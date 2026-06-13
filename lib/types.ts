@@ -13,11 +13,25 @@ export interface MediaItem {
 // Song / Lyrics types
 export type LyricSection = "verse" | "chorus" | "bridge" | "pre-chorus" | "outro" | "intro";
 
+export interface TextBlock {
+  id: string;
+  x: number;        // px within 1920×1080 virtual canvas
+  y: number;
+  width: number;
+  text: string;
+  fontSize: number;
+  color: string;
+  fontFamily: string;
+}
+
 export interface LyricSlide {
   id: string;
   section: LyricSection;
   sectionIndex: number;
   lines: string[];
+  canvas?: {
+    textBlocks: TextBlock[];
+  };
 }
 
 export interface Song {
@@ -65,6 +79,9 @@ export interface LayerConfig {
     height: number;
     opacity: number;
   };
+  canvas?: {
+    textBlocks: TextBlock[];
+  };
 }
 
 // ServiceItemSettings: partial LayerConfig for per-item overrides
@@ -72,6 +89,14 @@ export interface ServiceItemSettings {
   background?: Partial<LayerConfig["background"]>;
   subtitle?: Partial<LayerConfig["subtitle"]>;
   overlay?: Partial<LayerConfig["overlay"]>;
+}
+
+export interface FlatSlide {
+  slide: LyricSlide;
+  songId: number;
+  songTitle: string;
+  serviceItemIndex: number; // index into currentService.items
+  slideIndex: number;       // index into that item's song.lyrics_json
 }
 
 export interface ServiceItem {
