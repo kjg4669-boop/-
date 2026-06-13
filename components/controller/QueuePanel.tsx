@@ -18,10 +18,6 @@ export default function QueuePanel() {
     if (service) setCurrentService(service);
   }
 
-  function selectItem(index: number) {
-    setActiveItem(index);
-  }
-
   const items = currentService?.items ?? [];
 
   return (
@@ -48,7 +44,7 @@ export default function QueuePanel() {
           items.map((item, i) => (
             <button
               key={item.id}
-              onClick={() => selectItem(i)}
+              onClick={() => setActiveItem(i)}
               className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
                 i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
               }`}
