@@ -75,6 +75,7 @@ export default function ControllerPage() {
     const itemOverrides = item.settings_json ?? {};
     const merged = deepMerge(
       deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
+      // ServiceItemSettings has Partial<> nested values; deepMerge handles this safely at runtime
       itemOverrides as Partial<LayerConfig>
     );
     const newConfig: LayerConfig = {
@@ -114,18 +115,7 @@ export default function ControllerPage() {
   const handleSaveItem = useCallback(async (itemId: number, config: LayerConfig) => {
     const settings = {
       background: { ...config.background },
-      subtitle: {
-        fontSize: config.subtitle.fontSize,
-        fontFamily: config.subtitle.fontFamily,
-        color: config.subtitle.color,
-        strokeColor: config.subtitle.strokeColor,
-        strokeWidth: config.subtitle.strokeWidth,
-        shadowEnabled: config.subtitle.shadowEnabled,
-        backgroundBoxVisible: config.subtitle.backgroundBoxVisible,
-        backgroundBoxOpacity: config.subtitle.backgroundBoxOpacity,
-        position: config.subtitle.position,
-        opacity: config.subtitle.opacity,
-      },
+      subtitle: (({ visible: _v, lines: _l, ...rest }) => rest)(config.subtitle),
       overlay: { ...config.overlay },
     };
     try {
@@ -136,8 +126,8 @@ export default function ControllerPage() {
         item.id === itemId ? { ...item, settings_json: settings } : item
       );
       updateServiceItems(updated);
-    } catch {
-      console.error("Failed to save item settings");
+    } catch (err) {
+      console.error("Failed to save item settings:", err);
     }
   }, [updateServiceItems]);
 
