@@ -42,7 +42,10 @@ export default function QueuePanel() {
           <div className="flex items-center gap-1">
             <select
               className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600"
-              onChange={(e) => loadService(Number(e.target.value))}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) loadService(Number(val)).catch(console.error);
+              }}
               value={currentService?.id ?? ""}
             >
               <option value="">-- 예배 선택 --</option>
