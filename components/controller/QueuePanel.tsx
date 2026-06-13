@@ -12,6 +12,7 @@ export default function QueuePanel() {
   const [newName, setNewName] = useState("주일예배");
   const [newDate, setNewDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
 
@@ -25,8 +26,9 @@ export default function QueuePanel() {
   }
 
   async function handleCreateService() {
-    if (!newName.trim()) return;
+    if (!newName.trim() || !newDate) return;
     setCreating(true);
+    setCreateError(null);
     try {
       const id = await serviceDb.create(newName.trim(), newDate);
       const updated = await serviceDb.list();
@@ -37,7 +39,7 @@ export default function QueuePanel() {
       setNewName("주일예배");
       setNewDate(new Date().toISOString().slice(0, 10));
     } catch {
-      // ignore
+      setCreateError("예배 생성에 실패했습니다.");
     } finally {
       setCreating(false);
     }
@@ -83,10 +85,13 @@ export default function QueuePanel() {
                   onChange={(e) => setNewDate(e.target.value)}
                   className="w-full bg-zinc-900 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
                 />
+                {createError && (
+                  <p className="text-xs text-red-400">{createError}</p>
+                )}
                 <div className="flex gap-1">
                   <button
                     onClick={handleCreateService}
-                    disabled={creating || !newName.trim()}
+                    disabled={creating || !newName.trim() || !newDate}
                     className="flex-1 text-xs py-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
                   >
                     {creating ? "생성 중..." : "만들기"}
