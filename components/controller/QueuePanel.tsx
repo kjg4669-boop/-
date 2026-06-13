@@ -7,7 +7,9 @@ import type { Service } from "@/lib/types";
 
 export default function QueuePanel() {
   const [services, setServices] = useState<Service[]>([]);
-  const { currentService, activeItemIndex, setCurrentService, setActiveItem } = useQueueStore();
+  const [isEditing, setIsEditing] = useState(false);
+
+  const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
 
   useEffect(() => {
     serviceDb.list().then(setServices).catch(console.error);
@@ -22,18 +24,42 @@ export default function QueuePanel() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Service selector */}
+      {/* Header */}
       <div className="p-2 border-b border-zinc-700">
-        <select
-          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600"
-          onChange={(e) => loadService(Number(e.target.value))}
-          value={currentService?.id ?? ""}
-        >
-          <option value="">-- 예배 선택 --</option>
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>{s.name} ({s.date})</option>
-          ))}
-        </select>
+        {isEditing ? (
+          <div className="flex items-center gap-1">
+            <span className="flex-1 text-xs text-zinc-300 truncate">
+              {currentService?.name ?? "예배 없음"}
+            </span>
+            <button
+              onClick={() => setIsEditing(false)}
+              className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded"
+            >
+              ✓ 완료
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1">
+            <select
+              className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600"
+              onChange={(e) => loadService(Number(e.target.value))}
+              value={currentService?.id ?? ""}
+            >
+              <option value="">-- 예배 선택 --</option>
+              {services.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} ({s.date})</option>
+              ))}
+            </select>
+            {currentService && (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap"
+              >
+                편집
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Queue items */}
@@ -44,9 +70,9 @@ export default function QueuePanel() {
           items.map((item, i) => (
             <button
               key={item.id}
-              onClick={() => setActiveItem(i)}
+              onClick={() => !isEditing && setActiveItem(i)}
               className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
-                i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
+                !isEditing && i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
               }`}
             >
               <div className="font-medium text-white">
