@@ -116,14 +116,12 @@ export default function QueuePanel() {
                 <option key={s.id} value={s.id}>{s.name} ({s.date})</option>
               ))}
             </select>
-            {currentService && (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap"
-              >
-                편집
-              </button>
-            )}
+            <button
+              onClick={() => setIsEditing(true)}
+              className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap"
+            >
+              편집
+            </button>
           </div>
         )}
       </div>
