@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb, songDb } from "@/lib/db";
-import type { Service, Song } from "@/lib/types";
+import type { Service, Song, LyricSlide } from "@/lib/types";
 
 export default function QueuePanel() {
   const [services, setServices] = useState<Service[]>([]);
@@ -17,10 +17,13 @@ export default function QueuePanel() {
   const [addError, setAddError] = useState<string | null>(null);
   // Add panel
   const [showAddPanel, setShowAddPanel] = useState(false);
-  const [addTab, setAddTab] = useState<"song" | "announcement" | "blank">("song");
+  const [addTab, setAddTab] = useState<"song" | "announcement" | "blank" | "direct">("song");
   const [addSearch, setAddSearch] = useState("");
   const [addSongs, setAddSongs] = useState<Song[]>([]);
   const [addLabel, setAddLabel] = useState("");
+  const [addDirectTitle, setAddDirectTitle] = useState("");
+  const [addDirectArtist, setAddDirectArtist] = useState("");
+  const [addDirectLyrics, setAddDirectLyrics] = useState("");
 
   const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
 
@@ -148,6 +151,47 @@ export default function QueuePanel() {
     } catch {
       setAddError("블랭크 추가에 실패했습니다.");
     }
+  }
+
+  async function addDirectItem() {
+    if (!currentService || !addDirectTitle.trim()) return;
+    setAddError(null);
+    try {
+      const lyrics = parseLyricsToSlides(addDirectLyrics);
+      const songId = await songDb.create({
+        title: addDirectTitle.trim(),
+        artist: addDirectArtist.trim(),
+        lyrics_json: lyrics,
+      });
+      const item_order = useQueueStore.getState().currentService?.items.length ?? 0;
+      await serviceDb.addItem(currentService.id, {
+        service_id: currentService.id,
+        item_order,
+        type: "song",
+        song_id: songId,
+        media_id: undefined,
+        settings_json: {},
+        label: addDirectTitle.trim(),
+      });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) setCurrentService(updated);
+      setAddDirectTitle("");
+      setAddDirectArtist("");
+      setAddDirectLyrics("");
+    } catch (err) {
+      console.error("Failed to add direct item:", err);
+      setAddError("가사 추가에 실패했습니다.");
+    }
+  }
+
+  function parseLyricsToSlides(text: string): LyricSlide[] {
+    const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+    return paragraphs.map((para, i) => ({
+      id: `verse-${i + 1}`,
+      section: "verse" as const,
+      sectionIndex: i + 1,
+      lines: para.split("\n").map((l) => l.trim()).filter(Boolean),
+    }));
   }
 
   async function handleAddSearch(q: string) {
@@ -320,7 +364,7 @@ export default function QueuePanel() {
               )}
               {/* Tabs */}
               <div className="flex border-b border-zinc-700">
-                {(["song", "announcement", "blank"] as const).map((tab) => (
+                {(["song", "announcement", "blank", "direct"] as const).map((tab) => (
                   <button
                     key={tab}
                     onClick={() => { setAddTab(tab); setAddError(null); }}
@@ -330,7 +374,7 @@ export default function QueuePanel() {
                         : "text-zinc-500 hover:text-white"
                     }`}
                   >
-                    {tab === "song" ? "찬양" : tab === "announcement" ? "기도·안내" : "블랭크"}
+                    {tab === "song" ? "찬양" : tab === "announcement" ? "기도·안내" : tab === "blank" ? "블랭크" : "직접 입력"}
                   </button>
                 ))}
               </div>
@@ -395,6 +439,40 @@ export default function QueuePanel() {
                     className="w-full text-xs py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded"
                   >
                     + 블랭크 추가
+                  </button>
+                </div>
+              )}
+
+              {/* Direct input tab */}
+              {addTab === "direct" && (
+                <div className="p-1.5 space-y-1.5" style={{ maxHeight: 220, overflowY: "auto" }}>
+                  <input
+                    type="text"
+                    placeholder="제목 (필수)"
+                    value={addDirectTitle}
+                    onChange={(e) => setAddDirectTitle(e.target.value)}
+                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="아티스트 (선택)"
+                    value={addDirectArtist}
+                    onChange={(e) => setAddDirectArtist(e.target.value)}
+                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                  />
+                  <textarea
+                    placeholder={"가사를 붙여넣으세요.\n빈 줄로 슬라이드를 구분합니다."}
+                    value={addDirectLyrics}
+                    onChange={(e) => setAddDirectLyrics(e.target.value)}
+                    rows={6}
+                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500 resize-none"
+                  />
+                  <button
+                    onClick={addDirectItem}
+                    disabled={!addDirectTitle.trim()}
+                    className="w-full text-xs py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
+                  >
+                    + 큐에 추가
                   </button>
                 </div>
               )}
