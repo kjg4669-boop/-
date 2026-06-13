@@ -76,7 +76,7 @@ export default function QueuePanel() {
   }
 
   async function deleteItem(itemId: number) {
-    if (!currentService) return;
+    if (!useQueueStore.getState().currentService) return;
     try {
       await serviceDb.deleteItem(itemId);
       const liveItems = useQueueStore.getState().currentService?.items ?? [];
@@ -323,7 +323,7 @@ export default function QueuePanel() {
                 {(["song", "announcement", "blank"] as const).map((tab) => (
                   <button
                     key={tab}
-                    onClick={() => setAddTab(tab)}
+                    onClick={() => { setAddTab(tab); setAddError(null); }}
                     className={`flex-1 py-1 text-xs ${
                       addTab === tab
                         ? "bg-zinc-700 text-white"
