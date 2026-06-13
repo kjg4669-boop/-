@@ -5,6 +5,16 @@ import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb, songDb } from "@/lib/db";
 import type { Service, Song, LyricSlide } from "@/lib/types";
 
+function parseLyricsToSlides(text: string): LyricSlide[] {
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  return paragraphs.map((para, i) => ({
+    id: `verse-${i + 1}`,
+    section: "verse" as const,
+    sectionIndex: i + 1,
+    lines: para.split("\n").map((l) => l.trim()).filter(Boolean),
+  }));
+}
+
 export default function QueuePanel() {
   const [services, setServices] = useState<Service[]>([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -24,6 +34,7 @@ export default function QueuePanel() {
   const [addDirectTitle, setAddDirectTitle] = useState("");
   const [addDirectArtist, setAddDirectArtist] = useState("");
   const [addDirectLyrics, setAddDirectLyrics] = useState("");
+  const [isDirectSubmitting, setIsDirectSubmitting] = useState(false);
 
   const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
 
@@ -154,10 +165,15 @@ export default function QueuePanel() {
   }
 
   async function addDirectItem() {
-    if (!currentService || !addDirectTitle.trim()) return;
+    if (!currentService || !addDirectTitle.trim() || isDirectSubmitting) return;
+    const lyrics = parseLyricsToSlides(addDirectLyrics);
+    if (lyrics.length === 0) {
+      setAddError("가사를 입력해 주세요.");
+      return;
+    }
     setAddError(null);
+    setIsDirectSubmitting(true);
     try {
-      const lyrics = parseLyricsToSlides(addDirectLyrics);
       const songId = await songDb.create({
         title: addDirectTitle.trim(),
         artist: addDirectArtist.trim(),
@@ -181,17 +197,9 @@ export default function QueuePanel() {
     } catch (err) {
       console.error("Failed to add direct item:", err);
       setAddError("가사 추가에 실패했습니다.");
+    } finally {
+      setIsDirectSubmitting(false);
     }
-  }
-
-  function parseLyricsToSlides(text: string): LyricSlide[] {
-    const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-    return paragraphs.map((para, i) => ({
-      id: `verse-${i + 1}`,
-      section: "verse" as const,
-      sectionIndex: i + 1,
-      lines: para.split("\n").map((l) => l.trim()).filter(Boolean),
-    }));
   }
 
   async function handleAddSearch(q: string) {
@@ -444,38 +452,44 @@ export default function QueuePanel() {
               )}
 
               {/* Direct input tab */}
-              {addTab === "direct" && (
-                <div className="p-1.5 space-y-1.5" style={{ maxHeight: 220, overflowY: "auto" }}>
-                  <input
-                    type="text"
-                    placeholder="제목 (필수)"
-                    value={addDirectTitle}
-                    onChange={(e) => setAddDirectTitle(e.target.value)}
-                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
-                  />
-                  <input
-                    type="text"
-                    placeholder="아티스트 (선택)"
-                    value={addDirectArtist}
-                    onChange={(e) => setAddDirectArtist(e.target.value)}
-                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
-                  />
-                  <textarea
-                    placeholder={"가사를 붙여넣으세요.\n빈 줄로 슬라이드를 구분합니다."}
-                    value={addDirectLyrics}
-                    onChange={(e) => setAddDirectLyrics(e.target.value)}
-                    rows={6}
-                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500 resize-none"
-                  />
-                  <button
-                    onClick={addDirectItem}
-                    disabled={!addDirectTitle.trim()}
-                    className="w-full text-xs py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-                  >
-                    + 큐에 추가
-                  </button>
-                </div>
-              )}
+              {addTab === "direct" && (() => {
+                const slideCount = parseLyricsToSlides(addDirectLyrics).length;
+                return (
+                  <div className="p-1.5 space-y-1.5" style={{ maxHeight: 300, overflowY: "auto" }}>
+                    <input
+                      type="text"
+                      placeholder="제목 (필수)"
+                      value={addDirectTitle}
+                      onChange={(e) => setAddDirectTitle(e.target.value)}
+                      className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="아티스트 (선택)"
+                      value={addDirectArtist}
+                      onChange={(e) => setAddDirectArtist(e.target.value)}
+                      className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                    />
+                    <textarea
+                      placeholder={"가사를 붙여넣으세요.\n빈 줄로 슬라이드를 구분합니다."}
+                      value={addDirectLyrics}
+                      onChange={(e) => setAddDirectLyrics(e.target.value)}
+                      rows={6}
+                      className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500 resize-none"
+                    />
+                    {addDirectLyrics.trim() && (
+                      <p className="text-zinc-500 text-xs">슬라이드 {slideCount}개</p>
+                    )}
+                    <button
+                      onClick={addDirectItem}
+                      disabled={!addDirectTitle.trim() || isDirectSubmitting}
+                      className="w-full text-xs py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
+                    >
+                      {isDirectSubmitting ? "추가 중..." : "+ 큐에 추가"}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
