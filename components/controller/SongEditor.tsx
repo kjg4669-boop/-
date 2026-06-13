@@ -17,7 +17,10 @@ const SECTION_OPTIONS: LyricSection[] = [
   "intro", "verse", "pre-chorus", "chorus", "bridge", "outro",
 ];
 
+let blockIdCounter = 0;
+
 interface BlockInput {
+  id: number;
   section: LyricSection;
   text: string;
 }
@@ -48,9 +51,10 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
   const [title, setTitle] = useState(song?.title ?? "");
   const [artist, setArtist] = useState(song?.artist ?? "");
   const [blocks, setBlocks] = useState<BlockInput[]>([
-    { section: "verse", text: "" },
+    { id: ++blockIdCounter, section: "verse", text: "" },
   ]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setTitle(song?.title ?? "");
@@ -58,17 +62,18 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
     if (song && song.lyrics_json.length > 0) {
       setBlocks(
         song.lyrics_json.map((slide) => ({
+          id: ++blockIdCounter,
           section: slide.section,
           text: slide.lines.join("\n"),
         }))
       );
     } else {
-      setBlocks([{ section: "verse", text: "" }]);
+      setBlocks([{ id: ++blockIdCounter, section: "verse", text: "" }]);
     }
-  }, [song?.id]);
+  }, [song?.id, song?.updated_at]);
 
   function addBlock() {
-    setBlocks((prev) => [...prev, { section: "verse", text: "" }]);
+    setBlocks((prev) => [...prev, { id: ++blockIdCounter, section: "verse", text: "" }]);
   }
 
   function removeBlock(i: number) {
@@ -86,6 +91,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
+    setError(null);
     try {
       const lyrics_json = parseBlocksToSlides(blocks);
       if (song) {
@@ -97,15 +103,18 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
           artist: artist.trim(),
           lyrics_json,
         });
+        const now = new Date().toISOString();
         onSave({
           id,
           title: title.trim(),
           artist: artist.trim(),
           lyrics_json,
-          created_at: "",
-          updated_at: "",
+          created_at: now,
+          updated_at: now,
         });
       }
+    } catch {
+      setError("저장에 실패했습니다. 다시 시도해 주세요.");
     } finally {
       setSaving(false);
     }
@@ -133,6 +142,13 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         </button>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="px-3 py-1.5 bg-red-900 text-red-200 text-xs">
+          {error}
+        </div>
+      )}
+
       {/* Fields */}
       <div className="p-2 border-b border-zinc-700 space-y-1">
         <input
@@ -154,7 +170,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
       {/* Blocks */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {blocks.map((block, i) => (
-          <div key={i} className="border border-zinc-700 rounded p-2 space-y-1">
+          <div key={block.id} className="border border-zinc-700 rounded p-2 space-y-1">
             <div className="flex items-center gap-1">
               <select
                 value={block.section}
