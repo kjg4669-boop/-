@@ -2,23 +2,36 @@
 
 import { useEffect, useState } from "react";
 import { useQueueStore } from "@/stores/queueStore";
-import { serviceDb } from "@/lib/db";
-import type { Service } from "@/lib/types";
+import { serviceDb, songDb } from "@/lib/db";
+import type { Service, Song } from "@/lib/types";
 
 export default function QueuePanel() {
   const [services, setServices] = useState<Service[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  // New service form
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("주일예배");
   const [newDate, setNewDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  // Add panel
+  const [showAddPanel, setShowAddPanel] = useState(false);
+  const [addTab, setAddTab] = useState<"song" | "announcement" | "blank">("song");
+  const [addSearch, setAddSearch] = useState("");
+  const [addSongs, setAddSongs] = useState<Song[]>([]);
+  const [addLabel, setAddLabel] = useState("");
 
   const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
 
   useEffect(() => {
     serviceDb.list().then(setServices).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (showAddPanel && addTab === "song") {
+      songDb.list().then(setAddSongs).catch(console.error);
+    }
+  }, [showAddPanel, addTab]);
 
   async function loadService(id: number) {
     const service = await serviceDb.get(id);
@@ -70,6 +83,77 @@ export default function QueuePanel() {
     }
   }
 
+  async function addSongItem(song: Song) {
+    if (!currentService) return;
+    try {
+      const item_order = currentService.items.length;
+      await serviceDb.addItem(currentService.id, {
+        service_id: currentService.id,
+        item_order,
+        type: "song",
+        song_id: song.id,
+        media_id: undefined,
+        settings_json: {},
+        label: song.title,
+      });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) setCurrentService(updated);
+    } catch {
+      console.error("Failed to add song item");
+    }
+  }
+
+  async function addAnnouncementItem() {
+    if (!currentService || !addLabel.trim()) return;
+    try {
+      const item_order = currentService.items.length;
+      await serviceDb.addItem(currentService.id, {
+        service_id: currentService.id,
+        item_order,
+        type: "announcement",
+        song_id: undefined,
+        media_id: undefined,
+        settings_json: {},
+        label: addLabel.trim(),
+      });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) setCurrentService(updated);
+      setAddLabel("");
+    } catch {
+      console.error("Failed to add announcement item");
+    }
+  }
+
+  async function addBlankItem() {
+    if (!currentService) return;
+    try {
+      const item_order = currentService.items.length;
+      await serviceDb.addItem(currentService.id, {
+        service_id: currentService.id,
+        item_order,
+        type: "blank",
+        song_id: undefined,
+        media_id: undefined,
+        settings_json: {},
+        label: "블랭크",
+      });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) setCurrentService(updated);
+    } catch {
+      console.error("Failed to add blank item");
+    }
+  }
+
+  async function handleAddSearch(q: string) {
+    setAddSearch(q);
+    try {
+      const results = q ? await songDb.search(q) : await songDb.list();
+      setAddSongs(results);
+    } catch {
+      console.error("Failed to search songs");
+    }
+  }
+
   const items = currentService?.items ?? [];
 
   return (
@@ -89,7 +173,7 @@ export default function QueuePanel() {
                 {currentService?.name ?? "예배 없음"}
               </span>
               <button
-                onClick={() => { setIsEditing(false); setShowNewForm(false); }}
+                onClick={() => { setIsEditing(false); setShowNewForm(false); setShowAddPanel(false); }}
                 className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded"
               >
                 ✓ 완료
@@ -211,6 +295,103 @@ export default function QueuePanel() {
           )
         )}
       </div>
+
+      {/* Add panel (edit mode only) */}
+      {isEditing && currentService && (
+        <div className="border-t border-zinc-700">
+          <button
+            onClick={() => setShowAddPanel((v) => !v)}
+            className="w-full py-1.5 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+          >
+            {showAddPanel ? "▲ 닫기" : "+ 항목 추가"}
+          </button>
+
+          {showAddPanel && (
+            <div className="border-t border-zinc-700 bg-zinc-900">
+              {/* Tabs */}
+              <div className="flex border-b border-zinc-700">
+                {(["song", "announcement", "blank"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setAddTab(tab)}
+                    className={`flex-1 py-1 text-xs ${
+                      addTab === tab
+                        ? "bg-zinc-700 text-white"
+                        : "text-zinc-500 hover:text-white"
+                    }`}
+                  >
+                    {tab === "song" ? "찬양" : tab === "announcement" ? "기도·안내" : "블랭크"}
+                  </button>
+                ))}
+              </div>
+
+              {/* Song tab */}
+              {addTab === "song" && (
+                <div className="flex flex-col" style={{ maxHeight: 180 }}>
+                  <div className="p-1.5">
+                    <input
+                      type="text"
+                      placeholder="찬양 검색..."
+                      value={addSearch}
+                      onChange={(e) => handleAddSearch(e.target.value)}
+                      className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="overflow-y-auto flex-1">
+                    {addSongs.map((song) => (
+                      <button
+                        key={song.id}
+                        onClick={() => addSongItem(song)}
+                        className="w-full text-left px-2 py-1.5 text-xs border-b border-zinc-800 hover:bg-zinc-700"
+                      >
+                        <div className="text-white truncate">{song.title}</div>
+                        {song.artist && (
+                          <div className="text-zinc-500 text-xs">{song.artist}</div>
+                        )}
+                      </button>
+                    ))}
+                    {addSongs.length === 0 && (
+                      <p className="text-xs text-zinc-600 p-2">찬양이 없습니다</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Announcement tab */}
+              {addTab === "announcement" && (
+                <div className="p-1.5 space-y-1">
+                  <input
+                    type="text"
+                    placeholder="항목 이름 (예: 대표기도)"
+                    value={addLabel}
+                    onChange={(e) => setAddLabel(e.target.value)}
+                    className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+                  />
+                  <button
+                    onClick={addAnnouncementItem}
+                    disabled={!addLabel.trim()}
+                    className="w-full text-xs py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded"
+                  >
+                    + 추가
+                  </button>
+                </div>
+              )}
+
+              {/* Blank tab */}
+              {addTab === "blank" && (
+                <div className="p-1.5">
+                  <button
+                    onClick={addBlankItem}
+                    className="w-full text-xs py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded"
+                  >
+                    + 블랭크 추가
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
