@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb, songDb } from "@/lib/db";
-import type { Service, Song, LyricSlide } from "@/lib/types";
+import type { Service, ServiceItem, Song, LyricSlide } from "@/lib/types";
 
 function parseLyricsToSlides(text: string): LyricSlide[] {
   const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
@@ -15,17 +18,81 @@ function parseLyricsToSlides(text: string): LyricSlide[] {
   }));
 }
 
+// ─── Sortable item component ──────────────────────────────────────────────────
+
+function SortableQueueItem({
+  item,
+  index,
+  total,
+  onDelete,
+  onMoveUp,
+  onMoveDown,
+}: {
+  item: ServiceItem;
+  index: number;
+  total: number;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      className="flex items-center px-2 py-1.5 text-xs border-b border-zinc-800 gap-1"
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-300 px-1 select-none"
+        title="드래그하여 순서 변경"
+      >
+        ⠿
+      </span>
+      <span className="flex-1 truncate text-white">
+        {item.song?.title ?? item.label ?? item.type}
+      </span>
+      <button
+        onClick={onMoveUp}
+        disabled={index === 0}
+        className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
+      >
+        ↑
+      </button>
+      <button
+        onClick={onMoveDown}
+        disabled={index === total - 1}
+        className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
+      >
+        ↓
+      </button>
+      <button
+        onClick={onDelete}
+        className="px-1 text-zinc-500 hover:text-red-400"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function QueuePanel() {
   const [services, setServices] = useState<Service[]>([]);
   const [isEditing, setIsEditing] = useState(false);
-  // New service form
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("주일예배");
   const [newDate, setNewDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
-  // Add panel
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [addTab, setAddTab] = useState<"song" | "announcement" | "blank" | "direct">("song");
   const [addSearch, setAddSearch] = useState("");
@@ -89,6 +156,21 @@ export default function QueuePanel() {
     }
   }
 
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !currentService) return;
+    const oldIndex = currentService.items.findIndex((i) => i.id === active.id);
+    const newIndex = currentService.items.findIndex((i) => i.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(currentService.items, oldIndex, newIndex);
+    try {
+      await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
+      updateServiceItems(reordered);
+    } catch {
+      console.error("Failed to reorder items");
+    }
+  }
+
   async function deleteItem(itemId: number) {
     if (!useQueueStore.getState().currentService) return;
     try {
@@ -115,7 +197,10 @@ export default function QueuePanel() {
         label: song.title,
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) setCurrentService(updated);
+      if (updated) {
+        setCurrentService(updated);
+        setActiveItem(updated.items.length - 1);
+      }
     } catch {
       setAddError("찬양 추가에 실패했습니다.");
     }
@@ -136,7 +221,10 @@ export default function QueuePanel() {
         label: addLabel.trim(),
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) setCurrentService(updated);
+      if (updated) {
+        setCurrentService(updated);
+        setActiveItem(updated.items.length - 1);
+      }
       setAddLabel("");
     } catch {
       setAddError("항목 추가에 실패했습니다.");
@@ -158,7 +246,10 @@ export default function QueuePanel() {
         label: "블랭크",
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) setCurrentService(updated);
+      if (updated) {
+        setCurrentService(updated);
+        setActiveItem(updated.items.length - 1);
+      }
     } catch {
       setAddError("블랭크 추가에 실패했습니다.");
     }
@@ -190,7 +281,10 @@ export default function QueuePanel() {
         label: addDirectTitle.trim(),
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) setCurrentService(updated);
+      if (updated) {
+        setCurrentService(updated);
+        setActiveItem(updated.items.length - 1);
+      }
       setAddDirectTitle("");
       setAddDirectArtist("");
       setAddDirectLyrics("");
@@ -303,55 +397,40 @@ export default function QueuePanel() {
       <div className="flex-1 overflow-y-auto">
         {items.length === 0 ? (
           <p className="text-xs text-zinc-500 p-3">예배 순서가 없습니다</p>
+        ) : isEditing ? (
+          <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+              {items.map((item, i) => (
+                <SortableQueueItem
+                  key={item.id}
+                  item={item}
+                  index={i}
+                  total={items.length}
+                  onDelete={() => deleteItem(item.id)}
+                  onMoveUp={() => moveItem(i, "up")}
+                  onMoveDown={() => moveItem(i, "down")}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         ) : (
-          items.map((item, i) =>
-            isEditing ? (
-              <div
-                key={item.id}
-                className="flex items-center px-2 py-1.5 text-xs border-b border-zinc-800 gap-1"
-              >
-                <span className="flex-1 truncate text-white">
-                  {item.song?.title ?? item.label ?? item.type}
-                </span>
-                <button
-                  onClick={() => moveItem(i, "up")}
-                  disabled={i === 0}
-                  className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
-                >
-                  ↑
-                </button>
-                <button
-                  onClick={() => moveItem(i, "down")}
-                  disabled={i === items.length - 1}
-                  className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
-                >
-                  ↓
-                </button>
-                <button
-                  onClick={() => deleteItem(item.id)}
-                  className="px-1 text-zinc-500 hover:text-red-400"
-                >
-                  ✕
-                </button>
+          items.map((item, i) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveItem(i)}
+              className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
+                i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
+              }`}
+            >
+              <div className="font-medium text-white">
+                {item.song?.title ?? item.label ?? item.type}
               </div>
-            ) : (
-              <button
-                key={item.id}
-                onClick={() => setActiveItem(i)}
-                className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
-                  i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
-                }`}
-              >
-                <div className="font-medium text-white">
-                  {item.song?.title ?? item.label ?? item.type}
-                </div>
-                {item.song?.artist && (
-                  <div className="text-zinc-500">{item.song.artist}</div>
-                )}
-                <div className="text-zinc-600 capitalize">{item.type}</div>
-              </button>
-            )
-          )
+              {item.song?.artist && (
+                <div className="text-zinc-500">{item.song.artist}</div>
+              )}
+              <div className="text-zinc-600 capitalize">{item.type}</div>
+            </button>
+          ))
         )}
       </div>
 
