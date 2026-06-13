@@ -27,11 +27,13 @@ export async function parsePptx(file: File): Promise<ParsedSlide[]> {
 
   const results: ParsedSlide[] = [];
 
-  for (let i = 0; i < slideEntries.length; i++) {
-    const xml = await zip.files[slideEntries[i]].async("string");
+  for (const slideFile of slideEntries) {
+    const match = slideFile.match(/slide(\d+)\.xml$/);
+    const originalSlideNumber = match ? parseInt(match[1], 10) : results.length + 1;
+    const xml = await zip.files[slideFile].async("string");
     const lines = extractLinesFromSlideXml(xml);
     if (lines.length > 0) {
-      results.push({ slideNumber: i + 1, lines });
+      results.push({ slideNumber: originalSlideNumber, lines });
     }
   }
 
@@ -45,11 +47,11 @@ export async function parsePptx(file: File): Promise<ParsedSlide[]> {
 function extractLinesFromSlideXml(xml: string): string[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xml, "application/xml");
-  const paragraphs = Array.from(doc.querySelectorAll("p"));
+  const paragraphs = Array.from(doc.getElementsByTagNameNS("*", "p"));
 
   const lines: string[] = [];
   for (const para of paragraphs) {
-    const runs = Array.from(para.querySelectorAll("t"));
+    const runs = Array.from(para.getElementsByTagNameNS("*", "t"));
     const text = runs.map((r) => r.textContent ?? "").join("").trim();
     if (text) {
       lines.push(text);
