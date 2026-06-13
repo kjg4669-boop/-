@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb, songDb } from "@/lib/db";
 import type { Service, Song } from "@/lib/types";
@@ -14,6 +14,7 @@ export default function QueuePanel() {
   const [newDate, setNewDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
   // Add panel
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [addTab, setAddTab] = useState<"song" | "announcement" | "blank">("song");
@@ -22,6 +23,8 @@ export default function QueuePanel() {
   const [addLabel, setAddLabel] = useState("");
 
   const { currentService, activeItemIndex, setCurrentService, setActiveItem, updateServiceItems } = useQueueStore();
+
+  const searchGenRef = useRef(0);
 
   useEffect(() => {
     serviceDb.list().then(setServices).catch(console.error);
@@ -85,8 +88,9 @@ export default function QueuePanel() {
 
   async function addSongItem(song: Song) {
     if (!currentService) return;
+    setAddError(null);
     try {
-      const item_order = currentService.items.length;
+      const item_order = useQueueStore.getState().currentService?.items.length ?? 0;
       await serviceDb.addItem(currentService.id, {
         service_id: currentService.id,
         item_order,
@@ -99,14 +103,15 @@ export default function QueuePanel() {
       const updated = await serviceDb.get(currentService.id);
       if (updated) setCurrentService(updated);
     } catch {
-      console.error("Failed to add song item");
+      setAddError("찬양 추가에 실패했습니다.");
     }
   }
 
   async function addAnnouncementItem() {
     if (!currentService || !addLabel.trim()) return;
+    setAddError(null);
     try {
-      const item_order = currentService.items.length;
+      const item_order = useQueueStore.getState().currentService?.items.length ?? 0;
       await serviceDb.addItem(currentService.id, {
         service_id: currentService.id,
         item_order,
@@ -120,14 +125,15 @@ export default function QueuePanel() {
       if (updated) setCurrentService(updated);
       setAddLabel("");
     } catch {
-      console.error("Failed to add announcement item");
+      setAddError("항목 추가에 실패했습니다.");
     }
   }
 
   async function addBlankItem() {
     if (!currentService) return;
+    setAddError(null);
     try {
-      const item_order = currentService.items.length;
+      const item_order = useQueueStore.getState().currentService?.items.length ?? 0;
       await serviceDb.addItem(currentService.id, {
         service_id: currentService.id,
         item_order,
@@ -140,15 +146,16 @@ export default function QueuePanel() {
       const updated = await serviceDb.get(currentService.id);
       if (updated) setCurrentService(updated);
     } catch {
-      console.error("Failed to add blank item");
+      setAddError("블랭크 추가에 실패했습니다.");
     }
   }
 
   async function handleAddSearch(q: string) {
     setAddSearch(q);
+    const gen = ++searchGenRef.current;
     try {
       const results = q ? await songDb.search(q) : await songDb.list();
-      setAddSongs(results);
+      if (gen === searchGenRef.current) setAddSongs(results);
     } catch {
       console.error("Failed to search songs");
     }
@@ -300,7 +307,7 @@ export default function QueuePanel() {
       {isEditing && currentService && (
         <div className="border-t border-zinc-700">
           <button
-            onClick={() => setShowAddPanel((v) => !v)}
+            onClick={() => { setShowAddPanel((v) => !v); setAddError(null); }}
             className="w-full py-1.5 text-xs text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           >
             {showAddPanel ? "▲ 닫기" : "+ 항목 추가"}
@@ -308,6 +315,9 @@ export default function QueuePanel() {
 
           {showAddPanel && (
             <div className="border-t border-zinc-700 bg-zinc-900">
+              {addError && (
+                <p className="text-xs text-red-400 px-2 py-1">{addError}</p>
+              )}
               {/* Tabs */}
               <div className="flex border-b border-zinc-700">
                 {(["song", "announcement", "blank"] as const).map((tab) => (
