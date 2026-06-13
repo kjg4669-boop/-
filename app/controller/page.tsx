@@ -1,13 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import QueuePanel from "@/components/controller/QueuePanel";
 import PreviewPanel from "@/components/controller/PreviewPanel";
 import LibraryPanel from "@/components/controller/LibraryPanel";
+import LayerSidebar from "@/components/controller/LayerSidebar";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
+import { serviceDb } from "@/lib/db";
 import { ipc } from "@/lib/ipc";
 import { DEFAULT_LAYER_CONFIG, type LayerConfig } from "@/lib/types";
+import { deepMerge, loadGlobalDefaults, saveGlobalDefaults } from "@/lib/utils";
 
 export default function ControllerPage() {
   const [activeTab, setActiveTab] = useState<"queue" | "library" | "songs">("queue");
@@ -18,7 +21,15 @@ export default function ControllerPage() {
     activeItemIndex,
     activeLyricSlideIndex,
     currentService,
+    updateServiceItems,
   } = useQueueStore();
+
+  // Load global defaults from localStorage on mount
+  useEffect(() => {
+    const defaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
+    setLayerConfig(defaults);
+    ipc.sendSlideUpdate(defaults);
+  }, [setLayerConfig]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -48,20 +59,28 @@ export default function ControllerPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [isBlackout, nextLyricSlide, prevLyricSlide, setBlackout]);
 
-  // Sync slide state → outputStore + IPC
+  // Sync slide state → outputStore + IPC (includes global defaults + item overrides)
   useEffect(() => {
     const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
     const item = getActiveItem();
+    const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
+
     if (!item) {
-      setLayerConfig(DEFAULT_LAYER_CONFIG);
-      ipc.sendSlideUpdate(DEFAULT_LAYER_CONFIG);
+      setLayerConfig(globalDefaults);
+      ipc.sendSlideUpdate(globalDefaults);
       return;
     }
+
     const slide = getActiveLyricSlide();
+    const itemOverrides = item.settings_json ?? {};
+    const merged = deepMerge(
+      deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
+      itemOverrides as Partial<LayerConfig>
+    );
     const newConfig: LayerConfig = {
-      ...DEFAULT_LAYER_CONFIG,
+      ...merged,
       subtitle: {
-        ...DEFAULT_LAYER_CONFIG.subtitle,
+        ...merged.subtitle,
         visible: !!slide,
         lines: slide?.lines ?? [],
       },
@@ -69,6 +88,64 @@ export default function ControllerPage() {
     setLayerConfig(newConfig);
     ipc.sendSlideUpdate(newConfig);
   }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, setLayerConfig]);
+
+  // Called when sidebar edits any layer setting
+  const handleLayerChange = useCallback((config: LayerConfig) => {
+    const { getActiveLyricSlide } = useQueueStore.getState();
+    const slide = getActiveLyricSlide?.();
+    const withLines: LayerConfig = {
+      ...config,
+      subtitle: {
+        ...config.subtitle,
+        visible: !!slide,
+        lines: slide?.lines ?? [],
+      },
+    };
+    setLayerConfig(withLines);
+    ipc.sendSlideUpdate(withLines);
+  }, [setLayerConfig]);
+
+  // Save global defaults to localStorage
+  const handleSaveGlobal = useCallback((config: LayerConfig) => {
+    saveGlobalDefaults(config);
+  }, []);
+
+  // Save item-specific overrides to DB
+  const handleSaveItem = useCallback(async (itemId: number, config: LayerConfig) => {
+    const settings = {
+      background: { ...config.background },
+      subtitle: {
+        fontSize: config.subtitle.fontSize,
+        fontFamily: config.subtitle.fontFamily,
+        color: config.subtitle.color,
+        strokeColor: config.subtitle.strokeColor,
+        strokeWidth: config.subtitle.strokeWidth,
+        shadowEnabled: config.subtitle.shadowEnabled,
+        backgroundBoxVisible: config.subtitle.backgroundBoxVisible,
+        backgroundBoxOpacity: config.subtitle.backgroundBoxOpacity,
+        position: config.subtitle.position,
+        opacity: config.subtitle.opacity,
+      },
+      overlay: { ...config.overlay },
+    };
+    try {
+      await serviceDb.updateItemSettings(itemId, settings);
+      // Update local store so next item switch picks up overrides
+      const liveItems = useQueueStore.getState().currentService?.items ?? [];
+      const updated = liveItems.map((item) =>
+        item.id === itemId ? { ...item, settings_json: settings } : item
+      );
+      updateServiceItems(updated);
+    } catch {
+      console.error("Failed to save item settings");
+    }
+  }, [updateServiceItems]);
+
+  // Get active item id for sidebar
+  const activeItemId = (() => {
+    if (!currentService || activeItemIndex < 0) return null;
+    return currentService.items[activeItemIndex]?.id ?? null;
+  })();
 
   return (
     <div className="flex h-screen bg-zinc-900 text-white select-none">
@@ -140,14 +217,15 @@ export default function ControllerPage() {
         </div>
       </div>
 
-      {/* Right: Settings sidebar placeholder */}
-      <div className="w-56 flex-shrink-0 border-l border-zinc-700 p-3">
-        <p className="text-xs text-zinc-500 mb-2">레이어 설정</p>
-        <div className="text-xs text-zinc-400 space-y-1">
-          <div>배경: {layerConfig.background.type}</div>
-          <div>자막: {layerConfig.subtitle.visible ? "표시" : "숨김"}</div>
-          <div>오버레이: {layerConfig.overlay.visible ? "표시" : "숨김"}</div>
-        </div>
+      {/* Right: Layer Settings Sidebar */}
+      <div className="w-56 flex-shrink-0 border-l border-zinc-700 overflow-hidden">
+        <LayerSidebar
+          layerConfig={layerConfig}
+          activeItemId={activeItemId}
+          onChange={handleLayerChange}
+          onSaveGlobal={handleSaveGlobal}
+          onSaveItem={handleSaveItem}
+        />
       </div>
     </div>
   );
