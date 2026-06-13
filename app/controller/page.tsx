@@ -17,8 +17,6 @@ export default function ControllerPage() {
     prevLyricSlide,
     activeItemIndex,
     activeLyricSlideIndex,
-    getActiveLyricSlide,
-    getActiveItem,
   } = useQueueStore();
 
   // Keyboard shortcuts
@@ -37,11 +35,12 @@ export default function ControllerPage() {
           prevLyricSlide();
           break;
         case "b":
-        case "B":
+        case "B": {
           const next = !isBlackout;
           setBlackout(next);
           ipc.sendBlackout(next);
           break;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -50,6 +49,7 @@ export default function ControllerPage() {
 
   // Sync slide state → outputStore + IPC
   useEffect(() => {
+    const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
     const item = getActiveItem();
     if (!item) return;
     const slide = getActiveLyricSlide();
@@ -63,8 +63,7 @@ export default function ControllerPage() {
     };
     setLayerConfig(newConfig);
     ipc.sendSlideUpdate(newConfig);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeItemIndex, activeLyricSlideIndex]);
+  }, [activeItemIndex, activeLyricSlideIndex, setLayerConfig]);
 
   return (
     <div className="flex h-screen bg-zinc-900 text-white select-none">
