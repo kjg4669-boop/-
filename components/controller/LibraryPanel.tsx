@@ -21,6 +21,7 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   const { currentService, setCurrentService } = useQueueStore();
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSongRef = useRef<Song | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (mode === "songs") {
@@ -30,6 +31,23 @@ export default function LibraryPanel({ mode = "media" }: Props) {
     }
   }, [mode]);
 
+  // Fix 1 + 2: cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (clickTimerRef.current !== null) clearTimeout(clickTimerRef.current);
+      if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
+
+  function showNotice(msg: string) {
+    setNotice(msg);
+    if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice("");
+    }, 1500);
+  }
+
   async function handleSearch(q: string) {
     setSearch(q);
     if (mode === "songs") {
@@ -38,25 +56,28 @@ export default function LibraryPanel({ mode = "media" }: Props) {
     }
   }
 
+  // Fix 3: try/catch + showNotice
   async function handleAddToService(song: Song) {
     if (!currentService) {
-      setNotice("예배를 먼저 선택해주세요");
-      setTimeout(() => setNotice(""), 1500);
+      showNotice("예배를 먼저 선택해주세요");
       return;
     }
-    await serviceDb.addItem(currentService.id, {
-      service_id: currentService.id,
-      item_order: currentService.items.length,
-      type: "song",
-      song_id: song.id,
-      media_id: undefined,
-      settings_json: {},
-      label: song.title,
-    });
-    const updated = await serviceDb.get(currentService.id);
-    if (updated) setCurrentService(updated);
-    setNotice(`"${song.title}" 추가됨`);
-    setTimeout(() => setNotice(""), 1500);
+    try {
+      await serviceDb.addItem(currentService.id, {
+        service_id: currentService.id,
+        item_order: currentService.items.length,
+        type: "song",
+        song_id: song.id,
+        media_id: undefined,
+        settings_json: {},
+        label: song.title,
+      });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) setCurrentService(updated);
+      showNotice(`"${song.title}" 추가됨`);
+    } catch {
+      showNotice("추가에 실패했습니다. 다시 시도해 주세요.");
+    }
   }
 
   function handleSongClick(song: Song) {
@@ -86,11 +107,15 @@ export default function LibraryPanel({ mode = "media" }: Props) {
     setEditMode(true);
   }
 
+  // Fix 4: optimistic update using saved Song
   function handleSongSaved(saved: Song) {
     setEditMode(false);
     setEditSong(null);
-    // Refresh list
-    songDb.list().then(setSongs).catch(console.error);
+    setSongs((prev) =>
+      prev.some((s) => s.id === saved.id)
+        ? prev.map((s) => (s.id === saved.id ? saved : s))
+        : [...prev, saved]
+    );
   }
 
   function handleEditCancel() {
