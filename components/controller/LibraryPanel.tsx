@@ -1,0 +1,181 @@
+"use client";
+
+import { useEffect, useState, useRef } from "react";
+import { songDb, mediaDb, serviceDb } from "@/lib/db";
+import { useQueueStore } from "@/stores/queueStore";
+import type { Song, MediaItem } from "@/lib/types";
+import SongEditor from "./SongEditor";
+
+interface Props {
+  mode?: "media" | "songs";
+}
+
+export default function LibraryPanel({ mode = "media" }: Props) {
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [search, setSearch] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [editSong, setEditSong] = useState<Song | null>(null); // null = 신규
+  const [notice, setNotice] = useState("");
+
+  const { currentService, setCurrentService } = useQueueStore();
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSongRef = useRef<Song | null>(null);
+
+  useEffect(() => {
+    if (mode === "songs") {
+      songDb.list().then(setSongs).catch(console.error);
+    } else {
+      mediaDb.list().then(setMedia).catch(console.error);
+    }
+  }, [mode]);
+
+  async function handleSearch(q: string) {
+    setSearch(q);
+    if (mode === "songs") {
+      const results = q ? await songDb.search(q) : await songDb.list();
+      setSongs(results);
+    }
+  }
+
+  async function handleAddToService(song: Song) {
+    if (!currentService) {
+      setNotice("예배를 먼저 선택해주세요");
+      setTimeout(() => setNotice(""), 1500);
+      return;
+    }
+    await serviceDb.addItem(currentService.id, {
+      service_id: currentService.id,
+      item_order: currentService.items.length,
+      type: "song",
+      song_id: song.id,
+      media_id: undefined,
+      settings_json: {},
+      label: song.title,
+    });
+    const updated = await serviceDb.get(currentService.id);
+    if (updated) setCurrentService(updated);
+    setNotice(`"${song.title}" 추가됨`);
+    setTimeout(() => setNotice(""), 1500);
+  }
+
+  function handleSongClick(song: Song) {
+    if (clickTimerRef.current !== null) {
+      // Second click within 300ms → double click
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+      pendingSongRef.current = null;
+      handleAddToService(song);
+    } else {
+      // First click — wait to see if double click follows
+      pendingSongRef.current = song;
+      clickTimerRef.current = setTimeout(() => {
+        clickTimerRef.current = null;
+        const s = pendingSongRef.current;
+        pendingSongRef.current = null;
+        if (s) {
+          setEditSong(s);
+          setEditMode(true);
+        }
+      }, 300);
+    }
+  }
+
+  function handleNewSong() {
+    setEditSong(null);
+    setEditMode(true);
+  }
+
+  function handleSongSaved(saved: Song) {
+    setEditMode(false);
+    setEditSong(null);
+    // Refresh list
+    songDb.list().then(setSongs).catch(console.error);
+  }
+
+  function handleEditCancel() {
+    setEditMode(false);
+    setEditSong(null);
+  }
+
+  // Song edit mode
+  if (mode === "songs" && editMode) {
+    return (
+      <SongEditor
+        song={editSong}
+        onSave={handleSongSaved}
+        onCancel={handleEditCancel}
+      />
+    );
+  }
+
+  if (mode === "songs") {
+    return (
+      <div className="h-full flex flex-col">
+        {/* Notice */}
+        {notice && (
+          <div className="px-3 py-1.5 bg-blue-900 text-blue-200 text-xs text-center">
+            {notice}
+          </div>
+        )}
+        <div className="p-2 border-b border-zinc-700 flex gap-1">
+          <input
+            type="text"
+            placeholder="찬양 검색..."
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+          />
+          <button
+            onClick={handleNewSong}
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap"
+          >
+            + 새 찬양
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {songs.map((song) => (
+            <div
+              key={song.id}
+              onClick={() => handleSongClick(song)}
+              className="px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none"
+            >
+              <div className="font-medium text-white">{song.title}</div>
+              {song.artist && <div className="text-zinc-500">{song.artist}</div>}
+              <div className="text-zinc-600">{song.lyrics_json.length}절</div>
+            </div>
+          ))}
+          {songs.length === 0 && (
+            <p className="text-xs text-zinc-500 p-3">찬양이 없습니다</p>
+          )}
+        </div>
+        <div className="p-2 border-t border-zinc-800">
+          <p className="text-xs text-zinc-600">클릭: 편집 · 더블클릭: 예배 추가</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Media mode (unchanged)
+  return (
+    <div className="h-full flex flex-col">
+      <div className="p-2 border-b border-zinc-700">
+        <p className="text-xs text-zinc-500">미디어 파일</p>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {media.map((item) => (
+          <div
+            key={item.id}
+            className="px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer"
+          >
+            <div className="font-medium text-white">{item.name}</div>
+            <div className="text-zinc-500 capitalize">{item.type}</div>
+          </div>
+        ))}
+        {media.length === 0 && (
+          <p className="text-xs text-zinc-500 p-3">미디어 파일이 없습니다</p>
+        )}
+      </div>
+    </div>
+  );
+}
