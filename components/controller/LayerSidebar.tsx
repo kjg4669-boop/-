@@ -29,6 +29,12 @@ export default function LayerSidebar({
     mediaDb.list().then(setMediaItems).catch(console.error);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    };
+  }, []);
+
   function showNotice(msg: string) {
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
     setSavedNotice(msg);
@@ -67,7 +73,7 @@ export default function LayerSidebar({
               key={t}
               onClick={() => setBackground({ type: t })}
               className={`flex-1 py-1 rounded text-xs ${
-                bg.type === t ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+                (bg.type === t || (t === "color" && bg.type === "none")) ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
               }`}
             >
               {t === "color" ? "단색" : t === "image" ? "이미지" : "영상"}
@@ -158,7 +164,7 @@ export default function LayerSidebar({
             type="number"
             min={12} max={120}
             value={sub.fontSize}
-            onChange={(e) => setSubtitle({ fontSize: Number(e.target.value) })}
+            onChange={(e) => setSubtitle({ fontSize: Math.max(12, Math.min(120, Number(e.target.value))) })}
             className="w-14 bg-zinc-800 text-white rounded px-2 py-1 border border-zinc-600 text-xs text-center"
           />
           <span className="text-zinc-500">px</span>
@@ -189,7 +195,7 @@ export default function LayerSidebar({
             type="number"
             min={0} max={10}
             value={sub.strokeWidth}
-            onChange={(e) => setSubtitle({ strokeWidth: Number(e.target.value) })}
+            onChange={(e) => setSubtitle({ strokeWidth: Math.max(0, Math.min(10, Number(e.target.value))) })}
             className="w-12 bg-zinc-800 text-white rounded px-2 py-1 border border-zinc-600 text-xs text-center"
           />
           <span className="text-zinc-500">px</span>
@@ -268,7 +274,11 @@ export default function LayerSidebar({
                   <input
                     type="number"
                     value={ov[field]}
-                    onChange={(e) => setOverlay({ [field]: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      const clamped = (field === "width" || field === "height") ? Math.max(1, v) : v;
+                      setOverlay({ [field]: clamped });
+                    }}
                     className="flex-1 bg-zinc-800 text-white rounded px-2 py-1 border border-zinc-600 text-xs text-center"
                   />
                 </div>
