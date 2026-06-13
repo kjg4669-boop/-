@@ -81,14 +81,18 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   }
 
   function handleSongClick(song: Song) {
-    if (clickTimerRef.current !== null) {
-      // Second click within 300ms → double click
+    if (clickTimerRef.current !== null && pendingSongRef.current?.id === song.id) {
+      // Same song clicked twice within 300ms → double click
       clearTimeout(clickTimerRef.current);
       clickTimerRef.current = null;
       pendingSongRef.current = null;
       handleAddToService(song);
     } else {
-      // First click — wait to see if double click follows
+      // Cancel any pending single-click from a different song
+      if (clickTimerRef.current !== null) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
       pendingSongRef.current = song;
       clickTimerRef.current = setTimeout(() => {
         clickTimerRef.current = null;

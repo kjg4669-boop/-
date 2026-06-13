@@ -17,6 +17,7 @@ export default function ControllerPage() {
     prevLyricSlide,
     activeItemIndex,
     activeLyricSlideIndex,
+    currentService,
   } = useQueueStore();
 
   // Keyboard shortcuts
@@ -51,7 +52,11 @@ export default function ControllerPage() {
   useEffect(() => {
     const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
     const item = getActiveItem();
-    if (!item) return;
+    if (!item) {
+      setLayerConfig(DEFAULT_LAYER_CONFIG);
+      ipc.sendSlideUpdate(DEFAULT_LAYER_CONFIG);
+      return;
+    }
     const slide = getActiveLyricSlide();
     const newConfig: LayerConfig = {
       ...DEFAULT_LAYER_CONFIG,
@@ -63,7 +68,7 @@ export default function ControllerPage() {
     };
     setLayerConfig(newConfig);
     ipc.sendSlideUpdate(newConfig);
-  }, [activeItemIndex, activeLyricSlideIndex, setLayerConfig]);
+  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, setLayerConfig]);
 
   return (
     <div className="flex h-screen bg-zinc-900 text-white select-none">
