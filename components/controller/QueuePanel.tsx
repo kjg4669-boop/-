@@ -45,6 +45,22 @@ export default function QueuePanel() {
     }
   }
 
+  async function moveItem(index: number, direction: "up" | "down") {
+    if (!currentService) return;
+    const reordered = [...currentService.items];
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= reordered.length) return;
+    [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
+    await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
+    updateServiceItems(reordered);
+  }
+
+  async function deleteItem(itemId: number) {
+    if (!currentService) return;
+    await serviceDb.deleteItem(itemId);
+    updateServiceItems(currentService.items.filter((i) => i.id !== itemId));
+  }
+
   const items = currentService?.items ?? [];
 
   return (
@@ -136,23 +152,54 @@ export default function QueuePanel() {
         {items.length === 0 ? (
           <p className="text-xs text-zinc-500 p-3">예배 순서가 없습니다</p>
         ) : (
-          items.map((item, i) => (
-            <button
-              key={item.id}
-              onClick={() => !isEditing && setActiveItem(i)}
-              className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
-                !isEditing && i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
-              }`}
-            >
-              <div className="font-medium text-white">
-                {item.song?.title ?? item.label ?? item.type}
+          items.map((item, i) =>
+            isEditing ? (
+              <div
+                key={item.id}
+                className="flex items-center px-2 py-1.5 text-xs border-b border-zinc-800 gap-1"
+              >
+                <span className="flex-1 truncate text-white">
+                  {item.song?.title ?? item.label ?? item.type}
+                </span>
+                <button
+                  onClick={() => moveItem(i, "up")}
+                  disabled={i === 0}
+                  className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
+                >
+                  ↑
+                </button>
+                <button
+                  onClick={() => moveItem(i, "down")}
+                  disabled={i === items.length - 1}
+                  className="px-1 text-zinc-400 hover:text-white disabled:opacity-20"
+                >
+                  ↓
+                </button>
+                <button
+                  onClick={() => deleteItem(item.id)}
+                  className="px-1 text-zinc-500 hover:text-red-400"
+                >
+                  ✕
+                </button>
               </div>
-              {item.song?.artist && (
-                <div className="text-zinc-500">{item.song.artist}</div>
-              )}
-              <div className="text-zinc-600 capitalize">{item.type}</div>
-            </button>
-          ))
+            ) : (
+              <button
+                key={item.id}
+                onClick={() => setActiveItem(i)}
+                className={`w-full text-left px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 transition-colors ${
+                  i === activeItemIndex ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
+                }`}
+              >
+                <div className="font-medium text-white">
+                  {item.song?.title ?? item.label ?? item.type}
+                </div>
+                {item.song?.artist && (
+                  <div className="text-zinc-500">{item.song.artist}</div>
+                )}
+                <div className="text-zinc-600 capitalize">{item.type}</div>
+              </button>
+            )
+          )
         )}
       </div>
     </div>
