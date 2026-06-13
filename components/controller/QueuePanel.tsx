@@ -51,14 +51,23 @@ export default function QueuePanel() {
     const swapIndex = direction === "up" ? index - 1 : index + 1;
     if (swapIndex < 0 || swapIndex >= reordered.length) return;
     [reordered[index], reordered[swapIndex]] = [reordered[swapIndex], reordered[index]];
-    await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
-    updateServiceItems(reordered);
+    try {
+      await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
+      updateServiceItems(reordered);
+    } catch {
+      console.error("Failed to reorder items");
+    }
   }
 
   async function deleteItem(itemId: number) {
     if (!currentService) return;
-    await serviceDb.deleteItem(itemId);
-    updateServiceItems(currentService.items.filter((i) => i.id !== itemId));
+    try {
+      await serviceDb.deleteItem(itemId);
+      const liveItems = useQueueStore.getState().currentService?.items ?? [];
+      updateServiceItems(liveItems.filter((i) => i.id !== itemId));
+    } catch {
+      console.error("Failed to delete item");
+    }
   }
 
   const items = currentService?.items ?? [];
