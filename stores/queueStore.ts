@@ -50,9 +50,17 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
 
   prevLyricSlide: () => {
-    const { activeLyricSlideIndex } = get();
+    const { activeLyricSlideIndex, activeItemIndex, currentService } = get();
     if (activeLyricSlideIndex > 0) {
       set({ activeLyricSlideIndex: activeLyricSlideIndex - 1 });
+    } else if (activeItemIndex > 0) {
+      const prevIndex = activeItemIndex - 1;
+      const prevItem = currentService?.items[prevIndex];
+      const prevSlideCount = prevItem?.song?.lyrics_json.length ?? 1;
+      set({
+        activeItemIndex: prevIndex,
+        activeLyricSlideIndex: Math.max(0, prevSlideCount - 1),
+      });
     }
   },
 
@@ -89,16 +97,31 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (!currentService) return [];
     const result: import("@/lib/types").FlatSlide[] = [];
     currentService.items.forEach((item, serviceItemIndex) => {
-      if (!item.song) return;
-      item.song.lyrics_json.forEach((slide, slideIndex) => {
-        result.push({
-          slide,
-          songId: item.song!.id,
-          songTitle: item.song!.title,
-          serviceItemIndex,
-          slideIndex,
+      if (item.song) {
+        item.song.lyrics_json.forEach((slide, slideIndex) => {
+          result.push({
+            slide,
+            songId: item.song!.id,
+            songTitle: item.song!.title,
+            serviceItemIndex,
+            slideIndex,
+          });
         });
-      });
+      } else {
+        // Non-song item (announcement, blank, etc.) — synthetic single slide
+        result.push({
+          slide: {
+            id: `nonsong-${item.id}`,
+            section: "verse" as const,
+            sectionIndex: 1,
+            lines: [item.label || item.type],
+          },
+          songId: -(item.id),           // negative = non-song marker
+          songTitle: item.label || item.type,
+          serviceItemIndex,
+          slideIndex: 0,
+        });
+      }
     });
     return result;
   },

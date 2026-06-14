@@ -84,7 +84,7 @@ export default function SlideThumbnailList() {
               </div>
               {/* Label */}
               <div className="px-1 py-0.5 text-[9px] text-zinc-400 truncate">
-                {entry.slide.section} {entry.slide.sectionIndex + 1}
+                {entry.songId < 0 ? entry.songTitle : `${entry.slide.section} ${entry.slide.sectionIndex}`}
               </div>
             </button>
           </div>
