@@ -5,18 +5,20 @@ import SlideThumbnailList from "@/components/controller/SlideThumbnailList";
 import SlideCanvas from "@/components/controller/SlideCanvas";
 import QueuePanel from "@/components/controller/QueuePanel";
 import LibraryPanel from "@/components/controller/LibraryPanel";
+import LayerSidebar from "@/components/controller/LayerSidebar";
+import PreviewPanel from "@/components/controller/PreviewPanel";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
-import { songDb } from "@/lib/db";
+import { serviceDb, songDb } from "@/lib/db";
 import { ipc } from "@/lib/ipc";
 import {
   DEFAULT_LAYER_CONFIG,
   type LayerConfig,
   type TextBlock,
 } from "@/lib/types";
-import { deepMerge, loadGlobalDefaults } from "@/lib/utils";
+import { deepMerge, loadGlobalDefaults, saveGlobalDefaults } from "@/lib/utils";
 
-type RightTab = "queue" | "songs";
+type RightTab = "queue" | "songs" | "settings" | "preview";
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig } = useOutputStore();
@@ -27,12 +29,30 @@ export default function ControllerPage() {
     activeLyricSlideIndex,
     currentService,
     updateSlideCanvas,
+    updateServiceItems,
   } = useQueueStore();
 
   const [isLive, setIsLive] = useState(true);
   const [showPanel, setShowPanel] = useState(true);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [displays, setDisplays] = useState<Array<{ id: number; name: string; x: number; y: number; width: number; height: number }>>([]);
+  const [selectedDisplayIdx, setSelectedDisplayIdx] = useState(0);
+
+  // Load displays on mount
+  useEffect(() => {
+    ipc.getDisplays().then((result) => {
+      const list = result as Array<{ id: number; name: string; x: number; y: number; width: number; height: number }>;
+      if (list && list.length > 0) {
+        setDisplays(list);
+        // Default to second display if available
+        if (list.length > 1) setSelectedDisplayIdx(1);
+      }
+    }).catch(() => {
+      // Fallback: no display info available
+    });
+  }, []);
 
   // Load global defaults once
   useEffect(() => {
@@ -140,6 +160,59 @@ export default function ControllerPage() {
     [isLive, layerConfig, setLayerConfig, updateSlideCanvas]
   );
 
+  const handleLayerChange = useCallback(
+    (config: LayerConfig) => {
+      const { getActiveLyricSlide } = useQueueStore.getState();
+      const slide = getActiveLyricSlide();
+      const canvasBlocks = slide?.canvas?.textBlocks ?? [];
+      const withContent: LayerConfig = {
+        ...config,
+        subtitle: {
+          ...config.subtitle,
+          visible: canvasBlocks.length === 0 && !!slide,
+          lines: canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
+        },
+        canvas: canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
+      };
+      setLayerConfig(withContent);
+      if (isLive) ipc.sendSlideUpdate(withContent);
+    },
+    [isLive, setLayerConfig]
+  );
+
+  const handleSaveGlobal = useCallback(
+    (config: LayerConfig) => {
+      saveGlobalDefaults(config);
+    },
+    []
+  );
+
+  const handleSaveItem = useCallback(
+    async (itemId: number, config: LayerConfig) => {
+      const settings = {
+        background: { ...config.background },
+        subtitle: (({ visible: _v, lines: _l, ...rest }) => rest)(config.subtitle),
+        overlay: { ...config.overlay },
+      };
+      try {
+        await serviceDb.updateItemSettings(itemId, settings);
+        const liveItems = useQueueStore.getState().currentService?.items ?? [];
+        const updated = liveItems.map((item) =>
+          item.id === itemId ? { ...item, settings_json: settings } : item
+        );
+        updateServiceItems(updated);
+      } catch (err) {
+        console.error("Failed to save item settings:", err);
+      }
+    },
+    [updateServiceItems]
+  );
+
+  const activeItemId = (() => {
+    if (!currentService || activeItemIndex < 0) return null;
+    return currentService.items[activeItemIndex]?.id ?? null;
+  })();
+
   return (
     <div className="flex flex-col h-screen bg-zinc-900 text-white select-none">
       {/* Top bar */}
@@ -177,11 +250,44 @@ export default function ControllerPage() {
           {isBlackout ? "● 블랙아웃" : "블랙아웃 (B)"}
         </button>
 
+        {displays.length > 1 && (
+          <select
+            value={selectedDisplayIdx}
+            onChange={(e) => setSelectedDisplayIdx(Number(e.target.value))}
+            className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-xs text-white"
+          >
+            {displays.map((d, i) => (
+              <option key={d.id} value={i}>
+                {d.name || `모니터 ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        )}
+
         <button
-          onClick={() => ipc.openOutputWindow(1920, 0, 1920, 1080)}
+          onClick={() => {
+            const d = displays[selectedDisplayIdx];
+            if (d) {
+              ipc.openOutputWindow(d.x, d.y, d.width, d.height);
+            } else {
+              ipc.openOutputWindow(1920, 0, 1920, 1080);
+            }
+          }}
           className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white"
         >
           출력창 열기
+          {displays.length > 1 && (
+            <span className="ml-1 text-xs opacity-70">
+              ({displays[selectedDisplayIdx]?.name ?? `모니터${selectedDisplayIdx + 1}`})
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => ipc.closeOutputWindow().catch(() => {})}
+          className="px-3 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-sm text-zinc-300"
+        >
+          출력창 닫기
         </button>
 
         <button
@@ -253,10 +359,44 @@ export default function ControllerPage() {
               >
                 찬양 라이브러리
               </button>
+              <button
+                onClick={() => setRightTab("settings")}
+                className={`flex-1 py-1.5 text-xs font-medium ${
+                  rightTab === "settings"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                }`}
+              >
+                설정
+              </button>
+              <button
+                onClick={() => setRightTab("preview")}
+                className={`flex-1 py-1.5 text-xs font-medium ${
+                  rightTab === "preview"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                }`}
+              >
+                미리보기
+              </button>
             </div>
             <div className="flex-1 overflow-hidden">
               {rightTab === "queue" && <QueuePanel />}
               {rightTab === "songs" && <LibraryPanel mode="songs" />}
+              {rightTab === "settings" && (
+                <LayerSidebar
+                  layerConfig={layerConfig}
+                  activeItemId={activeItemId}
+                  onChange={handleLayerChange}
+                  onSaveGlobal={handleSaveGlobal}
+                  onSaveItem={handleSaveItem}
+                />
+              )}
+              {rightTab === "preview" && (
+                <div className="p-2 overflow-y-auto h-full">
+                  <PreviewPanel />
+                </div>
+              )}
             </div>
           </div>
         )}
