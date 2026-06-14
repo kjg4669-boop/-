@@ -20,6 +20,7 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   const [editMode, setEditMode] = useState(false);
   const [editSong, setEditSong] = useState<Song | null>(null); // null = 신규
   const [notice, setNotice] = useState("");
+  const [deletingSongId, setDeletingSongId] = useState<number | null>(null);
 
   const { currentService, setCurrentService } = useQueueStore();
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -223,12 +224,37 @@ export default function LibraryPanel({ mode = "media" }: Props) {
           {songs.map((song) => (
             <div
               key={song.id}
-              onClick={() => handleSongClick(song)}
-              className="px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none"
+              className="flex items-center group px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none"
             >
-              <div className="font-medium text-white">{song.title}</div>
-              {song.artist && <div className="text-zinc-500">{song.artist}</div>}
-              <div className="text-zinc-600">{song.lyrics_json.length}절</div>
+              <div className="flex-1 min-w-0" onClick={() => handleSongClick(song)}>
+                <div className="font-medium text-white truncate">{song.title}</div>
+                {song.artist && <div className="text-zinc-500 truncate">{song.artist}</div>}
+                <div className="text-zinc-600">{song.lyrics_json.length}절</div>
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (deletingSongId === song.id) {
+                    // Second click = confirm delete
+                    songDb.delete(song.id).then(() => {
+                      setSongs((prev) => prev.filter((s) => s.id !== song.id));
+                      setDeletingSongId(null);
+                    }).catch(() => showNotice("삭제 실패"));
+                  } else {
+                    setDeletingSongId(song.id);
+                    // Auto-cancel after 3s
+                    setTimeout(() => setDeletingSongId((prev) => prev === song.id ? null : prev), 3000);
+                  }
+                }}
+                className={`ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity ${
+                  deletingSongId === song.id
+                    ? "bg-red-600 text-white opacity-100"
+                    : "text-zinc-500 hover:text-red-400 hover:bg-zinc-800"
+                }`}
+                title={deletingSongId === song.id ? "한 번 더 클릭하여 삭제 확인" : "삭제"}
+              >
+                {deletingSongId === song.id ? "확인?" : "✕"}
+              </button>
             </div>
           ))}
           {songs.length === 0 && (

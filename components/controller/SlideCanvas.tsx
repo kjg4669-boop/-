@@ -33,6 +33,7 @@ export default function SlideCanvas({ onCanvasChange }: Props) {
   const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [rightClickedBlockId, setRightClickedBlockId] = useState<string | null>(null);
 
   // Sync blocks when active slide changes
   useEffect(() => {
@@ -159,10 +160,14 @@ export default function SlideCanvas({ onCanvasChange }: Props) {
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    setRightClickedBlockId(null);
     setContextMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
-  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+    setRightClickedBlockId(null);
+  }, []);
 
   const addBlockAtCenter = useCallback(() => {
     const id = `${idPrefix}-${Date.now()}-${nextBlockNum.current++}`;
@@ -239,6 +244,12 @@ export default function SlideCanvas({ onCanvasChange }: Props) {
               }}
               onPointerDown={(e) => handleBlockPointerDown(e, block)}
               onDoubleClick={(e) => handleBlockDblClick(e, block.id)}
+              onContextMenu={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                setRightClickedBlockId(block.id);
+                setContextMenu({ x: e.clientX, y: e.clientY });
+              }}
             >
               {editingId === block.id ? (
                 <textarea
@@ -309,6 +320,21 @@ export default function SlideCanvas({ onCanvasChange }: Props) {
           >
             + 텍스트 블록 추가
           </button>
+          {rightClickedBlockId && (
+            <button
+              className="block w-full text-left px-3 py-1.5 hover:bg-zinc-700 text-red-400"
+              onClick={() => {
+                setBlocks((prev) => prev.filter((b) => b.id !== rightClickedBlockId));
+                setRightClickedBlockId(null);
+                closeContextMenu();
+              }}
+            >
+              ✕ 이 블록 삭제
+            </button>
+          )}
+          {rightClickedBlockId && blocks.length > 0 && (
+            <div className="border-t border-zinc-700 my-1" />
+          )}
           {blocks.length > 0 && (
             <button
               className="block w-full text-left px-3 py-1.5 hover:bg-zinc-700 text-red-400"
