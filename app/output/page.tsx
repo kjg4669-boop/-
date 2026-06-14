@@ -6,6 +6,7 @@ import { ipc, isTauri } from "@/lib/ipc";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import SubtitleLayer from "@/components/layers/SubtitleLayer";
 import OverlayLayer from "@/components/layers/OverlayLayer";
+import CanvasLayer from "@/components/layers/CanvasLayer";
 import type { LayerConfig } from "@/lib/types";
 
 async function closeWindow() {
@@ -84,6 +85,9 @@ export default function OutputPage() {
 
       {/* Layer 3: Overlay */}
       <OverlayLayer config={layerConfig.overlay} />
+
+      {/* Layer 4: Canvas (free-position text blocks) */}
+      <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />
 
       {/* Blackout layer */}
       <div

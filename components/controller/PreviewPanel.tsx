@@ -6,6 +6,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import SubtitleLayer from "@/components/layers/SubtitleLayer";
 import OverlayLayer from "@/components/layers/OverlayLayer";
+import CanvasLayer from "@/components/layers/CanvasLayer";
 
 // Virtual output resolution
 const OUTPUT_W = 1920;
@@ -55,6 +56,7 @@ export default function PreviewPanel() {
           <BackgroundLayer config={layerConfig.background} />
           <SubtitleLayer config={layerConfig.subtitle} />
           <OverlayLayer config={layerConfig.overlay} />
+          <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />
           {isBlackout && (
             <div
               style={{
