@@ -3,17 +3,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import SlideThumbnailList from "@/components/controller/SlideThumbnailList";
 import SlideCanvas from "@/components/controller/SlideCanvas";
+import QueuePanel from "@/components/controller/QueuePanel";
+import LibraryPanel from "@/components/controller/LibraryPanel";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
-import { serviceDb, songDb } from "@/lib/db";
+import { songDb } from "@/lib/db";
 import { ipc } from "@/lib/ipc";
 import {
   DEFAULT_LAYER_CONFIG,
   type LayerConfig,
   type TextBlock,
-  type Service,
 } from "@/lib/types";
 import { deepMerge, loadGlobalDefaults } from "@/lib/utils";
+
+type RightTab = "queue" | "songs";
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig } = useOutputStore();
@@ -23,26 +26,13 @@ export default function ControllerPage() {
     activeItemIndex,
     activeLyricSlideIndex,
     currentService,
-    setCurrentService,
     updateSlideCanvas,
-    getFlatSlideList,
-    getActiveFlatSlideIndex,
   } = useQueueStore();
 
-  const [services, setServices] = useState<Service[]>([]);
   const [isLive, setIsLive] = useState(true);
+  const [showPanel, setShowPanel] = useState(true);
+  const [rightTab, setRightTab] = useState<RightTab>("queue");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Load services list on mount; auto-select most recent
-  useEffect(() => {
-    serviceDb.list().then(async (list) => {
-      setServices(list);
-      if (list.length > 0) {
-        const full = await serviceDb.get(list[0].id);
-        if (full) setCurrentService(full);
-      }
-    });
-  }, [setCurrentService]);
 
   // Load global defaults once
   useEffect(() => {
@@ -150,34 +140,14 @@ export default function ControllerPage() {
     [isLive, layerConfig, setLayerConfig, updateSlideCanvas]
   );
 
-  const handleServiceChange = useCallback(
-    async (serviceId: number) => {
-      const full = await serviceDb.get(serviceId);
-      if (full) setCurrentService(full);
-    },
-    [setCurrentService]
-  );
-
-  // Suppress unused variable warnings for store helpers used by child components
-  void getFlatSlideList;
-  void getActiveFlatSlideIndex;
-
   return (
     <div className="flex flex-col h-screen bg-zinc-900 text-white select-none">
       {/* Top bar */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-700 flex-shrink-0">
-        <select
-          className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-white max-w-xs"
-          value={currentService?.id ?? ""}
-          onChange={(e) => handleServiceChange(Number(e.target.value))}
-        >
-          {services.length === 0 && <option value="">서비스 없음</option>}
-          {services.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.date})
-            </option>
-          ))}
-        </select>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-700 flex-shrink-0">
+        {/* Current service name */}
+        <span className="text-sm text-zinc-300 truncate max-w-[180px]">
+          {currentService ? `${currentService.name} (${currentService.date})` : "예배 없음"}
+        </span>
 
         <div className="flex-1" />
 
@@ -213,17 +183,29 @@ export default function ControllerPage() {
         >
           출력창 열기
         </button>
+
+        <button
+          onClick={() => setShowPanel((v) => !v)}
+          className={`px-3 py-1 rounded text-sm ${
+            showPanel
+              ? "bg-zinc-600 text-white"
+              : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+          }`}
+          title="관리 패널 열기/닫기"
+        >
+          {showPanel ? "패널 ◀" : "패널 ▶"}
+        </button>
       </div>
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Slide thumbnails */}
-        <div className="w-48 flex-shrink-0 border-r border-zinc-700 overflow-hidden">
+        <div className="w-40 flex-shrink-0 border-r border-zinc-700 overflow-hidden">
           <SlideThumbnailList />
         </div>
 
         {/* Center: Canvas editor */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-hidden min-w-0">
           <div className="w-full max-w-4xl flex flex-col gap-3">
             <SlideCanvas onCanvasChange={handleCanvasChange} />
             <div className="flex items-center justify-center gap-3">
@@ -233,6 +215,9 @@ export default function ControllerPage() {
               >
                 ← 이전
               </button>
+              <span className="text-xs text-zinc-500">
+                더블클릭: 자막 추가 · 드래그: 이동 · 우클릭: 메뉴
+              </span>
               <button
                 onClick={nextLyricSlide}
                 className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
@@ -242,6 +227,39 @@ export default function ControllerPage() {
             </div>
           </div>
         </div>
+
+        {/* Right: Management panel */}
+        {showPanel && (
+          <div className="w-64 flex-shrink-0 border-l border-zinc-700 flex flex-col overflow-hidden">
+            {/* Tabs */}
+            <div className="flex border-b border-zinc-700 flex-shrink-0">
+              <button
+                onClick={() => setRightTab("queue")}
+                className={`flex-1 py-1.5 text-xs font-medium ${
+                  rightTab === "queue"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                }`}
+              >
+                예배순서
+              </button>
+              <button
+                onClick={() => setRightTab("songs")}
+                className={`flex-1 py-1.5 text-xs font-medium ${
+                  rightTab === "songs"
+                    ? "bg-zinc-700 text-white"
+                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                }`}
+              >
+                찬양 라이브러리
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {rightTab === "queue" && <QueuePanel />}
+              {rightTab === "songs" && <LibraryPanel mode="songs" />}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
