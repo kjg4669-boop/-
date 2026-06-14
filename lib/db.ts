@@ -175,6 +175,13 @@ export const serviceDb = {
       [JSON.stringify(settings), itemId]
     );
   },
+
+  async delete(id: number): Promise<void> {
+    const conn = await getDb();
+    // Delete all items first (cascade)
+    await conn.execute("DELETE FROM service_items WHERE service_id = ?", [id]);
+    await conn.execute("DELETE FROM services WHERE id = ?", [id]);
+  },
 };
 
 function parseServiceItem(row: any): ServiceItem {

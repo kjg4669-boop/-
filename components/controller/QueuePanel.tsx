@@ -325,6 +325,31 @@ export default function QueuePanel() {
               <span className="flex-1 text-xs text-zinc-300 truncate">
                 {currentService?.name ?? "예배 없음"}
               </span>
+              {currentService && (
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`"${currentService.name}" 예배를 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+                    try {
+                      await serviceDb.delete(currentService.id);
+                      const updated = await serviceDb.list();
+                      setServices(updated);
+                      if (updated.length > 0) {
+                        const next = await serviceDb.get(updated[0].id);
+                        if (next) setCurrentService(next);
+                      } else {
+                        setCurrentService(null);
+                      }
+                      setIsEditing(false);
+                    } catch {
+                      console.error("Failed to delete service");
+                    }
+                  }}
+                  className="text-xs px-2 py-1 bg-red-700 hover:bg-red-600 rounded whitespace-nowrap text-white"
+                  title="현재 예배 삭제"
+                >
+                  삭제
+                </button>
+              )}
               <button
                 onClick={() => { setIsEditing(false); setShowNewForm(false); setShowAddPanel(false); }}
                 className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded"
