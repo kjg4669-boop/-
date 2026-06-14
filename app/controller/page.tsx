@@ -1,19 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import QueuePanel from "@/components/controller/QueuePanel";
-import PreviewPanel from "@/components/controller/PreviewPanel";
-import LibraryPanel from "@/components/controller/LibraryPanel";
-import LayerSidebar from "@/components/controller/LayerSidebar";
+import { useState, useEffect, useCallback, useRef } from "react";
+import SlideThumbnailList from "@/components/controller/SlideThumbnailList";
+import SlideCanvas from "@/components/controller/SlideCanvas";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
-import { serviceDb } from "@/lib/db";
+import { serviceDb, songDb } from "@/lib/db";
 import { ipc } from "@/lib/ipc";
-import { DEFAULT_LAYER_CONFIG, type LayerConfig } from "@/lib/types";
-import { deepMerge, loadGlobalDefaults, saveGlobalDefaults } from "@/lib/utils";
+import {
+  DEFAULT_LAYER_CONFIG,
+  type LayerConfig,
+  type TextBlock,
+  type Service,
+} from "@/lib/types";
+import { deepMerge, loadGlobalDefaults } from "@/lib/utils";
 
 export default function ControllerPage() {
-  const [activeTab, setActiveTab] = useState<"queue" | "library" | "songs">("queue");
   const { isBlackout, setBlackout, layerConfig, setLayerConfig } = useOutputStore();
   const {
     nextLyricSlide,
@@ -21,15 +23,68 @@ export default function ControllerPage() {
     activeItemIndex,
     activeLyricSlideIndex,
     currentService,
-    updateServiceItems,
+    setCurrentService,
+    updateSlideCanvas,
+    getFlatSlideList,
+    getActiveFlatSlideIndex,
   } = useQueueStore();
 
-  // Load global defaults from localStorage on mount
+  const [services, setServices] = useState<Service[]>([]);
+  const [isLive, setIsLive] = useState(true);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load services list on mount; auto-select most recent
+  useEffect(() => {
+    serviceDb.list().then(async (list) => {
+      setServices(list);
+      if (list.length > 0) {
+        const full = await serviceDb.get(list[0].id);
+        if (full) setCurrentService(full);
+      }
+    });
+  }, [setCurrentService]);
+
+  // Load global defaults once
   useEffect(() => {
     const defaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
     setLayerConfig(defaults);
     ipc.sendSlideUpdate(defaults);
   }, [setLayerConfig]);
+
+  // IPC sync: rebuild LayerConfig when active slide changes
+  useEffect(() => {
+    if (!isLive) return;
+    const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
+    const item = getActiveItem();
+    const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
+
+    if (!item) {
+      const config = deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults) as LayerConfig;
+      setLayerConfig(config);
+      ipc.sendSlideUpdate(config);
+      return;
+    }
+
+    const slide = getActiveLyricSlide();
+    const itemOverrides = item.settings_json ?? {};
+    const merged = deepMerge(
+      deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
+      itemOverrides as Partial<LayerConfig>
+    ) as LayerConfig;
+
+    const canvasBlocks = slide?.canvas?.textBlocks ?? [];
+    const newConfig: LayerConfig = {
+      ...merged,
+      subtitle: {
+        ...merged.subtitle,
+        visible: canvasBlocks.length === 0 && !!slide,
+        lines: canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
+      },
+      canvas: canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
+    };
+    setLayerConfig(newConfig);
+    ipc.sendSlideUpdate(newConfig);
+  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, isLive, setLayerConfig]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -59,163 +114,134 @@ export default function ControllerPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [isBlackout, nextLyricSlide, prevLyricSlide, setBlackout]);
 
-  // Sync slide state → outputStore + IPC (includes global defaults + item overrides)
-  useEffect(() => {
-    const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
-    const item = getActiveItem();
-    const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
+  // Canvas blocks changed → update store + IPC + debounced DB save
+  const handleCanvasChange = useCallback(
+    (songId: number, slideId: string, canvas: { textBlocks: TextBlock[] }) => {
+      updateSlideCanvas(songId, slideId, canvas);
 
-    if (!item) {
-      setLayerConfig(globalDefaults);
-      ipc.sendSlideUpdate(globalDefaults);
-      return;
-    }
+      if (isLive) {
+        const config: LayerConfig = {
+          ...layerConfig,
+          subtitle: {
+            ...layerConfig.subtitle,
+            visible: canvas.textBlocks.length === 0,
+            lines: [],
+          },
+          canvas: canvas.textBlocks.length > 0 ? { textBlocks: canvas.textBlocks } : undefined,
+        };
+        setLayerConfig(config);
+        ipc.sendSlideUpdate(config);
+      }
 
-    const slide = getActiveLyricSlide();
-    const itemOverrides = item.settings_json ?? {};
-    const merged = deepMerge(
-      deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
-      // ServiceItemSettings has Partial<> nested values; deepMerge handles this safely at runtime
-      itemOverrides as Partial<LayerConfig>
-    );
-    const newConfig: LayerConfig = {
-      ...merged,
-      subtitle: {
-        ...merged.subtitle,
-        visible: !!slide,
-        lines: slide?.lines ?? [],
-      },
-    };
-    setLayerConfig(newConfig);
-    ipc.sendSlideUpdate(newConfig);
-  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, setLayerConfig]);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        const song = useQueueStore
+          .getState()
+          .currentService?.items.find((i) => i.song?.id === songId)?.song;
+        if (song) {
+          try {
+            await songDb.update(songId, { lyrics_json: song.lyrics_json });
+          } catch (err) {
+            console.error("Failed to save canvas:", err);
+          }
+        }
+      }, 600);
+    },
+    [isLive, layerConfig, setLayerConfig, updateSlideCanvas]
+  );
 
-  // Called when sidebar edits any layer setting
-  const handleLayerChange = useCallback((config: LayerConfig) => {
-    const { getActiveLyricSlide } = useQueueStore.getState();
-    const slide = getActiveLyricSlide?.();
-    const withLines: LayerConfig = {
-      ...config,
-      subtitle: {
-        ...config.subtitle,
-        visible: !!slide,
-        lines: slide?.lines ?? [],
-      },
-    };
-    setLayerConfig(withLines);
-    ipc.sendSlideUpdate(withLines);
-  }, [setLayerConfig]);
+  const handleServiceChange = useCallback(
+    async (serviceId: number) => {
+      const full = await serviceDb.get(serviceId);
+      if (full) setCurrentService(full);
+    },
+    [setCurrentService]
+  );
 
-  // Save global defaults to localStorage
-  const handleSaveGlobal = useCallback((config: LayerConfig) => {
-    saveGlobalDefaults(config);
-  }, []);
-
-  // Save item-specific overrides to DB
-  const handleSaveItem = useCallback(async (itemId: number, config: LayerConfig) => {
-    const settings = {
-      background: { ...config.background },
-      subtitle: (({ visible: _v, lines: _l, ...rest }) => rest)(config.subtitle),
-      overlay: { ...config.overlay },
-    };
-    try {
-      await serviceDb.updateItemSettings(itemId, settings);
-      // Update local store so next item switch picks up overrides
-      const liveItems = useQueueStore.getState().currentService?.items ?? [];
-      const updated = liveItems.map((item) =>
-        item.id === itemId ? { ...item, settings_json: settings } : item
-      );
-      updateServiceItems(updated);
-    } catch (err) {
-      console.error("Failed to save item settings:", err);
-    }
-  }, [updateServiceItems]);
-
-  // Get active item id for sidebar
-  const activeItemId = (() => {
-    if (!currentService || activeItemIndex < 0) return null;
-    return currentService.items[activeItemIndex]?.id ?? null;
-  })();
+  // Suppress unused variable warnings for store helpers used by child components
+  void getFlatSlideList;
+  void getActiveFlatSlideIndex;
 
   return (
-    <div className="flex h-screen bg-zinc-900 text-white select-none">
-      {/* Left: Queue Panel */}
-      <div className="w-64 flex-shrink-0 border-r border-zinc-700 flex flex-col">
-        <div className="p-3 border-b border-zinc-700">
-          <div className="flex gap-1">
-            {(["queue", "library", "songs"] as const).map((tab) => (
+    <div className="flex flex-col h-screen bg-zinc-900 text-white select-none">
+      {/* Top bar */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-700 flex-shrink-0">
+        <select
+          className="bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm text-white max-w-xs"
+          value={currentService?.id ?? ""}
+          onChange={(e) => handleServiceChange(Number(e.target.value))}
+        >
+          {services.length === 0 && <option value="">서비스 없음</option>}
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.date})
+            </option>
+          ))}
+        </select>
+
+        <div className="flex-1" />
+
+        <button
+          onClick={() => setIsLive((v) => !v)}
+          className={`px-3 py-1 rounded text-sm font-medium ${
+            isLive
+              ? "bg-green-600 hover:bg-green-700 text-white"
+              : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+          }`}
+        >
+          {isLive ? "● 라이브" : "라이브 꺼짐"}
+        </button>
+
+        <button
+          onClick={() => {
+            const next = !isBlackout;
+            setBlackout(next);
+            ipc.sendBlackout(next);
+          }}
+          className={`px-3 py-1 rounded text-sm font-bold ${
+            isBlackout
+              ? "bg-red-600 hover:bg-red-700 text-white"
+              : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+          }`}
+        >
+          {isBlackout ? "● 블랙아웃" : "블랙아웃 (B)"}
+        </button>
+
+        <button
+          onClick={() => ipc.openOutputWindow(1920, 0, 1920, 1080)}
+          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white"
+        >
+          출력창 열기
+        </button>
+      </div>
+
+      {/* Main content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: Slide thumbnails */}
+        <div className="w-48 flex-shrink-0 border-r border-zinc-700 overflow-hidden">
+          <SlideThumbnailList />
+        </div>
+
+        {/* Center: Canvas editor */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4 overflow-hidden">
+          <div className="w-full max-w-4xl flex flex-col gap-3">
+            <SlideCanvas onCanvasChange={handleCanvasChange} />
+            <div className="flex items-center justify-center gap-3">
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-1 text-xs rounded capitalize ${
-                  activeTab === tab
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-700"
-                }`}
+                onClick={prevLyricSlide}
+                className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
               >
-                {tab === "queue" ? "큐시트" : tab === "library" ? "미디어" : "찬양"}
+                ← 이전
               </button>
-            ))}
+              <button
+                onClick={nextLyricSlide}
+                className="px-4 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
+              >
+                다음 →
+              </button>
+            </div>
           </div>
         </div>
-        <div className="flex-1 overflow-hidden">
-          {activeTab === "queue" && <QueuePanel />}
-          {activeTab === "library" && <LibraryPanel />}
-          {activeTab === "songs" && <LibraryPanel mode="songs" />}
-        </div>
-      </div>
-
-      {/* Center: Preview */}
-      <div className="flex-1 flex flex-col">
-        <div className="flex-1 flex items-center justify-center p-4">
-          <PreviewPanel />
-        </div>
-
-        {/* Control bar */}
-        <div className="p-3 border-t border-zinc-700 flex items-center gap-3">
-          <button
-            onClick={() => { prevLyricSlide(); }}
-            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
-          >
-            ← 이전
-          </button>
-          <button
-            onClick={() => { nextLyricSlide(); }}
-            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
-          >
-            다음 →
-          </button>
-          <div className="flex-1" />
-          <button
-            onClick={() => {
-              const next = !isBlackout;
-              setBlackout(next);
-              ipc.sendBlackout(next);
-            }}
-            className={`px-4 py-2 rounded text-sm font-bold ${
-              isBlackout ? "bg-red-600 hover:bg-red-700" : "bg-zinc-700 hover:bg-zinc-600"
-            }`}
-          >
-            {isBlackout ? "● 블랙아웃" : "블랙아웃 (B)"}
-          </button>
-          <button
-            onClick={() => ipc.openOutputWindow(1920, 0, 1920, 1080)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm"
-          >
-            출력창 열기
-          </button>
-        </div>
-      </div>
-
-      {/* Right: Layer Settings Sidebar */}
-      <div className="w-56 flex-shrink-0 border-l border-zinc-700 overflow-hidden">
-        <LayerSidebar
-          layerConfig={layerConfig}
-          activeItemId={activeItemId}
-          onChange={handleLayerChange}
-          onSaveGlobal={handleSaveGlobal}
-          onSaveItem={handleSaveItem}
-        />
       </div>
     </div>
   );
