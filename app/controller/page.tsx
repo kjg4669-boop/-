@@ -21,6 +21,8 @@ import {
 import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId } from "@/lib/utils";
 import { FONT_OPTIONS } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import ServiceListModal from "@/components/controller/ServiceListModal";
+import SaveServiceModal from "@/components/controller/SaveServiceModal";
 
 type RightTab = "queue" | "songs" | "settings";
 
@@ -32,6 +34,7 @@ export default function ControllerPage() {
     activeItemIndex,
     activeLyricSlideIndex,
     currentService,
+    isDirty,
     updateSlideCanvas,
     updateServiceItems,
     getFlatSlideList,
@@ -59,6 +62,8 @@ export default function ControllerPage() {
   const [soundName, setSoundName] = useState<string | null>(null);
   const [soundPlaying, setSoundPlaying] = useState(false);
   const pendingAddBlockRef = useRef(false);
+  const [showServiceList, setShowServiceList] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
   useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
 
@@ -404,6 +409,51 @@ export default function ControllerPage() {
   // Keep openOutputRef current so menu listeners always call latest version
   useEffect(() => { openOutputRef.current = openOutput; });
 
+  const handleSave = useCallback(async () => {
+    const store = useQueueStore.getState();
+    const svc = store.currentService;
+    if (!svc) return;
+    if (svc.id === -1) {
+      setShowSaveModal(true);
+      return;
+    }
+    try {
+      await serviceDb.saveItems(svc.id, svc.items);
+      store.setIsDirty(false);
+    } catch (e) {
+      console.error("[save]", e);
+    }
+  }, []);
+
+  const handleSaveAs = useCallback(async (name: string) => {
+    const store = useQueueStore.getState();
+    const svc = store.currentService;
+    const date = new Date().toISOString().slice(0, 10);
+    try {
+      const newId = await serviceDb.create(name, date);
+      const items = svc?.items ?? [];
+      await serviceDb.saveItems(newId, items);
+      store.updateCurrentServiceMeta({ id: newId, name, date });
+      setShowSaveModal(false);
+    } catch (e) {
+      console.error("[saveAs]", e);
+    }
+  }, []);
+
+  const handleLoadService = useCallback((service: import("@/lib/types").Service) => {
+    useQueueStore.getState().setCurrentService(service);
+    setShowServiceList(false);
+  }, []);
+
+  const handleNewService = useCallback(() => {
+    const store = useQueueStore.getState();
+    if (store.isDirty) {
+      if (!confirm("저장되지 않은 변경사항이 있습니다. 새 예배를 시작하시겠습니까?")) return;
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    store.setCurrentService({ id: -1, name: "새 예배", date, items: [] });
+  }, []);
+
   // Tauri native menu event listeners
   useEffect(() => {
     let unlistens: Array<() => void> = [];
@@ -420,6 +470,10 @@ export default function ControllerPage() {
           listen("menu:show-from-current", () => openOutputRef.current()),
           listen("menu:hide-slide",        () => setIsClear((v) => !v)),
           listen("menu:add-song",          () => { setShowPanel(true); setRightTab("songs"); }),
+          listen("menu:new-service",       () => handleNewService()),
+          listen("menu:open-service",      () => setShowServiceList(true)),
+          listen("menu:save-service",      () => handleSave()),
+          listen("menu:save-as",           () => setShowSaveModal(true)),
         ]);
       } catch (e) { console.error("[menu setup]", e); }
     }
@@ -449,7 +503,9 @@ export default function ControllerPage() {
       <div className="h-9 flex items-center gap-1.5 px-3 border-b border-zinc-700 bg-[#3c3c3c] flex-shrink-0 text-xs">
         <span className="font-bold text-zinc-200 tracking-wide mr-1">✝ Worship</span>
         <div className="w-px h-5 bg-zinc-600" />
-        <span className="text-zinc-400 truncate max-w-[140px]">{currentService?.name ?? "예배 없음"}</span>
+        <span className="text-zinc-400 truncate max-w-[140px]">
+          {currentService?.name ?? "예배 없음"}{isDirty ? " *" : ""}
+        </span>
         <div className="flex-1" />
 
         <button onClick={() => setIsLive((v) => !v)}
@@ -811,6 +867,19 @@ export default function ControllerPage() {
       </div>
 
     </div>
+      {showServiceList && (
+        <ServiceListModal
+          onLoad={handleLoadService}
+          onClose={() => setShowServiceList(false)}
+        />
+      )}
+      {showSaveModal && (
+        <SaveServiceModal
+          initialName={currentService?.name !== "새 예배" ? (currentService?.name ?? "") : ""}
+          onSave={handleSaveAs}
+          onClose={() => setShowSaveModal(false)}
+        />
+      )}
     </ErrorBoundary>
   );
 }
