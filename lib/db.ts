@@ -2,18 +2,57 @@
 
 import type { Song, MediaItem, Service, ServiceItem } from "./types";
 
-let db: Awaited<ReturnType<typeof openDb>> | null = null;
+let dbPromise: ReturnType<typeof openDb> | null = null;
 
 async function openDb() {
   const { default: Database } = await import("@tauri-apps/plugin-sql");
-  return Database.load("sqlite:worship.db");
+  const conn = await Database.load("sqlite:worship.db");
+  await conn.execute("PRAGMA foreign_keys = ON");
+  return conn;
 }
 
 async function getDb() {
-  if (!db) {
-    db = await openDb();
+  if (!dbPromise) {
+    dbPromise = openDb().catch((err) => {
+      dbPromise = null;
+      throw err;
+    });
   }
-  return db;
+  return dbPromise;
+}
+
+// ─── Internal DB row types ───────────────────────────────────────────────────
+
+interface SongRow {
+  id: number;
+  title: string;
+  artist: string;
+  lyrics_json: string;
+  media_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ServiceRow {
+  id: number;
+  name: string;
+  date: string;
+  created_at: string;
+}
+
+interface ServiceItemRow {
+  id: number;
+  service_id: number;
+  item_order: number;
+  type: string;
+  song_id: number | null;
+  media_id: number | null;
+  settings_json: string;
+  label: string;
+  // joined from songs via LEFT JOIN
+  song_title: string | null;
+  artist: string | null;
+  lyrics_json: string | null;
 }
 
 // ─── Songs ──────────────────────────────────────────────────────────────────
@@ -21,7 +60,7 @@ async function getDb() {
 export const songDb = {
   async list(): Promise<Song[]> {
     const conn = await getDb();
-    const rows = await conn.select<any[]>(
+    const rows = await conn.select<SongRow[]>(
       "SELECT * FROM songs ORDER BY title ASC"
     );
     return rows.map(parseSong);
@@ -29,7 +68,7 @@ export const songDb = {
 
   async search(query: string): Promise<Song[]> {
     const conn = await getDb();
-    const rows = await conn.select<any[]>(
+    const rows = await conn.select<SongRow[]>(
       "SELECT * FROM songs WHERE title LIKE ? OR artist LIKE ? ORDER BY title ASC",
       [`%${query}%`, `%${query}%`]
     );
@@ -38,7 +77,7 @@ export const songDb = {
 
   async get(id: number): Promise<Song | null> {
     const conn = await getDb();
-    const rows = await conn.select<any[]>("SELECT * FROM songs WHERE id = ?", [id]);
+    const rows = await conn.select<SongRow[]>("SELECT * FROM songs WHERE id = ?", [id]);
     return rows[0] ? parseSong(rows[0]) : null;
   },
 
@@ -48,13 +87,15 @@ export const songDb = {
       "INSERT INTO songs (title, artist, lyrics_json, media_id) VALUES (?, ?, ?, ?)",
       [song.title, song.artist, JSON.stringify(song.lyrics_json), song.media_id ?? null]
     );
-    return result.lastInsertId!;
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (songs)");
+    return id;
   },
 
   async update(id: number, song: Partial<Omit<Song, "id" | "created_at">>): Promise<void> {
     const conn = await getDb();
     const sets: string[] = [];
-    const values: any[] = [];
+    const values: unknown[] = [];
     if (song.title !== undefined) { sets.push("title = ?"); values.push(song.title); }
     if (song.artist !== undefined) { sets.push("artist = ?"); values.push(song.artist); }
     if (song.lyrics_json !== undefined) { sets.push("lyrics_json = ?"); values.push(JSON.stringify(song.lyrics_json)); }
@@ -70,12 +111,13 @@ export const songDb = {
   },
 };
 
-function parseSong(row: any): Song {
+function parseSong(row: SongRow): Song {
   return {
     ...row,
+    media_id: row.media_id ?? undefined,
     lyrics_json: typeof row.lyrics_json === "string"
       ? JSON.parse(row.lyrics_json)
-      : row.lyrics_json ?? [],
+      : (row.lyrics_json ?? []),
   };
 }
 
@@ -99,7 +141,9 @@ export const mediaDb = {
       "INSERT INTO media (type, file_path, thumbnail_path, name) VALUES (?, ?, ?, ?)",
       [item.type, item.file_path, item.thumbnail_path ?? null, item.name]
     );
-    return result.lastInsertId!;
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (media)");
+    return id;
   },
 
   async delete(id: number): Promise<void> {
@@ -113,15 +157,15 @@ export const mediaDb = {
 export const serviceDb = {
   async list(): Promise<Service[]> {
     const conn = await getDb();
-    const services = await conn.select<any[]>("SELECT * FROM services ORDER BY date DESC");
+    const services = await conn.select<ServiceRow[]>("SELECT * FROM services ORDER BY date DESC");
     return services.map((s) => ({ ...s, items: [] }));
   },
 
   async get(id: number): Promise<Service | null> {
     const conn = await getDb();
-    const services = await conn.select<any[]>("SELECT * FROM services WHERE id = ?", [id]);
+    const services = await conn.select<ServiceRow[]>("SELECT * FROM services WHERE id = ?", [id]);
     if (!services[0]) return null;
-    const items = await conn.select<any[]>(
+    const items = await conn.select<ServiceItemRow[]>(
       `SELECT si.*, s.title as song_title, s.artist, s.lyrics_json
        FROM service_items si
        LEFT JOIN songs s ON si.song_id = s.id
@@ -141,7 +185,9 @@ export const serviceDb = {
       "INSERT INTO services (name, date) VALUES (?, ?)",
       [name, date]
     );
-    return result.lastInsertId!;
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (services)");
+    return id;
   },
 
   async addItem(serviceId: number, item: Omit<ServiceItem, "id">): Promise<number> {
@@ -150,16 +196,25 @@ export const serviceDb = {
       "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [serviceId, item.item_order, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
     );
-    return result.lastInsertId!;
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (service_items)");
+    return id;
   },
 
   async reorderItems(serviceId: number, orderedIds: number[]): Promise<void> {
     const conn = await getDb();
-    for (let i = 0; i < orderedIds.length; i++) {
-      await conn.execute(
-        "UPDATE service_items SET item_order = ? WHERE id = ? AND service_id = ?",
-        [i, orderedIds[i], serviceId]
-      );
+    await conn.execute("BEGIN");
+    try {
+      for (let i = 0; i < orderedIds.length; i++) {
+        await conn.execute(
+          "UPDATE service_items SET item_order = ? WHERE id = ? AND service_id = ?",
+          [i, orderedIds[i], serviceId]
+        );
+      }
+      await conn.execute("COMMIT");
+    } catch (err) {
+      await conn.execute("ROLLBACK");
+      throw err;
     }
   },
 
@@ -176,28 +231,51 @@ export const serviceDb = {
     );
   },
 
+  async saveItems(serviceId: number, items: ServiceItem[]): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("BEGIN");
+    try {
+      await conn.execute("DELETE FROM service_items WHERE service_id = ?", [serviceId]);
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        await conn.execute(
+          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
+        );
+      }
+      await conn.execute("COMMIT");
+    } catch (err) {
+      await conn.execute("ROLLBACK");
+      throw err;
+    }
+  },
+
+  async rename(id: number, name: string): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("UPDATE services SET name = ? WHERE id = ?", [name, id]);
+  },
+
   async delete(id: number): Promise<void> {
     const conn = await getDb();
-    // Delete all items first (cascade)
-    await conn.execute("DELETE FROM service_items WHERE service_id = ?", [id]);
+    // service_items are removed automatically via ON DELETE CASCADE
     await conn.execute("DELETE FROM services WHERE id = ?", [id]);
   },
 };
 
-function parseServiceItem(row: any): ServiceItem {
+function parseServiceItem(row: ServiceItemRow): ServiceItem {
   const item: ServiceItem = {
     id: row.id,
     service_id: row.service_id,
     item_order: row.item_order,
-    type: row.type,
-    song_id: row.song_id,
-    media_id: row.media_id,
+    type: row.type as ServiceItem["type"],
+    song_id: row.song_id ?? undefined,
+    media_id: row.media_id ?? undefined,
     settings_json: typeof row.settings_json === "string"
       ? JSON.parse(row.settings_json)
-      : row.settings_json ?? {},
+      : (row.settings_json ?? {}),
     label: row.label ?? "",
   };
-  if (row.song_title) {
+  if (row.song_title && row.song_id != null) {
     item.song = {
       id: row.song_id,
       title: row.song_title,
