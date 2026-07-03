@@ -8,6 +8,7 @@ import SubtitleLayer from "@/components/layers/SubtitleLayer";
 import OverlayLayer from "@/components/layers/OverlayLayer";
 import CanvasLayer from "@/components/layers/CanvasLayer";
 import type { LayerConfig } from "@/lib/types";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 async function closeWindow() {
   if (!isTauri()) return;
@@ -16,35 +17,56 @@ async function closeWindow() {
 }
 
 export default function OutputPage() {
-  const { layerConfig, isBlackout, setLayerConfig, setBlackout, setOutputReady } = useOutputStore();
+  const { layerConfig, isBlackout, alertText, alertVisible, setLayerConfig, setBlackout, setOutputReady, setAlert } = useOutputStore();
   const unlistenRefs = useRef<Array<() => void>>([]);
   const [showControls, setShowControls] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let mounted = true;
+    let retryTimer: ReturnType<typeof setInterval> | null = null;
 
     async function setup() {
+      let receivedSlide = false;
+
       const unlistenSlide = await ipc.onSlideUpdate((config: LayerConfig) => {
-        if (mounted) setLayerConfig(config);
+        if (!mounted) return;
+        setLayerConfig(config);
+        receivedSlide = true;
+        if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
       });
       const unlistenBlackout = await ipc.onBlackout((active: boolean) => {
         if (mounted) setBlackout(active);
       });
+      const unlistenAlert = await ipc.onAlert((text: string, visible: boolean) => {
+        if (mounted) setAlert(text, visible);
+      });
 
-      unlistenRefs.current = [unlistenSlide, unlistenBlackout];
+      unlistenRefs.current = [unlistenSlide, unlistenBlackout, unlistenAlert];
 
       await ipc.sendOutputReady();
       if (mounted) setOutputReady(true);
+
+      // Retry every 500ms until controller responds with slide:update (max 20회 = 10초)
+      let retryCount = 0;
+      retryTimer = setInterval(async () => {
+        if (!mounted || receivedSlide || retryCount >= 20) {
+          if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+          return;
+        }
+        retryCount++;
+        await ipc.sendOutputReady();
+      }, 500);
     }
 
     setup();
 
     return () => {
       mounted = false;
+      if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
       unlistenRefs.current.forEach((fn) => fn());
     };
-  }, [setLayerConfig, setBlackout, setOutputReady]);
+  }, [setLayerConfig, setBlackout, setOutputReady, setAlert]);
 
   // Esc key closes the window
   useEffect(() => {
@@ -72,6 +94,7 @@ export default function OutputPage() {
   }, []);
 
   return (
+    <ErrorBoundary fallback="blackout">
     <div
       className="relative w-screen h-screen overflow-hidden bg-black"
       style={{ cursor: showControls ? "default" : "none" }}
@@ -88,6 +111,30 @@ export default function OutputPage() {
 
       {/* Layer 4: Canvas (free-position text blocks) */}
       <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />
+
+      {/* Alert banner — appears above content, below blackout */}
+      {alertVisible && alertText && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 60,
+            background: "rgba(0,0,0,0.82)",
+            borderTop: "3px solid #f97316",
+            color: "#fff",
+            padding: "18px 40px",
+            textAlign: "center",
+            fontSize: 42,
+            fontWeight: 600,
+            letterSpacing: "0.01em",
+            pointerEvents: "none",
+          }}
+        >
+          {alertText}
+        </div>
+      )}
 
       {/* Blackout layer */}
       <div
@@ -122,5 +169,6 @@ export default function OutputPage() {
         </button>
       )}
     </div>
+    </ErrorBoundary>
   );
 }
