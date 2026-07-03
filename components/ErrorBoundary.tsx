@@ -23,7 +23,9 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[ErrorBoundary] Caught error:", error, info.componentStack);
+    console.error("[ErrorBoundary] Caught error:", error);
+    console.error("[ErrorBoundary] Stack:", error.stack);
+    console.error("[ErrorBoundary] Component stack:", info.componentStack);
   }
 
   render() {
@@ -41,7 +43,13 @@ export default class ErrorBoundary extends Component<Props, State> {
         </p>
         <button
           className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm"
-          onClick={() => window.location.reload()}
+          onClick={() => {
+            try {
+              window.location.reload();
+            } catch (err) {
+              console.error("[ErrorBoundary] Reload failed:", err);
+            }
+          }}
         >
           새로고침
         </button>
