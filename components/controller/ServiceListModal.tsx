@@ -15,10 +15,15 @@ export default function ServiceListModal({ onLoad, onClose }: Props) {
   const [loadingId, setLoadingId] = useState<number | null>(null);
 
   useEffect(() => {
-    serviceDb.list().then((list) => {
-      setServices(list);
-      setLoading(false);
-    });
+    serviceDb.list()
+      .then((list) => {
+        setServices(list);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("[ServiceListModal] Failed to load services:", err);
+        setLoading(false);
+      });
   }, []);
 
   async function handleLoad(id: number) {
@@ -33,8 +38,12 @@ export default function ServiceListModal({ onLoad, onClose }: Props) {
 
   async function handleDelete(id: number, name: string) {
     if (!confirm(`"${name}" 예배를 삭제하시겠습니까?`)) return;
-    await serviceDb.delete(id);
-    setServices((prev) => prev.filter((s) => s.id !== id));
+    try {
+      await serviceDb.delete(id);
+      setServices((prev) => prev.filter((s) => s.id !== id));
+    } catch (err) {
+      console.error("[ServiceListModal] Failed to delete service:", err);
+    }
   }
 
   return (
