@@ -1,11 +1,25 @@
 import { create } from "zustand";
-import type { Service, ServiceItem, Song, LyricSlide } from "@/lib/types";
+import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide, ServiceItemSettings } from "@/lib/types";
+
+function getScriptureSlides(item: ServiceItem): ScriptureSlide[] {
+  const settings = item.settings_json as ServiceItemSettings;
+  return settings.scripture?.slides ?? [];
+}
+
+function getItemSlideCount(item: ServiceItem): number {
+  if (item.song) return item.song.lyrics_json.length;
+  const ss = getScriptureSlides(item);
+  return ss.length > 0 ? ss.length : 1;
+}
 
 interface QueueState {
   currentService: Service | null;
   activeItemIndex: number;
   activeLyricSlideIndex: number;
+  isDirty: boolean;
   setCurrentService: (service: Service | null) => void;
+  setIsDirty: (v: boolean) => void;
+  updateCurrentServiceMeta: (updates: Partial<Pick<Service, "id" | "name" | "date">>) => void;
   setActiveItem: (index: number) => void;
   nextLyricSlide: () => void;
   prevLyricSlide: () => void;
@@ -30,8 +44,18 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   currentService: null,
   activeItemIndex: -1,
   activeLyricSlideIndex: 0,
+  isDirty: false,
 
-  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0 }),
+  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0, isDirty: false }),
+
+  setIsDirty: (v) => set({ isDirty: v }),
+
+  updateCurrentServiceMeta: (updates) => {
+    const { currentService } = get();
+    if (currentService) {
+      set({ currentService: { ...currentService, ...updates }, isDirty: false });
+    }
+  },
 
   setActiveItem: (index) => set({ activeItemIndex: index, activeLyricSlideIndex: 0 }),
 
@@ -56,7 +80,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     } else if (activeItemIndex > 0) {
       const prevIndex = activeItemIndex - 1;
       const prevItem = currentService?.items[prevIndex];
-      const prevSlideCount = prevItem?.song?.lyrics_json.length ?? 1;
+      const prevSlideCount = prevItem ? getItemSlideCount(prevItem) : 1;
       set({
         activeItemIndex: prevIndex,
         activeLyricSlideIndex: Math.max(0, prevSlideCount - 1),
@@ -67,7 +91,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   updateServiceItems: (items) => {
     const { currentService } = get();
     if (currentService) {
-      set({ currentService: { ...currentService, items } });
+      set({ currentService: { ...currentService, items }, isDirty: true });
     }
   },
 
@@ -82,14 +106,22 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
 
   getActiveLyricSlide: () => {
-    const song = get().getActiveSong();
-    const { activeLyricSlideIndex } = get();
-    return song?.lyrics_json[activeLyricSlideIndex] ?? null;
+    const { activeItemIndex, activeLyricSlideIndex, currentService } = get();
+    const item = currentService?.items[activeItemIndex] ?? null;
+    if (!item) return null;
+    if (item.song) return item.song.lyrics_json[activeLyricSlideIndex] ?? null;
+    const ss = getScriptureSlides(item);
+    if (ss.length > 0) {
+      const s = ss[activeLyricSlideIndex];
+      if (!s) return null;
+      return { id: `scripture-${activeLyricSlideIndex}`, section: "verse" as const, sectionIndex: activeLyricSlideIndex + 1, lines: s.lines };
+    }
+    return null;
   },
 
   getTotalLyricSlides: () => {
-    const song = get().getActiveSong();
-    return song?.lyrics_json.length ?? 0;
+    const item = get().getActiveItem();
+    return item ? getItemSlideCount(item) : 1;
   },
 
   getFlatSlideList: () => {
@@ -99,29 +131,31 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     currentService.items.forEach((item, serviceItemIndex) => {
       if (item.song) {
         item.song.lyrics_json.forEach((slide, slideIndex) => {
+          result.push({ slide, songId: item.song!.id, songTitle: item.song!.title, serviceItemIndex, slideIndex });
+        });
+        return;
+      }
+      const ss = getScriptureSlides(item);
+      if (ss.length > 0) {
+        ss.forEach((s, slideIndex) => {
           result.push({
-            slide,
-            songId: item.song!.id,
-            songTitle: item.song!.title,
+            slide: { id: `scripture-${item.id}-${slideIndex}`, section: "verse" as const, sectionIndex: slideIndex + 1, lines: s.lines },
+            songId: -(item.id),
+            songTitle: item.label || "성경",
             serviceItemIndex,
             slideIndex,
           });
         });
-      } else {
-        // Non-song item (announcement, blank, etc.) — synthetic single slide
-        result.push({
-          slide: {
-            id: `nonsong-${item.id}`,
-            section: "verse" as const,
-            sectionIndex: 1,
-            lines: [item.label || item.type],
-          },
-          songId: -(item.id),           // negative = non-song marker
-          songTitle: item.label || item.type,
-          serviceItemIndex,
-          slideIndex: 0,
-        });
+        return;
       }
+      // Non-song item (announcement, blank, etc.)
+      result.push({
+        slide: { id: `nonsong-${item.id}`, section: "verse" as const, sectionIndex: 1, lines: [item.label || item.type] },
+        songId: -(item.id),
+        songTitle: item.label || item.type,
+        serviceItemIndex,
+        slideIndex: 0,
+      });
     });
     return result;
   },
@@ -131,9 +165,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (!currentService || activeItemIndex < 0) return -1;
     let flatIdx = 0;
     for (let i = 0; i < currentService.items.length; i++) {
-      const slides = currentService.items[i].song?.lyrics_json ?? [];
       if (i === activeItemIndex) return flatIdx + activeLyricSlideIndex;
-      flatIdx += slides.length;
+      flatIdx += getItemSlideCount(currentService.items[i]);
     }
     return -1;
   },
