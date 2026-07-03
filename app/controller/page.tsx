@@ -17,6 +17,7 @@ import {
   type TextBlock,
   type LyricSlide,
   type FlatSlide,
+  type Service,
 } from "@/lib/types";
 import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId } from "@/lib/utils";
 import { FONT_OPTIONS } from "@/lib/constants";
@@ -428,11 +429,11 @@ export default function ControllerPage() {
   const handleSaveAs = useCallback(async (name: string) => {
     const store = useQueueStore.getState();
     const svc = store.currentService;
+    if (!svc) { setShowSaveModal(false); return; }
     const date = new Date().toISOString().slice(0, 10);
     try {
       const newId = await serviceDb.create(name, date);
-      const items = svc?.items ?? [];
-      await serviceDb.saveItems(newId, items);
+      await serviceDb.saveItems(newId, svc.items);
       store.updateCurrentServiceMeta({ id: newId, name, date });
       setShowSaveModal(false);
     } catch (e) {
@@ -440,7 +441,7 @@ export default function ControllerPage() {
     }
   }, []);
 
-  const handleLoadService = useCallback((service: import("@/lib/types").Service) => {
+  const handleLoadService = useCallback((service: Service) => {
     useQueueStore.getState().setCurrentService(service);
     setShowServiceList(false);
   }, []);
@@ -453,6 +454,11 @@ export default function ControllerPage() {
     const date = new Date().toISOString().slice(0, 10);
     store.setCurrentService({ id: -1, name: "새 예배", date, items: [] });
   }, []);
+
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; });
+  const handleNewServiceRef = useRef(handleNewService);
+  useEffect(() => { handleNewServiceRef.current = handleNewService; });
 
   // Tauri native menu event listeners
   useEffect(() => {
@@ -470,9 +476,9 @@ export default function ControllerPage() {
           listen("menu:show-from-current", () => openOutputRef.current()),
           listen("menu:hide-slide",        () => setIsClear((v) => !v)),
           listen("menu:add-song",          () => { setShowPanel(true); setRightTab("songs"); }),
-          listen("menu:new-service",       () => handleNewService()),
+          listen("menu:new-service",       () => handleNewServiceRef.current()),
           listen("menu:open-service",      () => setShowServiceList(true)),
-          listen("menu:save-service",      () => handleSave()),
+          listen("menu:save-service",      () => handleSaveRef.current()),
           listen("menu:save-as",           () => setShowSaveModal(true)),
         ]);
       } catch (e) { console.error("[menu setup]", e); }
