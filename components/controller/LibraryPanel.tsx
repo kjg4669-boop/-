@@ -23,9 +23,8 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   const [deletingSongId, setDeletingSongId] = useState<number | null>(null);
 
   const { currentService, setCurrentService } = useQueueStore();
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSongRef = useRef<Song | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pptxInputRef = useRef<HTMLInputElement | null>(null);
   const [pptxModal, setPptxModal] = useState<{ fileName: string; slides: ParsedSlide[] } | null>(null);
   const [pptxLoading, setPptxLoading] = useState(false);
@@ -38,11 +37,10 @@ export default function LibraryPanel({ mode = "media" }: Props) {
     }
   }, [mode]);
 
-  // Fix 1 + 2: cleanup on unmount
   useEffect(() => {
     return () => {
-      if (clickTimerRef.current !== null) clearTimeout(clickTimerRef.current);
       if (noticeTimerRef.current !== null) clearTimeout(noticeTimerRef.current);
+      if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
     };
   }, []);
 
@@ -80,36 +78,10 @@ export default function LibraryPanel({ mode = "media" }: Props) {
         label: song.title,
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) setCurrentService(updated);
+      if (updated) { setCurrentService(updated); useQueueStore.getState().setIsDirty(true); }
       showNotice(`"${song.title}" 추가됨`);
     } catch {
       showNotice("추가에 실패했습니다. 다시 시도해 주세요.");
-    }
-  }
-
-  function handleSongClick(song: Song) {
-    if (clickTimerRef.current !== null && pendingSongRef.current?.id === song.id) {
-      // Same song clicked twice within 300ms → double click
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-      pendingSongRef.current = null;
-      handleAddToService(song);
-    } else {
-      // Cancel any pending single-click from a different song
-      if (clickTimerRef.current !== null) {
-        clearTimeout(clickTimerRef.current);
-        clickTimerRef.current = null;
-      }
-      pendingSongRef.current = song;
-      clickTimerRef.current = setTimeout(() => {
-        clickTimerRef.current = null;
-        const s = pendingSongRef.current;
-        pendingSongRef.current = null;
-        if (s) {
-          setEditSong(s);
-          setEditMode(true);
-        }
-      }, 300);
     }
   }
 
@@ -226,11 +198,17 @@ export default function LibraryPanel({ mode = "media" }: Props) {
               key={song.id}
               className="flex items-center group px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none"
             >
-              <div className="flex-1 min-w-0" onClick={() => handleSongClick(song)}>
+              <div className="flex-1 min-w-0" onClick={() => handleAddToService(song)}>
                 <div className="font-medium text-white truncate">{song.title}</div>
                 {song.artist && <div className="text-zinc-500 truncate">{song.artist}</div>}
                 <div className="text-zinc-600">{song.lyrics_json.length}절</div>
               </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditSong(song); setEditMode(true); }}
+                className="ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
+              >
+                편집
+              </button>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -243,7 +221,11 @@ export default function LibraryPanel({ mode = "media" }: Props) {
                   } else {
                     setDeletingSongId(song.id);
                     // Auto-cancel after 3s
-                    setTimeout(() => setDeletingSongId((prev) => prev === song.id ? null : prev), 3000);
+                    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+                    deleteTimerRef.current = setTimeout(() => {
+                      deleteTimerRef.current = null;
+                      setDeletingSongId((prev) => prev === song.id ? null : prev);
+                    }, 3000);
                   }
                 }}
                 className={`ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity ${
@@ -260,9 +242,6 @@ export default function LibraryPanel({ mode = "media" }: Props) {
           {songs.length === 0 && (
             <p className="text-xs text-zinc-500 p-3">찬양이 없습니다</p>
           )}
-        </div>
-        <div className="p-2 border-t border-zinc-800">
-          <p className="text-xs text-zinc-600">클릭: 편집 · 더블클릭: 예배 추가</p>
         </div>
       </div>
     );

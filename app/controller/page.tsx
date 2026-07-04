@@ -446,13 +446,17 @@ export default function ControllerPage() {
     setShowServiceList(false);
   }, []);
 
-  const handleNewService = useCallback(() => {
+  const handleNewService = useCallback(async () => {
     const store = useQueueStore.getState();
     if (store.isDirty) {
       if (!confirm("저장되지 않은 변경사항이 있습니다. 새 예배를 시작하시겠습니까?")) return;
     }
     const date = new Date().toISOString().slice(0, 10);
-    store.setCurrentService({ id: -1, name: "새 예배", date, items: [] });
+    try {
+      const id = await serviceDb.create("새 예배", date);
+      const service = await serviceDb.get(id);
+      if (service) store.setCurrentService(service);
+    } catch (e) { console.error("[newService]", e); }
   }, []);
 
   const handleSaveRef = useRef(handleSave);

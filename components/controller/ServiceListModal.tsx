@@ -56,6 +56,9 @@ export default function ServiceListModal({ onLoad, onClose }: Props) {
           <h2 className="font-semibold text-white text-sm">예배 불러오기</h2>
           <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg leading-none">✕</button>
         </div>
+        <div className="px-4 py-2 bg-amber-900/40 border-b border-amber-700/50 text-amber-300 text-xs">
+          ⚠️ 라이브 중 불러오면 출력 화면이 초기화됩니다.
+        </div>
         <div className="flex-1 overflow-y-auto">
           {loading && <p className="text-zinc-400 text-sm p-4">불러오는 중...</p>}
           {!loading && services.length === 0 && (
