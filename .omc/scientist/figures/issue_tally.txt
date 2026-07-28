@@ -1,0 +1,27 @@
+
+=== Issue Tally ===
+
+[CRITICAL] (2건)
+  - controller/page.tsx 813줄 God Component — 단일 책임 원칙 위반
+  - 접근성 (aria-*) 완전 미구현 — role=0, aria-label=0
+
+[HIGH] (5건)
+  - eslint-disable react-hooks/exhaustive-deps 4곳 — 잠재적 stale closure 버그
+  - module-level mutable `blockClipboard` — 멀티 캔버스 환경에서 공유 상태 오염
+  - getFlatSlideList()를 useMemo 없이 렌더 중 인라인 호출 — O(n) 매 렌더
+  - Rust 메뉴 이벤트 4개 (new_service, open_service, save_service, save_as) — 프론트엔드 리스너 없음
+  - catch {} 빈 블록 다수 — 오류 삼킴 (QueuePanel, controller/page.tsx)
+
+[MEDIUM] (6건)
+  - 에러 바운더리(Error Boundary) 컴포넌트 없음 — 런타임 오류 시 전체 화면 블랭크
+  - localStorage를 직접 호출하는 QueuePanel — settingsStore와 책임 이중화
+  - SlideCanvas.tsx: 전역 변수 blockClipboard — 모듈 재초기화 시 예측 불가
+  - handleNewSlide() 300줄 컨트롤러 내 복잡 함수 — 추출 필요
+  - 타입 단언 `as ServiceItem['type']`, `as Partial<LayerConfig>` 일부 존재
+  - parseSong / parseServiceItem 에서 JSON.parse 실패 시 앱 크래시 가능
+
+[LOW] (4건)
+  - FONT_OPTIONS, ITEM_TYPE_ICON 등 상수가 컴포넌트 파일 내 분산
+  - 슬라이드 ID 생성 방식이 counter + Date.now() 혼용 — UUID 미사용
+  - console.error 33곳 — 프로덕션 로거 미사용
+  - 주석 한국어/영어 혼재 — 일관성 부족

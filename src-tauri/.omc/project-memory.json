@@ -1,0 +1,149 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1785223188191,
+  "projectRoot": "/Volumes/P31/chppt/worship-projector/src-tauri",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Rust",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Cargo.toml"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "cargo",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "cargo build",
+    "testCommand": "cargo test",
+    "lintCommand": "cargo clippy",
+    "devCommand": "cargo run",
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "src"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "capabilities": {
+      "path": "capabilities",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1785223188177,
+      "keyFiles": [
+        "default.json",
+        "main.json",
+        "stage.json"
+      ]
+    },
+    "gen": {
+      "path": "gen",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1785223188177,
+      "keyFiles": []
+    },
+    "icons": {
+      "path": "icons",
+      "purpose": null,
+      "fileCount": 18,
+      "lastAccessed": 1785223188178,
+      "keyFiles": [
+        "128x128.png",
+        "128x128@2x.png",
+        "32x32.png",
+        "64x64.png",
+        "Square107x107Logo.png"
+      ]
+    },
+    "migrations": {
+      "path": "migrations",
+      "purpose": "Database migrations",
+      "fileCount": 2,
+      "lastAccessed": 1785223188178,
+      "keyFiles": [
+        "001_initial.sql",
+        "002_fix_fk.sql"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 3,
+      "lastAccessed": 1785223188178,
+      "keyFiles": [
+        "display.rs",
+        "lib.rs",
+        "main.rs"
+      ]
+    },
+    "target": {
+      "path": "target",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1785223188178,
+      "keyFiles": [
+        "CACHEDIR.TAG"
+      ]
+    },
+    "gen/schemas": {
+      "path": "gen/schemas",
+      "purpose": "Schema definitions",
+      "fileCount": 4,
+      "lastAccessed": 1785223188178,
+      "keyFiles": [
+        "acl-manifests.json",
+        "capabilities.json",
+        "desktop-schema.json"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src/lib.rs",
+      "accessCount": 2,
+      "lastAccessed": 1785223230661,
+      "type": "file"
+    },
+    {
+      "path": "migrations/002_fix_fk.sql",
+      "accessCount": 2,
+      "lastAccessed": 1785230562368,
+      "type": "file"
+    },
+    {
+      "path": "migrations/003_bible.sql",
+      "accessCount": 1,
+      "lastAccessed": 1785223220581,
+      "type": "file"
+    },
+    {
+      "path": "src/display.rs",
+      "accessCount": 1,
+      "lastAccessed": 1785223907691,
+      "type": "file"
+    },
+    {
+      "path": "migrations/001_initial.sql",
+      "accessCount": 1,
+      "lastAccessed": 1785230588190,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

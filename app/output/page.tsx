@@ -34,6 +34,7 @@ export default function OutputPage() {
       const unlistenFreeze = await ipc.onFreeze((active: boolean) => {
         if (mounted) isFrozenRef.current = active;
       });
+      if (!mounted) { unlistenFreeze(); return; }
       unlistenRefs.current.push(unlistenFreeze);
 
       const unlistenSlide = await ipc.onSlideUpdate((config: LayerConfig) => {
@@ -53,6 +54,10 @@ export default function OutputPage() {
         if (mounted) setCountdown(payload);
       });
 
+      if (!mounted) {
+        unlistenSlide(); unlistenBlackout(); unlistenAlert(); unlistenCountdown();
+        return;
+      }
       unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown);
 
       await ipc.sendOutputReady();

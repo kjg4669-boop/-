@@ -27,6 +27,8 @@ interface QueueState {
   nextLyricSlide: () => void;
   prevLyricSlide: () => void;
   updateServiceItems: (items: ServiceItem[]) => void;
+  reorderItemsAndActive: (items: ServiceItem[], newActiveIndex: number) => void;
+  updateCurrentServiceNotes: (notes: string) => void;
   updateServiceData: (service: Service) => void;
   hiddenSlideKeys: Set<string>;
   toggleHiddenSlide: (key: string) => void;
@@ -105,6 +107,20 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const { currentService } = get();
     if (currentService) {
       set({ currentService: { ...currentService, items }, isDirty: true });
+    }
+  },
+
+  reorderItemsAndActive: (items, newActiveIndex) => {
+    const { currentService } = get();
+    if (currentService) {
+      set({ currentService: { ...currentService, items }, isDirty: true, activeItemIndex: newActiveIndex });
+    }
+  },
+
+  updateCurrentServiceNotes: (notes) => {
+    const { currentService } = get();
+    if (currentService) {
+      set({ currentService: { ...currentService, notes } });
     }
   },
 

@@ -79,7 +79,7 @@ export default function QueuePanel() {
   const [renaming, setRenaming] = useState(false);
   const [renameVal, setRenameVal] = useState("");
 
-  const { currentService, activeItemIndex, activeLyricSlideIndex, setCurrentService, setActiveItem, updateServiceItems, setActiveFlatSlide, getFlatSlideList } = useQueueStore();
+  const { currentService, activeItemIndex, activeLyricSlideIndex, setCurrentService, setActiveItem, updateServiceItems, reorderItemsAndActive, setActiveFlatSlide, getFlatSlideList } = useQueueStore();
 
   function showOpNotice(msg: string, error = false) {
     setOpNotice({ msg, error });
@@ -193,18 +193,20 @@ export default function QueuePanel() {
     const newIndex = currentService.items.findIndex((i) => i.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
     const reordered = arrayMove(currentService.items, oldIndex, newIndex);
+    // Compute new active index before async call (dnd blocks interactions during drag)
+    const liveActiveIdx = useQueueStore.getState().activeItemIndex;
+    let newActiveIdx = liveActiveIdx;
+    if (liveActiveIdx === oldIndex) {
+      newActiveIdx = newIndex;
+    } else if (oldIndex < liveActiveIdx && newIndex >= liveActiveIdx) {
+      newActiveIdx = liveActiveIdx - 1;
+    } else if (oldIndex > liveActiveIdx && newIndex <= liveActiveIdx) {
+      newActiveIdx = liveActiveIdx + 1;
+    }
     try {
       await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
-      updateServiceItems(reordered);
-      // Read live index (not stale closure) after the await
-      const liveActiveIdx = useQueueStore.getState().activeItemIndex;
-      if (liveActiveIdx === oldIndex) {
-        useQueueStore.setState({ activeItemIndex: newIndex });
-      } else if (oldIndex < liveActiveIdx && newIndex >= liveActiveIdx) {
-        useQueueStore.setState({ activeItemIndex: liveActiveIdx - 1 });
-      } else if (oldIndex > liveActiveIdx && newIndex <= liveActiveIdx) {
-        useQueueStore.setState({ activeItemIndex: liveActiveIdx + 1 });
-      }
+      // Atomic: update items + activeItemIndex in one set() call to avoid intermediate render
+      reorderItemsAndActive(reordered, newActiveIdx);
     } catch {
       showOpNotice("순서 변경에 실패했습니다", true);
     }

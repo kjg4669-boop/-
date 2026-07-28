@@ -1,0 +1,15 @@
+
+File Size (Lines of Code)
+============================================================
+
+   813  ████████████████████████████████████████  app/controller/page.tsx  <-- GOD COMPONENT
+   513  █████████████████████████  components/controller/SlideCanvas.tsx  <-- GOD COMPONENT
+   272  █████████████  components/controller/LibraryPanel.tsx
+   267  █████████████  components/controller/QueuePanel.tsx
+   265  █████████████  lib/db.ts
+   181  █████████  stores/queueStore.ts
+   180  █████████  lib/types.ts
+   105  █████  src-tauri/src/lib.rs
+   101  █████  lib/ipc.ts
+    26  █  stores/outputStore.ts
+    17  █  stores/settingsStore.ts

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"pgrep -l \\\"tauri\\\" 2>/dev/null; pgrep -l \\\"next\\\" 2>/dev/null\",\"description\":\"Check if tauri dev watcher is still running\"}",
+  "error": "Exit code 1",
+  "timestamp": "2026-07-28T09:30:14.228Z",
+  "retry_count": 1
+}

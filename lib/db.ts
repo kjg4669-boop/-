@@ -37,6 +37,7 @@ interface ServiceRow {
   id: number;
   name: string;
   date: string;
+  notes: string;
   created_at: string;
 }
 
@@ -293,6 +294,11 @@ export const serviceDb = {
     }
   },
 
+  async updateNotes(id: number, notes: string): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("UPDATE services SET notes = ? WHERE id = ?", [notes, id]);
+  },
+
   async rename(id: number, name: string): Promise<void> {
     const conn = await getDb();
     await conn.execute("UPDATE services SET name = ? WHERE id = ?", [name, id]);
@@ -311,8 +317,8 @@ export const serviceDb = {
     await conn.execute("BEGIN");
     try {
       const result = await conn.execute(
-        "INSERT INTO services (name, date) VALUES (?, ?)",
-        [`${original.name} (복사)`, original.date]
+        "INSERT INTO services (name, date, notes) VALUES (?, ?, ?)",
+        [`${original.name} (복사)`, original.date, original.notes ?? ""]
       );
       const newId = result.lastInsertId;
       if (newId == null) throw new Error("INSERT failed: no lastInsertId (duplicate service)");

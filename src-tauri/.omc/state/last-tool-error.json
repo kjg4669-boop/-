@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"pkill -f \\\"tauri dev\\\" 2>/dev/null; pkill -f \\\"worship-projector\\\" 2>/dev/null; pkill -f \\\"next dev\\\" 2>/dev/null; sleep 1\\n\\nDB_PATH=\\\"$HOME/Library/Application Support/com.worship.projec...",
+  "error": "Exit code 1\n-rw-r--r--@ 1 gim-yechan  staff  53248 Jul  9 23:43 /Users/gim-yechan/Library/Application Support/com.worship.projector/worship.db\nDB deleted\n\n-rw-r--r--@ 1 gim-yechan  staff  53248 Jul  9 23:43 /Users/gim-yechan/Library/Application Support/com.worship.projector/worship.db\nDB deleted",
+  "timestamp": "2026-07-28T09:20:43.231Z",
+  "retry_count": 1
+}

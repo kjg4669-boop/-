@@ -139,6 +139,7 @@ export interface Service {
   id: number;
   date: string;
   name: string;
+  notes: string;
   items: ServiceItem[];
 }
 

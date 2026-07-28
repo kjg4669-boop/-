@@ -85,6 +85,7 @@ export default function ControllerPage() {
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
   const canvasRef = useRef<SlideCanvasHandle>(null);
   const saveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openOutputRef = useRef<() => void>(() => {});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundName, setSoundName] = useState<string | null>(null);
@@ -107,6 +108,7 @@ export default function ControllerPage() {
   useEffect(() => { countdownRemainingMsRef.current = countdownRemainingMs; }, [countdownRemainingMs]);
 
   useEffect(() => () => { saveTimersRef.current.forEach(clearTimeout); saveTimersRef.current.clear(); }, []);
+  useEffect(() => () => { if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current); }, []);
   useEffect(() => () => { if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current); }, []);
   useEffect(() => () => { if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } }, []);
 
@@ -175,10 +177,9 @@ export default function ControllerPage() {
   useEffect(() => { showQuickSearchRef.current = showQuickSearch; }, [showQuickSearch]);
   useEffect(() => { showCheatSheetRef.current = showCheatSheet; }, [showCheatSheet]);
 
-  // serviceNotes: load from localStorage when service changes, save on change
+  // serviceNotes: load from DB record when service changes
   useEffect(() => {
-    if (!currentService) { setServiceNotes(""); return; }
-    setServiceNotes(localStorage.getItem(`notes_${currentService.id}`) ?? "");
+    setServiceNotes(currentService?.notes ?? "");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
@@ -1264,11 +1265,17 @@ export default function ControllerPage() {
             <span className="text-zinc-400 text-[10px]">예배 메모</span>
             <input
               type="text"
-              placeholder="운영 메모 (로컬 저장)..."
+              placeholder="운영 메모..."
               value={serviceNotes}
               onChange={(e) => {
-                setServiceNotes(e.target.value);
-                if (currentService) localStorage.setItem(`notes_${currentService.id}`, e.target.value);
+                const notes = e.target.value;
+                setServiceNotes(notes);
+                if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
+                notesDebounceRef.current = setTimeout(() => {
+                  if (!currentService) return;
+                  serviceDb.updateNotes(currentService.id, notes).catch(console.error);
+                  useQueueStore.getState().updateCurrentServiceNotes(notes);
+                }, 500);
               }}
               className="bg-[#3c3c3c] border border-zinc-600 rounded px-2 py-0.5 text-white w-72 text-xs outline-none focus:border-blue-500"
             />
