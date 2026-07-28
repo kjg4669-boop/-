@@ -2,13 +2,21 @@
 
 import Database from "@tauri-apps/plugin-sql";
 
-let _db: Database | null = null;
+// Promise-based singleton prevents race condition on concurrent first calls
+let _dbPromise: Promise<Database> | null = null;
 async function getDb(): Promise<Database> {
-  if (!_db) {
-    _db = await Database.load("sqlite:worship.db");
-    await _db.execute("PRAGMA foreign_keys = ON");
+  if (!_dbPromise) {
+    _dbPromise = Database.load("sqlite:worship.db")
+      .then(async (db) => {
+        await db.execute("PRAGMA foreign_keys = ON");
+        return db;
+      })
+      .catch((err) => {
+        _dbPromise = null;
+        throw err;
+      });
   }
-  return _db;
+  return _dbPromise;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -154,15 +162,24 @@ export async function importBibleJson(json: BibleImportJson): Promise<void> {
       const bookId = bookRows[0]?.id;
       if (bookId === undefined) throw new Error(`Failed to get book ID for order ${book.order}`);
 
+      // Collect all verse rows for this book, then batch-insert 200 at a time.
+      // SQLite limits bound variables to 999; 200 rows × 4 cols = 800 — safely under the limit.
+      // This replaces individual per-verse IPC calls (~30s for 31,000 verses) with ~160 calls.
+      const BATCH = 200;
+      const verseRows: [number, number, number, string][] = [];
       for (let chIdx = 0; chIdx < book.chapters.length; chIdx++) {
         const chapter = chIdx + 1;
-        const verses = book.chapters[chIdx];
-        for (let vIdx = 0; vIdx < verses.length; vIdx++) {
-          await db.execute(
-            "INSERT INTO bible_verses (book_id, chapter, verse, text) VALUES (?, ?, ?, ?)",
-            [bookId, chapter, vIdx + 1, verses[vIdx]]
-          );
-        }
+        book.chapters[chIdx].forEach((text, vIdx) => {
+          verseRows.push([bookId, chapter, vIdx + 1, text]);
+        });
+      }
+      for (let i = 0; i < verseRows.length; i += BATCH) {
+        const batch = verseRows.slice(i, i + BATCH);
+        const placeholders = batch.map(() => "(?,?,?,?)").join(",");
+        await db.execute(
+          `INSERT INTO bible_verses (book_id, chapter, verse, text) VALUES ${placeholders}`,
+          batch.flat()
+        );
       }
     }
 

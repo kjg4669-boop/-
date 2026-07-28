@@ -62,6 +62,9 @@ export default function StagePage() {
         unlistenRefs.current.push(unlisten);
         // Signal ready so controller re-sends current state
         await ipc.sendOutputReady();
+      } else {
+        // Unmounted before setup completed — immediately release the listener
+        unlisten();
       }
     }
     setup();
