@@ -101,11 +101,11 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
   function buildReference(): string {
     if (!selectedBook || checkedVerses.size === 0) return "";
     const sorted = [...checkedVerses].sort((a, b) => a - b);
-    const first = sorted[0];
-    const last = sorted[sorted.length - 1];
-    return first === last
-      ? `${selectedChapter}:${first}`
-      : `${selectedChapter}:${first}-${last}`;
+    // Check if selection is contiguous
+    const isContiguous = sorted.every((v, i) => i === 0 || v === sorted[i - 1] + 1);
+    if (sorted.length === 1) return `${selectedChapter}:${sorted[0]}`;
+    if (isContiguous) return `${selectedChapter}:${sorted[0]}-${sorted[sorted.length - 1]}`;
+    return `${selectedChapter}:${sorted.join(",")}`;
   }
 
   function buildSlides(): ScriptureSlide[] {
@@ -143,7 +143,10 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
       await importBibleJson(json);
       const v = await getBibleVersions();
       setVersions(v);
-      if (v.length > 0) setSelectedVersionId(v[0].id);
+      // Preserve current selection if still present; otherwise fall back to first
+      if (v.length > 0 && !v.find((x) => x.id === selectedVersionId)) {
+        setSelectedVersionId(v[0].id);
+      }
     } catch (e) {
       console.error("[BibleBrowser] import error", e);
     } finally {

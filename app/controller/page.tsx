@@ -1205,9 +1205,11 @@ export default function ControllerPage() {
           <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
             <span className="text-zinc-400 text-[10px] mr-1">텍스트 입장</span>
             {([
-              { label: "없음",    val: "none"     as const },
-              { label: "페이드인", val: "fade"     as const },
-              { label: "위로",    val: "slide-up" as const },
+              { label: "없음",      val: "none"       as const },
+              { label: "페이드인",   val: "fade"       as const },
+              { label: "위로↑",     val: "slide-up"   as const },
+              { label: "아래로↓",   val: "slide-down" as const },
+              { label: "줌인",      val: "zoom-in"    as const },
             ]).map(({ label, val }) => (
               <button key={val}
                 onClick={() => setSubtitle({ textEntrance: val })}
