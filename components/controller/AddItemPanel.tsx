@@ -3,21 +3,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb, songDb } from "@/lib/db";
-import type { Song, LyricSlide } from "@/lib/types";
+import type { Song, LyricSlide, ScriptureSlide } from "@/lib/types";
+import { newSlideId } from "@/lib/utils";
+import { BibleBrowser } from "./BibleBrowser";
 
 function parseLyricsToSlides(text: string): LyricSlide[] {
   const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
   return paragraphs.map((para, i) => ({
-    id: `verse-${i + 1}`,
+    id: newSlideId(),
     section: "verse" as const,
     sectionIndex: i + 1,
     lines: para.split("\n").map((l) => l.trim()).filter(Boolean),
   }));
 }
 
-export function AddItemPanel() {
+interface Props {
+  initialTab?: "song" | "announcement" | "blank" | "direct" | "scripture";
+}
+
+export function AddItemPanel({ initialTab }: Props) {
   const [addError, setAddError] = useState<string | null>(null);
-  const [addTab, setAddTab] = useState<"song" | "announcement" | "blank" | "direct" | "scripture">("song");
+  const [addTab, setAddTab] = useState<"song" | "announcement" | "blank" | "direct" | "scripture">(initialTab ?? "song");
+
+  useEffect(() => {
+    if (initialTab) setAddTab(initialTab);
+  }, [initialTab]);
   const [addSearch, setAddSearch] = useState("");
   const [addSongs, setAddSongs] = useState<Song[]>([]);
   const [addLabel, setAddLabel] = useState("");
@@ -25,13 +35,15 @@ export function AddItemPanel() {
   const [addDirectArtist, setAddDirectArtist] = useState("");
   const [addDirectLyrics, setAddDirectLyrics] = useState("");
   const [isDirectSubmitting, setIsDirectSubmitting] = useState(false);
-  const [scriptureBook, setScriptureBook] = useState("");
-  const [scriptureRef, setScriptureRef] = useState("");
-  const [scriptureText, setScriptureText] = useState("");
   const [isScriptureSubmitting, setIsScriptureSubmitting] = useState(false);
 
-  const { setCurrentService, setActiveItem } = useQueueStore();
+  const { setActiveItem } = useQueueStore();
   const searchGenRef = useRef(0);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
+  }, []);
 
   useEffect(() => {
     if (addTab === "song") {
@@ -50,7 +62,7 @@ export function AddItemPanel() {
         song_id: song.id, media_id: undefined, settings_json: {}, label: song.title,
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) { setCurrentService(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
+      if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
       console.error("[addSongItem]", e);
       setAddError("찬양 추가에 실패했습니다.");
@@ -68,7 +80,7 @@ export function AddItemPanel() {
         song_id: undefined, media_id: undefined, settings_json: {}, label: addLabel.trim(),
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) { setCurrentService(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
+      if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
       setAddLabel("");
     } catch (e) {
       console.error("[addAnnouncementItem]", e);
@@ -87,37 +99,31 @@ export function AddItemPanel() {
         song_id: undefined, media_id: undefined, settings_json: {}, label: "블랭크",
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) { setCurrentService(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
+      if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
       console.error("[addBlankItem]", e);
       setAddError("블랭크 추가에 실패했습니다.");
     }
   }
 
-  async function addScriptureItem() {
+  async function handleBibleAdd(book: string, reference: string, slides: ScriptureSlide[]) {
     const currentService = useQueueStore.getState().currentService;
-    if (!currentService || !scriptureBook.trim() || isScriptureSubmitting) return;
-    const slides = scriptureText
-      .split(/\n\s*\n/)
-      .map((p) => ({ lines: p.split("\n").map((l) => l.trim()).filter(Boolean) }))
-      .filter((s) => s.lines.length > 0);
-    if (slides.length === 0) { setAddError("구절 내용을 입력해 주세요."); return; }
+    if (!currentService || isScriptureSubmitting) return;
     setAddError(null);
     setIsScriptureSubmitting(true);
     try {
-      const label = `${scriptureBook.trim()} ${scriptureRef.trim()}`.trim();
+      const label = `${book} ${reference}`.trim();
       const item_order = useQueueStore.getState().currentService?.items.length ?? 0;
       await serviceDb.addItem(currentService.id, {
         service_id: currentService.id, item_order, type: "scripture",
         song_id: undefined, media_id: undefined,
-        settings_json: { scripture: { book: scriptureBook.trim(), reference: scriptureRef.trim(), slides } },
+        settings_json: { scripture: { book, reference, slides } },
         label,
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) { setCurrentService(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
-      setScriptureBook(""); setScriptureRef(""); setScriptureText("");
+      if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
-      console.error("[addScriptureItem]", e);
+      console.error("[handleBibleAdd]", e);
       setAddError("성경 추가에 실패했습니다.");
     } finally {
       setIsScriptureSubmitting(false);
@@ -141,7 +147,7 @@ export function AddItemPanel() {
         song_id: songId, media_id: undefined, settings_json: {}, label: addDirectTitle.trim(),
       });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) { setCurrentService(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
+      if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
       setAddDirectTitle(""); setAddDirectArtist(""); setAddDirectLyrics("");
     } catch (e) {
       console.error("[addDirectItem]", e);
@@ -151,15 +157,18 @@ export function AddItemPanel() {
     }
   }
 
-  async function handleAddSearch(q: string) {
+  function handleAddSearch(q: string) {
     setAddSearch(q);
-    const gen = ++searchGenRef.current;
-    try {
-      const results = q ? await songDb.search(q) : await songDb.list();
-      if (gen === searchGenRef.current) setAddSongs(results);
-    } catch {
-      console.error("Failed to search songs");
-    }
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      const gen = ++searchGenRef.current;
+      try {
+        const results = q ? await songDb.search(q) : await songDb.list();
+        if (gen === searchGenRef.current) setAddSongs(results);
+      } catch {
+        console.error("Failed to search songs");
+      }
+    }, 300);
   }
 
   return (
@@ -224,7 +233,7 @@ export function AddItemPanel() {
       )}
 
       {addTab === "direct" && (() => {
-        const slideCount = parseLyricsToSlides(addDirectLyrics).length;
+        const slideCount = addDirectLyrics.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length;
         return (
           <div className="p-1.5 space-y-1.5" style={{ maxHeight: 280, overflowY: "auto" }}>
             <input type="text" placeholder="제목 (필수)" value={addDirectTitle}
@@ -252,34 +261,9 @@ export function AddItemPanel() {
         );
       })()}
 
-      {addTab === "scripture" && (() => {
-        const slideCount = scriptureText.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean).length;
-        return (
-          <div className="p-1.5 space-y-1.5" style={{ maxHeight: 280, overflowY: "auto" }}>
-            <input type="text" placeholder="책 이름 (예: 요한복음)" value={scriptureBook}
-              onChange={(e) => setScriptureBook(e.target.value)}
-              className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
-            />
-            <input type="text" placeholder="장절 (예: 3:16)" value={scriptureRef}
-              onChange={(e) => setScriptureRef(e.target.value)}
-              className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
-            />
-            <textarea
-              placeholder={"구절 내용을 붙여넣으세요.\n빈 줄로 슬라이드를 구분합니다."}
-              value={scriptureText} onChange={(e) => setScriptureText(e.target.value)}
-              rows={5}
-              className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500 resize-none"
-            />
-            {scriptureText.trim() && <p className="text-zinc-500 text-xs">슬라이드 {slideCount}개</p>}
-            <button onClick={addScriptureItem}
-              disabled={!scriptureBook.trim() || !scriptureText.trim() || isScriptureSubmitting}
-              className="w-full text-xs py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded"
-            >
-              {isScriptureSubmitting ? "추가 중..." : "+ 큐에 추가"}
-            </button>
-          </div>
-        );
-      })()}
+      {addTab === "scripture" && (
+        <BibleBrowser onAdd={handleBibleAdd} isAdding={isScriptureSubmitting} />
+      )}
     </div>
   );
 }

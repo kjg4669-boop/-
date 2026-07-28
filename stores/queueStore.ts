@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide, ServiceItemSettings } from "@/lib/types";
 
+// Module-level cache: invalidates automatically when currentService reference changes (Zustand immutable updates)
+let _flatListCache: { serviceRef: import("@/lib/types").Service | null; list: import("@/lib/types").FlatSlide[] } = { serviceRef: null, list: [] };
+
 function getScriptureSlides(item: ServiceItem): ScriptureSlide[] {
   const settings = item.settings_json as ServiceItemSettings;
   return settings.scripture?.slides ?? [];
@@ -24,6 +27,9 @@ interface QueueState {
   nextLyricSlide: () => void;
   prevLyricSlide: () => void;
   updateServiceItems: (items: ServiceItem[]) => void;
+  updateServiceData: (service: Service) => void;
+  hiddenSlideKeys: Set<string>;
+  toggleHiddenSlide: (key: string) => void;
 
   // Computed helpers
   getActiveItem: () => ServiceItem | null;
@@ -45,46 +51,53 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   activeItemIndex: -1,
   activeLyricSlideIndex: 0,
   isDirty: false,
+  hiddenSlideKeys: new Set<string>(),
 
-  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0, isDirty: false }),
+  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0, isDirty: false, hiddenSlideKeys: new Set() }),
+
+  toggleHiddenSlide: (key) => {
+    const prev = get().hiddenSlideKeys;
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    set({ hiddenSlideKeys: next });
+  },
 
   setIsDirty: (v) => set({ isDirty: v }),
 
   updateCurrentServiceMeta: (updates) => {
     const { currentService } = get();
     if (currentService) {
-      set({ currentService: { ...currentService, ...updates }, isDirty: false });
+      set({ currentService: { ...currentService, ...updates } });
     }
   },
 
   setActiveItem: (index) => set({ activeItemIndex: index, activeLyricSlideIndex: 0 }),
 
   nextLyricSlide: () => {
-    const { activeLyricSlideIndex, getTotalLyricSlides, currentService, activeItemIndex } = get();
-    const total = getTotalLyricSlides();
-    if (activeLyricSlideIndex < total - 1) {
-      set({ activeLyricSlideIndex: activeLyricSlideIndex + 1 });
-    } else {
-      // Auto-advance to next item
-      const nextIndex = activeItemIndex + 1;
-      if (currentService && nextIndex < currentService.items.length) {
-        set({ activeItemIndex: nextIndex, activeLyricSlideIndex: 0 });
+    const state = get();
+    const flatList = state.getFlatSlideList();
+    const currentFlat = state.getActiveFlatSlideIndex();
+    for (let i = currentFlat + 1; i < flatList.length; i++) {
+      const entry = flatList[i];
+      const key = `${entry.serviceItemIndex}-${entry.songId}-${entry.slideIndex}`;
+      if (!state.hiddenSlideKeys.has(key)) {
+        set({ activeItemIndex: entry.serviceItemIndex, activeLyricSlideIndex: entry.slideIndex });
+        return;
       }
     }
   },
 
   prevLyricSlide: () => {
-    const { activeLyricSlideIndex, activeItemIndex, currentService } = get();
-    if (activeLyricSlideIndex > 0) {
-      set({ activeLyricSlideIndex: activeLyricSlideIndex - 1 });
-    } else if (activeItemIndex > 0) {
-      const prevIndex = activeItemIndex - 1;
-      const prevItem = currentService?.items[prevIndex];
-      const prevSlideCount = prevItem ? getItemSlideCount(prevItem) : 1;
-      set({
-        activeItemIndex: prevIndex,
-        activeLyricSlideIndex: Math.max(0, prevSlideCount - 1),
-      });
+    const state = get();
+    const flatList = state.getFlatSlideList();
+    const currentFlat = state.getActiveFlatSlideIndex();
+    for (let i = currentFlat - 1; i >= 0; i--) {
+      const entry = flatList[i];
+      const key = `${entry.serviceItemIndex}-${entry.songId}-${entry.slideIndex}`;
+      if (!state.hiddenSlideKeys.has(key)) {
+        set({ activeItemIndex: entry.serviceItemIndex, activeLyricSlideIndex: entry.slideIndex });
+        return;
+      }
     }
   },
 
@@ -93,6 +106,11 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (currentService) {
       set({ currentService: { ...currentService, items }, isDirty: true });
     }
+  },
+
+  // Update service data (after DB reload) without resetting activeItemIndex/activeLyricSlideIndex
+  updateServiceData: (service) => {
+    set({ currentService: service, isDirty: false });
   },
 
   getActiveItem: () => {
@@ -126,7 +144,8 @@ export const useQueueStore = create<QueueState>((set, get) => ({
 
   getFlatSlideList: () => {
     const { currentService } = get();
-    if (!currentService) return [];
+    if (_flatListCache.serviceRef === currentService) return _flatListCache.list;
+    if (!currentService) { _flatListCache = { serviceRef: null, list: [] }; return []; }
     const result: import("@/lib/types").FlatSlide[] = [];
     currentService.items.forEach((item, serviceItemIndex) => {
       if (item.song) {
@@ -157,6 +176,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
         slideIndex: 0,
       });
     });
+    _flatListCache = { serviceRef: currentService, list: result };
     return result;
   },
 
@@ -188,6 +208,6 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       );
       return { ...item, song: { ...item.song, lyrics_json: newSlides } };
     });
-    set({ currentService: { ...currentService, items: newItems } });
+    set({ currentService: { ...currentService, items: newItems }, isDirty: true });
   },
 }));

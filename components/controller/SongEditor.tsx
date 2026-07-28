@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { songDb } from "@/lib/db";
 import type { Song, LyricSection, LyricSlide } from "@/lib/types";
+import { newSlideId } from "@/lib/utils";
 
 const SECTION_LABELS: Record<LyricSection, string> = {
   intro: "인트로",
@@ -17,12 +18,12 @@ const SECTION_OPTIONS: LyricSection[] = [
   "intro", "verse", "pre-chorus", "chorus", "bridge", "outro",
 ];
 
-let blockIdCounter = 0;
-
 interface BlockInput {
   id: number;
   section: LyricSection;
   text: string;
+  slideId?: string;               // original slide ID (undefined = new block)
+  canvas?: LyricSlide["canvas"]; // preserve existing canvas positioning
 }
 
 interface Props {
@@ -38,20 +39,47 @@ function parseBlocksToSlides(blocks: BlockInput[]): LyricSlide[] {
     .map((block) => {
       counts[block.section] = (counts[block.section] ?? 0) + 1;
       const idx = counts[block.section]!;
+      const slideId = block.slideId ?? newSlideId();
+      const lines = block.text.split("\n").filter((l) => l.trim());
+      // Preserve existing canvas layout but sync lyric text block with current lines
+      const lyricText = lines.join("\n");
+      const canvas: LyricSlide["canvas"] = block.canvas
+        ? {
+            ...block.canvas,
+            textBlocks: block.canvas.textBlocks.map((tb) =>
+              tb.id === `${slideId}-lyric` ? { ...tb, text: lyricText } : tb
+            ),
+          }
+        : {
+            textBlocks: [{
+              id: `${slideId}-lyric`,
+              x: 160, y: 290,
+              width: 1600, height: 500,
+              text: lyricText,
+              fontSize: 60,
+              color: "#ffffff",
+              fontFamily: "sans-serif",
+              textAlign: "center",
+            }],
+          };
       return {
-        id: `${block.section}-${idx}`,
+        id: slideId,
         section: block.section,
         sectionIndex: idx,
-        lines: block.text.split("\n").filter((l) => l.trim()),
+        lines,
+        canvas,
       };
     });
 }
 
 export default function SongEditor({ song, onSave, onCancel }: Props) {
+  const blockIdCounter = useRef(0);
+  const nextId = () => ++blockIdCounter.current;
+
   const [title, setTitle] = useState(song?.title ?? "");
   const [artist, setArtist] = useState(song?.artist ?? "");
-  const [blocks, setBlocks] = useState<BlockInput[]>([
-    { id: ++blockIdCounter, section: "verse", text: "" },
+  const [blocks, setBlocks] = useState<BlockInput[]>(() => [
+    { id: nextId(), section: "verse", text: "" },
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,18 +90,20 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
     if (song && song.lyrics_json.length > 0) {
       setBlocks(
         song.lyrics_json.map((slide) => ({
-          id: ++blockIdCounter,
+          id: nextId(),
           section: slide.section,
           text: slide.lines.join("\n"),
+          slideId: slide.id,
+          canvas: slide.canvas,
         }))
       );
     } else {
-      setBlocks([{ id: ++blockIdCounter, section: "verse", text: "" }]);
+      setBlocks([{ id: nextId(), section: "verse", text: "" }]);
     }
   }, [song?.id, song?.updated_at]);
 
   function addBlock() {
-    setBlocks((prev) => [...prev, { id: ++blockIdCounter, section: "verse", text: "" }]);
+    setBlocks((prev) => [...prev, { id: nextId(), section: "verse", text: "" }]);
   }
 
   function removeBlock(i: number) {
@@ -96,7 +126,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
       const lyrics_json = parseBlocksToSlides(blocks);
       if (song) {
         await songDb.update(song.id, { title: title.trim(), artist: artist.trim(), lyrics_json });
-        onSave({ ...song, title: title.trim(), artist: artist.trim(), lyrics_json });
+        onSave({ ...song, title: title.trim(), artist: artist.trim(), lyrics_json, updated_at: new Date().toISOString() });
       } else {
         const id = await songDb.create({
           title: title.trim(),

@@ -2,6 +2,7 @@
 
 import JSZip from "jszip";
 import type { LyricSlide } from "./types";
+import { newSlideId } from "./utils";
 
 export interface ParsedSlide {
   slideNumber: number;  // 원본 슬라이드 번호 (1-based)
@@ -44,14 +45,16 @@ export async function parsePptx(file: File): Promise<ParsedSlide[]> {
  * 슬라이드 XML에서 단락별 텍스트를 추출한다.
  * 각 <a:p> 단락의 <a:t> 텍스트를 이어붙인 것이 하나의 lines 항목이 된다.
  */
+const DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
 function extractLinesFromSlideXml(xml: string): string[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xml, "application/xml");
-  const paragraphs = Array.from(doc.getElementsByTagNameNS("*", "p"));
+  const paragraphs = Array.from(doc.getElementsByTagNameNS(DRAWINGML_NS, "p"));
 
   const lines: string[] = [];
   for (const para of paragraphs) {
-    const runs = Array.from(para.getElementsByTagNameNS("*", "t"));
+    const runs = Array.from(para.getElementsByTagNameNS(DRAWINGML_NS, "t"));
     const text = runs.map((r) => r.textContent ?? "").join("").trim();
     if (text) {
       lines.push(text);
@@ -66,7 +69,7 @@ function extractLinesFromSlideXml(xml: string): string[] {
  */
 export function parsedSlidesToLyricSlides(slides: ParsedSlide[]): LyricSlide[] {
   return slides.map((slide, i) => ({
-    id: `verse-${i + 1}`,
+    id: newSlideId(),
     section: "verse" as const,
     sectionIndex: i + 1,
     lines: slide.lines,

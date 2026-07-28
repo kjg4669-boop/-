@@ -18,10 +18,16 @@ export interface TextBlock {
   x: number;        // px within 1920×1080 virtual canvas
   y: number;
   width: number;
+  height?: number;
+  rotation?: number; // degrees
   text: string;
   fontSize: number;
   color: string;
   fontFamily: string;
+  fontWeight?: "normal" | "bold";
+  fontStyle?: "normal" | "italic";
+  textDecoration?: "none" | "underline" | "line-through";
+  textAlign?: "left" | "center" | "right";
 }
 
 export interface LyricSlide {
@@ -49,6 +55,7 @@ export type ServiceItemType = "song" | "video" | "announcement" | "scripture" | 
 
 // Layer configuration (sent via IPC to output window)
 export interface LayerConfig {
+  transitionMs?: number;
   background: {
     type: MediaType | "none";
     src?: string;
@@ -69,6 +76,10 @@ export interface LayerConfig {
     backgroundBoxOpacity: number;
     position: "top" | "center" | "bottom";
     opacity: number;
+    fontWeight: "normal" | "bold";
+    fontStyle: "normal" | "italic";
+    textAlign: "left" | "center" | "right";
+    textEntrance?: "none" | "fade" | "slide-up" | "slide-down" | "zoom-in";
   };
   overlay: {
     visible: boolean;
@@ -84,11 +95,23 @@ export interface LayerConfig {
   };
 }
 
+// Scripture types
+export interface ScriptureSlide {
+  lines: string[];
+}
+
+export interface ScriptureSettings {
+  book: string;
+  reference: string;
+  slides: ScriptureSlide[];
+}
+
 // ServiceItemSettings: partial LayerConfig for per-item overrides
 export interface ServiceItemSettings {
   background?: Partial<LayerConfig["background"]>;
   subtitle?: Partial<LayerConfig["subtitle"]>;
   overlay?: Partial<LayerConfig["overlay"]>;
+  scripture?: ScriptureSettings;
 }
 
 export interface FlatSlide {
@@ -120,6 +143,7 @@ export interface Service {
 }
 
 export const DEFAULT_LAYER_CONFIG: LayerConfig = {
+  transitionMs: 250,
   background: { type: "color", color: "#000000", loop: true, opacity: 1 },
   subtitle: {
     visible: false,
@@ -128,15 +152,30 @@ export const DEFAULT_LAYER_CONFIG: LayerConfig = {
     fontFamily: "sans-serif",
     color: "#ffffff",
     strokeColor: "#000000",
-    strokeWidth: 2,
-    shadowEnabled: true,
+    strokeWidth: 0,
+    shadowEnabled: false,
     backgroundBoxVisible: false,
     backgroundBoxOpacity: 0.5,
     position: "bottom",
     opacity: 1,
+    fontWeight: "normal",
+    fontStyle: "normal",
+    textAlign: "center",
+    textEntrance: "fade",
   },
   overlay: { visible: false, x: 0, y: 0, width: 320, height: 180, opacity: 1 },
 };
+
+// Display / monitor info (mirrors Rust display.rs DisplayInfo)
+export interface DisplayInfo {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  is_primary: boolean;
+}
 
 // IPC event types
 export type IpcEventName =
@@ -144,11 +183,42 @@ export type IpcEventName =
   | "subtitle:next"
   | "subtitle:prev"
   | "blackout:toggle"
-  | "overlay:toggle"
   | "output:ready"
-  | "playback:status";
+  | "playback:status"
+  | "countdown:update"
+  | "stage:closed"
+  | "alert:show"
+  | "freeze:toggle"
+  | "heartbeat:ping"
+  | "video:control";
+
+export interface VideoControlPayload {
+  action: "play" | "pause" | "seek" | "volume" | "loop";
+  value?: number; // seek: seconds, volume: 0-1, loop: 0|1
+}
 
 export interface BlackoutTogglePayload { active: boolean; }
-export interface SlideUpdatePayload { layerConfig: LayerConfig; }
+
+// Stage Display metadata sent alongside each slide update
+export interface SlideMeta {
+  songTitle: string;
+  section: string;
+  slideIndex: number;   // 0-based index within the song/item
+  totalSlides: number;  // total slides in this item
+  itemIndex: number;    // 0-based index in service
+  totalItems: number;   // total items in service
+  nextLines?: string[];
+  nextSection?: string;
+}
+
+export interface SlideUpdatePayload { layerConfig: LayerConfig; meta?: SlideMeta; }
 export interface OverlayTogglePayload { id: string; visible: boolean; }
-export interface PlaybackStatusPayload { currentTime: number; duration: number; }
+export interface PlaybackStatusPayload { currentTime: number; duration: number; playing: boolean; }
+export interface AlertPayload { text: string; visible: boolean; }
+
+// Countdown timer payload
+export interface CountdownPayload {
+  active: boolean;
+  remainingMs: number;
+  totalMs: number;
+}

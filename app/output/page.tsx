@@ -7,6 +7,7 @@ import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import SubtitleLayer from "@/components/layers/SubtitleLayer";
 import OverlayLayer from "@/components/layers/OverlayLayer";
 import CanvasLayer from "@/components/layers/CanvasLayer";
+import CountdownLayer from "@/components/layers/CountdownLayer";
 import type { LayerConfig } from "@/lib/types";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -17,10 +18,11 @@ async function closeWindow() {
 }
 
 export default function OutputPage() {
-  const { layerConfig, isBlackout, alertText, alertVisible, setLayerConfig, setBlackout, setOutputReady, setAlert } = useOutputStore();
+  const { layerConfig, isBlackout, alertText, alertVisible, countdown, setLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown } = useOutputStore();
   const unlistenRefs = useRef<Array<() => void>>([]);
   const [showControls, setShowControls] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFrozenRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -29,9 +31,14 @@ export default function OutputPage() {
     async function setup() {
       let receivedSlide = false;
 
+      const unlistenFreeze = await ipc.onFreeze((active: boolean) => {
+        if (mounted) isFrozenRef.current = active;
+      });
+      unlistenRefs.current.push(unlistenFreeze);
+
       const unlistenSlide = await ipc.onSlideUpdate((config: LayerConfig) => {
         if (!mounted) return;
-        setLayerConfig(config);
+        if (!isFrozenRef.current) setLayerConfig(config);
         receivedSlide = true;
         if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
       });
@@ -42,21 +49,36 @@ export default function OutputPage() {
         if (mounted) setAlert(text, visible);
       });
 
-      unlistenRefs.current = [unlistenSlide, unlistenBlackout, unlistenAlert];
+      const unlistenCountdown = await ipc.onCountdown((payload) => {
+        if (mounted) setCountdown(payload);
+      });
+
+      unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown);
 
       await ipc.sendOutputReady();
       if (mounted) setOutputReady(true);
 
+      // Heartbeat every 4s so controller can detect this window is alive
+      if (mounted) {
+        const heartbeatInterval = setInterval(() => {
+          if (mounted) ipc.sendHeartbeat();
+        }, 4000);
+        unlistenRefs.current.push(() => clearInterval(heartbeatInterval));
+      }
+
       // Retry every 500ms until controller responds with slide:update (max 20회 = 10초)
-      let retryCount = 0;
-      retryTimer = setInterval(async () => {
-        if (!mounted || receivedSlide || retryCount >= 20) {
-          if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
-          return;
-        }
-        retryCount++;
-        await ipc.sendOutputReady();
-      }, 500);
+      if (mounted) {
+        let retryCount = 0;
+        retryTimer = setInterval(async () => {
+          if (!mounted || receivedSlide || retryCount >= 20) {
+            if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+            return;
+          }
+          retryCount++;
+          await ipc.sendOutputReady();
+        }, 500);
+        unlistenRefs.current.push(() => { if (retryTimer) { clearInterval(retryTimer); retryTimer = null; } });
+      }
     }
 
     setup();
@@ -65,8 +87,9 @@ export default function OutputPage() {
       mounted = false;
       if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
       unlistenRefs.current.forEach((fn) => fn());
+      unlistenRefs.current = [];
     };
-  }, [setLayerConfig, setBlackout, setOutputReady, setAlert]);
+  }, [setLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown]);
 
   // Esc key closes the window
   useEffect(() => {
@@ -104,13 +127,16 @@ export default function OutputPage() {
       <BackgroundLayer config={layerConfig.background} />
 
       {/* Layer 2: Subtitle */}
-      <SubtitleLayer config={layerConfig.subtitle} />
+      <SubtitleLayer config={layerConfig.subtitle} transitionMs={layerConfig.transitionMs} />
 
       {/* Layer 3: Overlay */}
       <OverlayLayer config={layerConfig.overlay} />
 
       {/* Layer 4: Canvas (free-position text blocks) */}
       <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />
+
+      {/* Layer 5: Countdown overlay (z:50, below blackout) */}
+      <CountdownLayer countdown={countdown} />
 
       {/* Alert banner — appears above content, below blackout */}
       {alertVisible && alertText && (

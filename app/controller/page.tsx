@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import SlideThumbnailList from "@/components/controller/SlideThumbnailList";
 import SlideCanvas, { type SlideCanvasHandle } from "@/components/controller/SlideCanvas";
 import QueuePanel from "@/components/controller/QueuePanel";
@@ -10,6 +10,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { serviceDb, songDb } from "@/lib/db";
+import { importMediaFile } from "@/lib/media";
 import { ipc } from "@/lib/ipc";
 import {
   DEFAULT_LAYER_CONFIG,
@@ -18,14 +19,19 @@ import {
   type LyricSlide,
   type FlatSlide,
   type Service,
+  type SlideMeta,
+  type DisplayInfo,
 } from "@/lib/types";
 import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId } from "@/lib/utils";
 import { FONT_OPTIONS } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceListModal from "@/components/controller/ServiceListModal";
 import SaveServiceModal from "@/components/controller/SaveServiceModal";
+import QuickSearchModal from "@/components/controller/QuickSearchModal";
+import ShortcutCheatSheet from "@/components/controller/ShortcutCheatSheet";
 
 type RightTab = "queue" | "songs" | "settings";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert } = useOutputStore();
@@ -43,9 +49,29 @@ export default function ControllerPage() {
   } = useQueueStore();
 
   const [isLive, setIsLive] = useState(true);
+  const [isFrozen, setIsFrozen] = useState(false);
+  const [autoAdvance, setAutoAdvance] = useState(false);
+  const [autoAdvanceMs, setAutoAdvanceMs] = useState(5000);
+  const [autoProgress, setAutoProgress] = useState(0);
+  const [showQuickSearch, setShowQuickSearch] = useState(false);
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
+  const [ctrlNotice, setCtrlNotice] = useState<{ msg: string; error?: boolean } | null>(null);
+  const ctrlNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showQuickSearchRef = useRef(false);
+  const showCheatSheetRef = useRef(false);
   const [isClear, setIsClear] = useState(false);
   const isClearRef = useRef(false);
   useEffect(() => { isClearRef.current = isClear; }, [isClear]);
+  // Sync clear state to output regardless of isLive (blackout pattern)
+  const isClearFirstRender = useRef(true);
+  useEffect(() => {
+    if (isClearFirstRender.current) { isClearFirstRender.current = false; return; }
+    const { layerConfig: lc } = useOutputStore.getState();
+    const toSend: LayerConfig = isClear
+      ? { ...lc, subtitle: { ...lc.subtitle, visible: false, lines: [] }, canvas: undefined }
+      : lc;
+    ipc.sendSlideUpdate(toSend);
+  }, [isClear]);
   const [isLoop, setIsLoop] = useState(false);
   const [alertInput, setAlertInput] = useState("");
   const [alertActive, setAlertActive] = useState(false);
@@ -53,11 +79,12 @@ export default function ControllerPage() {
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
-  const [ribbonTab, setRibbonTab] = useState<"home" | "insert">("home");
+  const [ribbonTab, setRibbonTab] = useState<RibbonTab>("home");
+  const [serviceNotes, setServiceNotes] = useState("");
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
   const canvasRef = useRef<SlideCanvasHandle>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const openOutputRef = useRef<() => void>(() => {});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundName, setSoundName] = useState<string | null>(null);
@@ -65,8 +92,95 @@ export default function ControllerPage() {
   const pendingAddBlockRef = useRef(false);
   const [showServiceList, setShowServiceList] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [outputConnected, setOutputConnected] = useState(false);
+  const [isStageOpen, setIsStageOpen] = useState(false);
 
-  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
+  // Countdown timer state
+  const [countdownMin, setCountdownMin] = useState(10);
+  const [countdownActive, setCountdownActive] = useState(false);
+  const [countdownRemainingMs, setCountdownRemainingMs] = useState(10 * 60 * 1000);
+  const countdownTotalMsRef = useRef(10 * 60 * 1000);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownActiveRef = useRef(false);
+  const countdownRemainingMsRef = useRef(10 * 60 * 1000);
+  useEffect(() => { countdownActiveRef.current = countdownActive; }, [countdownActive]);
+  useEffect(() => { countdownRemainingMsRef.current = countdownRemainingMs; }, [countdownRemainingMs]);
+
+  useEffect(() => () => { saveTimersRef.current.forEach(clearTimeout); saveTimersRef.current.clear(); }, []);
+  useEffect(() => () => { if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current); }, []);
+  useEffect(() => () => { if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } }, []);
+
+  // beforeunload: 미저장 변경 시 경고
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (useQueueStore.getState().isDirty) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
+  // Autosave: 30초마다 isDirty면 저장
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (useQueueStore.getState().isDirty) handleSaveRef.current();
+    }, 30000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Countdown timer tick
+  useEffect(() => {
+    if (!countdownActive) {
+      if (countdownIntervalRef.current) { clearInterval(countdownIntervalRef.current); countdownIntervalRef.current = null; }
+      return;
+    }
+    const startTime = Date.now();
+    const startRemaining = countdownRemainingMs;
+    countdownIntervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, startRemaining - elapsed);
+      setCountdownRemainingMs(remaining);
+      ipc.sendCountdown({ active: true, remainingMs: remaining, totalMs: countdownTotalMsRef.current });
+      if (remaining <= 0) {
+        setCountdownActive(false);
+        clearInterval(countdownIntervalRef.current!);
+        countdownIntervalRef.current = null;
+        ipc.sendCountdown({ active: false, remainingMs: 0, totalMs: countdownTotalMsRef.current });
+      }
+    }, 250);
+    return () => { if (countdownIntervalRef.current) { clearInterval(countdownIntervalRef.current); countdownIntervalRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countdownActive]);
+
+  // Auto-advance: 슬라이드 자동 넘기기 타이머 (EasyWorship 스타일)
+  useEffect(() => {
+    if (!autoAdvance) { setAutoProgress(0); return; }
+    const start = Date.now();
+    setAutoProgress(0);
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      setAutoProgress(Math.min((elapsed / autoAdvanceMs) * 100, 100));
+      if (elapsed >= autoAdvanceMs) {
+        clearInterval(id);
+        const st = useQueueStore.getState();
+        const fi = st.getActiveFlatSlideIndex();
+        const fl = st.getFlatSlideList();
+        if (isLoop && fi >= fl.length - 1) { st.setActiveFlatSlide(0); } else { nextLyricSlide(); }
+      }
+    }, 100);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAdvance, autoAdvanceMs, activeItemIndex, activeLyricSlideIndex, isLoop]);
+
+  // Sync modal state to refs (so keyboard handler sees latest value without stale closure)
+  useEffect(() => { showQuickSearchRef.current = showQuickSearch; }, [showQuickSearch]);
+  useEffect(() => { showCheatSheetRef.current = showCheatSheet; }, [showCheatSheet]);
+
+  // serviceNotes: load from localStorage when service changes, save on change
+  useEffect(() => {
+    if (!currentService) { setServiceNotes(""); return; }
+    setServiceNotes(localStorage.getItem(`notes_${currentService.id}`) ?? "");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentService?.id]);
 
   // Live clock
   useEffect(() => {
@@ -76,16 +190,44 @@ export default function ControllerPage() {
     return () => clearInterval(id);
   }, []);
 
+  // Heartbeat: detect when output window connects/disconnects
+  useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const TIMEOUT_MS = 8000; // 2x heartbeat interval
+
+    const resetTimer = () => {
+      setOutputConnected(true);
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => setOutputConnected(false), TIMEOUT_MS);
+    };
+
+    let mounted = true;
+    let unlisten: (() => void) | null = null;
+    ipc.onHeartbeat(resetTimer).then((fn) => {
+      if (mounted) unlisten = fn;
+      else fn();
+    });
+
+    return () => {
+      mounted = false;
+      if (timeoutId) clearTimeout(timeoutId);
+      unlisten?.();
+    };
+  }, []);
+
   const { outputDisplayId, setOutputDisplayId } = useSettingsStore();
-  const [displays, setDisplays] = useState<Array<{ id: number; name: string; x: number; y: number; width: number; height: number }>>([]);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const selectedDisplayIdx = outputDisplayId >= 0 ? outputDisplayId : 0;
 
   useEffect(() => {
     ipc.getDisplays().then((result) => {
-      const list = result as Array<{ id: number; name: string; x: number; y: number; width: number; height: number }>;
+      const list = result as DisplayInfo[];
       if (list && list.length > 0) {
         setDisplays(list);
-        if (outputDisplayId < 0 && list.length > 1) setOutputDisplayId(1);
+        if (outputDisplayId < 0 && list.length > 1) {
+          const secondaryIdx = list.findIndex((d) => !d.is_primary);
+          setOutputDisplayId(secondaryIdx >= 0 ? secondaryIdx : 1);
+        }
       }
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,6 +240,7 @@ export default function ControllerPage() {
   }, [setLayerConfig]);
 
   useEffect(() => {
+    let mounted = true;
     let unlisten: (() => void) | null = null;
     ipc.onOutputReady(() => {
       const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av } = useOutputStore.getState();
@@ -105,11 +248,35 @@ export default function ControllerPage() {
       const toSend: LayerConfig = cleared
         ? { ...lc, subtitle: { ...lc.subtitle, visible: false, lines: [] }, canvas: undefined }
         : lc;
-      ipc.sendSlideUpdate(toSend);
+      // Compute meta for Stage Display
+      const qState = useQueueStore.getState();
+      const item = qState.getActiveItem();
+      const slide = qState.getActiveLyricSlide();
+      const flatList = qState.getFlatSlideList();
+      const flatIdx = qState.getActiveFlatSlideIndex();
+      const nextEntry = flatIdx >= 0 && flatIdx + 1 < flatList.length ? flatList[flatIdx + 1] : null;
+      const readyMeta: SlideMeta | undefined = item ? {
+        songTitle: item.song?.title ?? item.label ?? item.type,
+        section: slide?.section ?? "verse",
+        slideIndex: qState.activeLyricSlideIndex,
+        totalSlides: item.song?.lyrics_json.length ?? 1,
+        itemIndex: qState.activeItemIndex,
+        totalItems: qState.currentService?.items.length ?? 0,
+        nextLines: nextEntry?.slide.lines,
+        nextSection: nextEntry?.slide.section,
+      } : undefined;
+      ipc.sendSlideUpdate(toSend, readyMeta);
       ipc.sendBlackout(bo);
       ipc.sendAlert(at, av);
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+      ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
+    }).then((fn) => {
+      if (mounted) unlisten = fn;
+      else fn();
+    });
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -143,23 +310,93 @@ export default function ControllerPage() {
       canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
     };
     setLayerConfig(newConfig);
-    ipc.sendSlideUpdate(newConfig);
+
+    // Build SlideMeta for Stage Display
+    const { getFlatSlideList, getActiveFlatSlideIndex } = useQueueStore.getState();
+    const flatList = getFlatSlideList();
+    const flatIdx = getActiveFlatSlideIndex();
+    const nextEntry = flatIdx >= 0 && flatIdx + 1 < flatList.length ? flatList[flatIdx + 1] : null;
+    const slideMeta: SlideMeta = {
+      songTitle: item.song?.title ?? item.label ?? item.type,
+      section: slide?.section ?? "verse",
+      slideIndex: activeLyricSlideIndex,
+      totalSlides: item.song?.lyrics_json.length ?? 1,
+      itemIndex: activeItemIndex,
+      totalItems: currentService?.items.length ?? 0,
+      nextLines: nextEntry?.slide.lines,
+      nextSection: nextEntry?.slide.section,
+    };
+
+    ipc.sendSlideUpdate(newConfig, slideMeta);
   }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, isLive, isClear, setLayerConfig]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+      // ⌘+S / Ctrl+S: 어디서든 저장
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        handleSaveRef.current();
+        return;
+      }
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable) return;
+      // When a modal is open, only Escape should fire
+      if ((showQuickSearchRef.current || showCheatSheetRef.current) && e.key !== "Escape") return;
       switch (e.key) {
         case " ":
           e.preventDefault();
-          nextLyricSlide();
+          if (isLoop) {
+            const st = useQueueStore.getState();
+            const fi = st.getActiveFlatSlideIndex();
+            const fl = st.getFlatSlideList();
+            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
+          } else {
+            nextLyricSlide();
+          }
           break;
         case "ArrowRight":
-          nextLyricSlide();
+          if (isLoop) {
+            const st = useQueueStore.getState();
+            const fi = st.getActiveFlatSlideIndex();
+            const fl = st.getFlatSlideList();
+            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
+          } else {
+            nextLyricSlide();
+          }
           break;
         case "ArrowLeft":
-          prevLyricSlide();
+          if (isLoop) {
+            const st = useQueueStore.getState();
+            const fi = st.getActiveFlatSlideIndex();
+            if (fi <= 0) { const fl = st.getFlatSlideList(); st.setActiveFlatSlide(fl.length - 1); }
+            else prevLyricSlide();
+          } else {
+            prevLyricSlide();
+          }
+          break;
+        case "ArrowDown":
+          if (isLoop) {
+            const st = useQueueStore.getState();
+            const fi = st.getActiveFlatSlideIndex();
+            const fl = st.getFlatSlideList();
+            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
+          } else {
+            nextLyricSlide();
+          }
+          break;
+        case "ArrowUp":
+          if (isLoop) {
+            const st = useQueueStore.getState();
+            const fi = st.getActiveFlatSlideIndex();
+            if (fi <= 0) { const fl = st.getFlatSlideList(); st.setActiveFlatSlide(fl.length - 1); }
+            else prevLyricSlide();
+          } else {
+            prevLyricSlide();
+          }
+          break;
+        case "F5":
+          e.preventDefault();
+          setIsLive((v) => !v);
           break;
         case "b":
         case "B": {
@@ -176,6 +413,64 @@ export default function ControllerPage() {
         case "L":
           setIsLoop((prev) => !prev);
           break;
+        case "o":
+        case "O":
+          openOutputRef.current();
+          break;
+        case "Home":
+          e.preventDefault();
+          useQueueStore.getState().setActiveFlatSlide(0);
+          break;
+        case "End": {
+          e.preventDefault();
+          const fl = useQueueStore.getState().getFlatSlideList();
+          if (fl.length > 0) useQueueStore.getState().setActiveFlatSlide(fl.length - 1);
+          break;
+        }
+        case "PageDown": {
+          const st = useQueueStore.getState();
+          const svc = st.currentService;
+          if (svc && st.activeItemIndex < svc.items.length - 1) st.setActiveItem(st.activeItemIndex + 1);
+          break;
+        }
+        case "PageUp": {
+          const st = useQueueStore.getState();
+          if (st.activeItemIndex > 0) st.setActiveItem(st.activeItemIndex - 1);
+          break;
+        }
+        case "f":
+        case "F":
+          setIsFrozen((prev) => {
+            ipc.sendFreeze(!prev);
+            if (prev) ipc.sendSlideUpdate(useOutputStore.getState().layerConfig);
+            return !prev;
+          });
+          break;
+        case "t":
+        case "T":
+          setAutoAdvance((v) => !v);
+          break;
+        case "/":
+          e.preventDefault();
+          setShowQuickSearch(true);
+          break;
+        case "?":
+          setShowCheatSheet(true);
+          break;
+        case "Escape":
+          if (isBlackout) { setBlackout(false); ipc.sendBlackout(false); }
+          setIsClear(false);
+          setShowQuickSearch(false);
+          setShowCheatSheet(false);
+          setCtrlNotice(null);
+          break;
+        case "1": case "2": case "3": case "4": case "5":
+        case "6": case "7": case "8": case "9": {
+          const idx = parseInt(e.key) - 1;
+          const svc = useQueueStore.getState().currentService;
+          if (svc && idx < svc.items.length) useQueueStore.getState().setActiveItem(idx);
+          break;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -205,12 +500,14 @@ export default function ControllerPage() {
       const songNow = useQueueStore.getState().currentService?.items.find((i) => i.song?.id === songId)?.song;
       if (!songNow) return;
       const lyricsSnapshot = songNow.lyrics_json;
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(async () => {
+      const existingTimer = saveTimersRef.current.get(songId);
+      if (existingTimer) clearTimeout(existingTimer);
+      saveTimersRef.current.set(songId, setTimeout(async () => {
+        saveTimersRef.current.delete(songId);
         try { await songDb.update(songId, { lyrics_json: lyricsSnapshot }); } catch (err) {
           console.error("Failed to save canvas:", err);
         }
-      }, 600);
+      }, 600));
     },
     [isLive, isClear, setLayerConfig, updateSlideCanvas]
   );
@@ -341,34 +638,57 @@ export default function ControllerPage() {
     try {
       await songDb.update(song.id, { lyrics_json: newLyrics });
       const updated = await serviceDb.get(currentService.id);
-      if (updated) useQueueStore.getState().setCurrentService(updated);
+      if (updated) {
+        const st = useQueueStore.getState();
+        st.updateServiceData(updated);
+        const fl = st.getFlatSlideList();
+        const ni = fl.findIndex((f) => f.serviceItemIndex === entry.serviceItemIndex && f.slideIndex === entry.slideIndex + 1);
+        if (ni >= 0) st.setActiveFlatSlide(ni);
+      }
     } catch (e) { console.error(e); }
+  }
+
+  async function handleDupSlide() {
+    const state = useQueueStore.getState();
+    const svc = state.currentService;
+    if (!svc) return;
+    const list = state.getFlatSlideList();
+    const idx = state.getActiveFlatSlideIndex();
+    const entry = idx >= 0 ? list[idx] : null;
+    if (!entry) return;
+    const song = svc.items[entry.serviceItemIndex]?.song;
+    if (!song) return;
+    const newSlide: LyricSlide = { ...entry.slide, id: newSlideId() };
+    const newLyrics = [...song.lyrics_json];
+    newLyrics.splice(entry.slideIndex + 1, 0, newSlide);
+    try {
+      await songDb.update(song.id, { lyrics_json: newLyrics });
+      const updated = await serviceDb.get(svc.id);
+      if (updated) {
+        state.updateServiceData(updated);
+        const fl = state.getFlatSlideList();
+        const ni = fl.findIndex((f) => f.serviceItemIndex === entry.serviceItemIndex && f.slideIndex === entry.slideIndex + 1);
+        if (ni >= 0) state.setActiveFlatSlide(ni);
+      }
+    } catch (e) { console.error("[dupSlide]", e); }
   }
 
   async function handleInsertImage() {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }],
-      });
-      if (!selected || typeof selected !== "string") return;
+      const mediaItem = await importMediaFile("image");
+      if (!mediaItem) return;
       const { convertFileSrc } = await import("@tauri-apps/api/core");
-      const src = convertFileSrc(selected);
+      const src = convertFileSrc(mediaItem.file_path);
       handleLayerChange({ ...layerConfig, background: { ...layerConfig.background, type: "image", src, opacity: 1 } });
     } catch (e) { console.error("[handleInsertImage]", e); }
   }
 
   async function handleInsertVideo() {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({
-        multiple: false,
-        filters: [{ name: "비디오", extensions: ["mp4", "mov", "avi", "webm", "mkv"] }],
-      });
-      if (!selected || typeof selected !== "string") return;
+      const mediaItem = await importMediaFile("video");
+      if (!mediaItem) return;
       const { convertFileSrc } = await import("@tauri-apps/api/core");
-      const src = convertFileSrc(selected);
+      const src = convertFileSrc(mediaItem.file_path);
       handleLayerChange({ ...layerConfig, background: { ...layerConfig.background, type: "video", src, loop: true, opacity: 1 } });
     } catch (e) { console.error("[handleInsertVideo]", e); }
   }
@@ -420,9 +740,14 @@ export default function ControllerPage() {
     }
     try {
       await serviceDb.saveItems(svc.id, svc.items);
-      store.setIsDirty(false);
+      const reloaded = await serviceDb.get(svc.id);
+      if (reloaded) store.updateServiceData(reloaded);
+      else store.setIsDirty(false);
     } catch (e) {
       console.error("[save]", e);
+      setCtrlNotice({ msg: "저장에 실패했습니다. 다시 시도해 주세요." , error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 5000);
     }
   }, []);
 
@@ -434,7 +759,9 @@ export default function ControllerPage() {
     try {
       const newId = await serviceDb.create(name, date);
       await serviceDb.saveItems(newId, svc.items);
-      store.updateCurrentServiceMeta({ id: newId, name, date });
+      const reloaded = await serviceDb.get(newId);
+      if (reloaded) store.updateServiceData(reloaded);
+      else store.updateCurrentServiceMeta({ id: newId, name, date });
       setShowSaveModal(false);
     } catch (e) {
       console.error("[saveAs]", e);
@@ -463,6 +790,12 @@ export default function ControllerPage() {
   useEffect(() => { handleSaveRef.current = handleSave; });
   const handleNewServiceRef = useRef(handleNewService);
   useEffect(() => { handleNewServiceRef.current = handleNewService; });
+  const handleNewSlideRef = useRef(handleNewSlide);
+  useEffect(() => { handleNewSlideRef.current = handleNewSlide; });
+  const handleDupSlideRef = useRef(handleDupSlide);
+  useEffect(() => { handleDupSlideRef.current = handleDupSlide; });
+  const handleInsertImageRef = useRef(handleInsertImage);
+  useEffect(() => { handleInsertImageRef.current = handleInsertImage; });
 
   // Tauri native menu event listeners
   useEffect(() => {
@@ -484,6 +817,20 @@ export default function ControllerPage() {
           listen("menu:open-service",      () => setShowServiceList(true)),
           listen("menu:save-service",      () => handleSaveRef.current()),
           listen("menu:save-as",           () => setShowSaveModal(true)),
+          listen("menu:new-slide",         () => handleNewSlideRef.current()),
+          listen("menu:dup-slide",         () => handleDupSlideRef.current()),
+          listen("menu:add-media",         () => handleInsertImageRef.current()),
+          listen("menu:add-scripture",     () => {
+            setShowPanel(true);
+            setRightTab("queue");
+            window.dispatchEvent(new CustomEvent("worship:open-scripture-tab"));
+          }),
+          listen("menu:open-stage",        () => {
+            ipc.openStageWindow().catch(console.error);
+            setIsStageOpen(true);
+          }),
+          // Sync isStageOpen when stage window is closed via OS close button
+          ipc.onStageClosed(() => setIsStageOpen(false)),
         ]);
       } catch (e) { console.error("[menu setup]", e); }
     }
@@ -492,10 +839,8 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const slides = useMemo(() => getFlatSlideList(), [currentService]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const flatIdx = useMemo(() => getActiveFlatSlideIndex(), [currentService, activeItemIndex, activeLyricSlideIndex]);
+  const slides = getFlatSlideList();
+  const flatIdx = getActiveFlatSlideIndex();
 
   // 슬라이드가 활성화된 후 대기 중인 addBlock 실행
   useEffect(() => {
@@ -513,12 +858,37 @@ export default function ControllerPage() {
       <div className="h-9 flex items-center gap-1.5 px-3 border-b border-zinc-700 bg-[#3c3c3c] flex-shrink-0 text-xs">
         <span className="font-bold text-zinc-200 tracking-wide mr-1">✝ Worship</span>
         <div className="w-px h-5 bg-zinc-600" />
-        <span className="text-zinc-400 truncate max-w-[140px]">
-          {currentService?.name ?? "예배 없음"}{isDirty ? " *" : ""}
+        <span className="text-zinc-400 truncate max-w-[120px]">
+          {currentService?.name ?? "예배 없음"}
         </span>
+        {isDirty && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-600 text-amber-100 font-semibold shrink-0">미저장</span>
+        )}
+        {ctrlNotice && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded bg-red-800 text-red-100 font-semibold shrink-0 cursor-pointer"
+            onClick={() => setCtrlNotice(null)}
+            title="클릭하여 닫기"
+          >
+            ⚠ {ctrlNotice.msg} ✕
+          </span>
+        )}
+        {slides.length > 0 && (
+          <span className="text-[10px] text-zinc-500 shrink-0">{flatIdx + 1}/{slides.length}</span>
+        )}
+        {(() => {
+          const next = flatIdx >= 0 && flatIdx + 1 < slides.length ? slides[flatIdx + 1] : null;
+          const nextText = next ? (next.slide.lines[0] ?? "빈 슬라이드") : null;
+          return nextText ? (
+            <span className="text-[10px] text-zinc-500 shrink-0 max-w-[180px] truncate hidden md:inline" title={next!.slide.lines.join(" / ")}>
+              다음: <span className="text-zinc-300">{nextText}</span>
+            </span>
+          ) : null;
+        })()}
         <div className="flex-1" />
 
         <button onClick={() => setIsLive((v) => !v)}
+          title="라이브/대기 전환 (F5)"
           className={`flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${isLive ? "bg-green-700 hover:bg-green-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${isLive ? "bg-green-300" : "bg-zinc-500"}`} />
           {isLive ? "라이브" : "대기"}
@@ -535,6 +905,34 @@ export default function ControllerPage() {
           title="화면 지우기 (C)">
           {isClear ? "● 지우기" : "지우기"}
         </button>
+
+        <button
+          onClick={() => setIsFrozen((prev) => { ipc.sendFreeze(!prev); if (prev) ipc.sendSlideUpdate(useOutputStore.getState().layerConfig); return !prev; })}
+          className={`px-2 py-0.5 rounded font-semibold ${isFrozen ? "bg-purple-700 hover:bg-purple-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
+          title="출력 고정 (F) - 탐색 중 화면 유지">
+          {isFrozen ? "● 고정" : "고정"}
+        </button>
+
+        <div className={`flex items-center rounded overflow-hidden border ${autoAdvance ? "border-teal-600" : "border-zinc-600"}`}>
+          <button
+            onClick={() => setAutoAdvance((v) => !v)}
+            className={`px-2 py-0.5 font-semibold relative overflow-hidden text-xs ${autoAdvance ? "bg-teal-700 hover:bg-teal-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
+            title="자동 넘기기 (T)">
+            {autoAdvance ? `⏱ ${Math.max(1, Math.ceil((autoAdvanceMs * (1 - autoProgress / 100)) / 1000))}s` : "자동"}
+            {autoAdvance && <div style={{ position: "absolute", bottom: 0, left: 0, height: 2, width: `${autoProgress}%`, backgroundColor: "#2dd4bf" }} />}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setAutoAdvanceMs((v) => Math.max(1000, v - 1000)); }}
+            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs"
+            title="1초 감소">−</button>
+          <span className="px-1 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] min-w-[24px] text-center border-l border-zinc-600">
+            {autoAdvanceMs / 1000}s
+          </span>
+          <button
+            onClick={(e) => { e.stopPropagation(); setAutoAdvanceMs((v) => Math.min(30000, v + 1000)); }}
+            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs"
+            title="1초 증가">+</button>
+        </div>
 
         <div className="w-px h-5 bg-zinc-600" />
 
@@ -556,7 +954,75 @@ export default function ControllerPage() {
 
         <button onClick={openOutput}
           className="px-2 py-0.5 bg-blue-700 hover:bg-blue-600 rounded text-white font-medium" title="출력창 열기">
-          📺 출력창
+          📺 출력창 <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: outputConnected ? "#4ade80" : "#6b7280", marginLeft: 2, verticalAlign: "middle" }} title={outputConnected ? "연결됨" : "연결 안됨"} />
+        </button>
+
+        <button
+          onClick={() => {
+            if (isStageOpen) {
+              ipc.closeStageWindow().catch(console.error);
+              setIsStageOpen(false);
+            } else {
+              ipc.openStageWindow().catch(console.error);
+              setIsStageOpen(true);
+            }
+          }}
+          className={`px-2 py-0.5 rounded font-medium ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
+          title="Stage Display 발표자 모니터">
+          🎤 Stage
+        </button>
+
+        <div className="w-px h-5 bg-zinc-600" />
+
+        {/* Countdown Timer Control */}
+        <div className={`flex items-center rounded overflow-hidden border ${countdownActive ? "border-violet-600" : "border-zinc-600"}`}>
+          <button
+            onClick={() => {
+              if (countdownActive) {
+                setCountdownActive(false);
+                ipc.sendCountdown({ active: false, remainingMs: countdownRemainingMs, totalMs: countdownTotalMsRef.current });
+              } else {
+                const totalMs = countdownMin * 60 * 1000;
+                countdownTotalMsRef.current = totalMs;
+                setCountdownRemainingMs(totalMs);
+                setCountdownActive(true);
+                ipc.sendCountdown({ active: true, remainingMs: totalMs, totalMs });
+              }
+            }}
+            className={`px-2 py-0.5 font-semibold text-xs ${countdownActive ? "bg-violet-700 hover:bg-violet-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
+            title="카운트다운 시작/정지">
+            {countdownActive ? `⏳ ${Math.ceil(countdownRemainingMs / 60000) > 0 ? `${Math.floor(countdownRemainingMs / 60000)}:${String(Math.floor((countdownRemainingMs % 60000) / 1000)).padStart(2, "0")}` : "0:00"}` : "카운트"}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!countdownActive) setCountdownMin((v) => Math.max(1, v - 1)); }}
+            disabled={countdownActive}
+            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs disabled:opacity-40">−</button>
+          <span className="px-1 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] min-w-[24px] text-center border-l border-zinc-600">{countdownMin}m</span>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!countdownActive) setCountdownMin((v) => Math.min(60, v + 1)); }}
+            disabled={countdownActive}
+            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs disabled:opacity-40">+</button>
+          {(countdownActive || countdownRemainingMs < countdownMin * 60 * 1000) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setCountdownActive(false);
+                const totalMs = countdownMin * 60 * 1000;
+                countdownTotalMsRef.current = totalMs;
+                setCountdownRemainingMs(totalMs);
+                ipc.sendCountdown({ active: false, remainingMs: totalMs, totalMs });
+              }}
+              className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-white border-l border-zinc-600 text-xs"
+              title="리셋">↺</button>
+          )}
+        </div>
+
+        {clock && <span className="text-[11px] text-zinc-400 tabular-nums shrink-0 font-mono">{clock}</span>}
+
+        <button onClick={() => setShowCheatSheet(true)}
+          className="px-1.5 py-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700"
+          title="단축키 도움말 (?)">
+          ?
         </button>
 
         <button onClick={() => setShowPanel((v) => !v)}
@@ -578,8 +1044,22 @@ export default function ControllerPage() {
             {tab === "home" ? "홈" : "삽입"}
           </button>
         ))}
-        {["디자인", "전환", "애니메이션", "슬라이드 쇼", "검토", "보기"].map((t) => (
-          <span key={t} className="px-3 h-full flex items-center text-zinc-600 text-xs">{t}</span>
+        {([
+          ["design", "디자인"],
+          ["transition", "전환"],
+          ["animation", "애니메이션"],
+          ["slideshow", "슬라이드 쇼"],
+          ["review", "검토"],
+          ["view", "보기"],
+        ] as [RibbonTab, string][]).map(([val, label]) => (
+          <button key={val} onClick={() => setRibbonTab(val)}
+            className={`px-3 h-full text-xs transition-colors ${
+              ribbonTab === val
+                ? "text-white border-b-2 border-blue-500 bg-[#2d2d2d]"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}>
+            {label}
+          </button>
         ))}
       </div>
 
@@ -663,6 +1143,155 @@ export default function ControllerPage() {
           <button onClick={() => setIsLoop((v) => !v)}
             className={`px-2 h-6 rounded ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
             ↺ {isLoop ? "루프 ON" : "루프"}
+          </button>
+        </>)}
+
+        {ribbonTab === "design" && (<>
+          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
+            <span className="text-zinc-400 text-[10px] mr-1">테마</span>
+            {([
+              { label: "어두운", bg: "#000000", text: "#ffffff" },
+              { label: "밝은",   bg: "#ffffff", text: "#000000" },
+              { label: "파랑",   bg: "#001040", text: "#ffffff" },
+              { label: "붉은",   bg: "#1a0000", text: "#ff9090" },
+              { label: "남색",   bg: "#0a0a1e", text: "#e0e0ff" },
+            ] as const).map(({ label, bg, text }) => (
+              <button key={label} title={label}
+                onClick={() => handleLayerChange({
+                  ...layerConfig,
+                  background: { ...layerConfig.background, type: "color", color: bg },
+                  subtitle: { ...layerConfig.subtitle, color: text },
+                })}
+                className="flex flex-col items-center gap-0.5 px-1 py-0.5 rounded hover:bg-zinc-700">
+                <div className="w-8 h-5 rounded border border-zinc-600 flex items-center justify-center"
+                  style={{ background: bg }}>
+                  <span style={{ fontSize: 7, color: text, fontWeight: "bold" }}>Aa</span>
+                </div>
+                <span className="text-[8px] text-zinc-400">{label}</span>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => { setShowPanel(true); setRightTab("settings"); }}
+            className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+            <span className="text-base leading-none">🎨</span>
+            <span className="text-[9px] mt-0.5">디자인 패널</span>
+          </button>
+        </>)}
+
+        {ribbonTab === "transition" && (<>
+          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
+            <span className="text-zinc-400 text-[10px] mr-1">전환 속도</span>
+            {([
+              { label: "없음",   ms: 0 },
+              { label: "빠름",   ms: 150 },
+              { label: "보통",   ms: 300 },
+              { label: "느림",   ms: 600 },
+            ] as const).map(({ label, ms }) => (
+              <button key={ms}
+                onClick={() => handleLayerChange({ ...layerConfig, transitionMs: ms })}
+                className={`px-2 h-6 rounded text-[10px] ${
+                  (layerConfig.transitionMs ?? 250) === ms
+                    ? "bg-blue-600 text-white"
+                    : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-zinc-500 text-[10px]">슬라이드 간 페이드 전환 속도</span>
+        </>)}
+
+        {ribbonTab === "animation" && (<>
+          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
+            <span className="text-zinc-400 text-[10px] mr-1">텍스트 입장</span>
+            {([
+              { label: "없음",    val: "none"     as const },
+              { label: "페이드인", val: "fade"     as const },
+              { label: "위로",    val: "slide-up" as const },
+            ]).map(({ label, val }) => (
+              <button key={val}
+                onClick={() => setSubtitle({ textEntrance: val })}
+                className={`px-2 h-6 rounded text-[10px] ${
+                  (layerConfig.subtitle.textEntrance ?? "fade") === val
+                    ? "bg-blue-600 text-white"
+                    : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"
+                }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="text-zinc-500 text-[10px]">새 슬라이드 표시 시 텍스트 효과</span>
+        </>)}
+
+        {ribbonTab === "slideshow" && (<>
+          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-2">
+            <button onClick={() => { useQueueStore.getState().setActiveFlatSlide(0); openOutput(); }}
+              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <span className="text-base leading-none">⏮</span>
+              <span className="text-[9px] mt-0.5">처음부터</span>
+            </button>
+            <button onClick={openOutput}
+              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <span className="text-base leading-none">▶</span>
+              <span className="text-[9px] mt-0.5">현재부터</span>
+            </button>
+            <button onClick={() => ipc.closeOutputWindow().catch(() => {})}
+              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
+              <span className="text-base leading-none">⏹</span>
+              <span className="text-[9px] mt-0.5">종료</span>
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setIsLoop((v) => !v)}
+              className={`px-2 h-6 rounded text-[10px] ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
+              ↺ 루프
+            </button>
+            <button onClick={() => { const n = !isBlackout; setBlackout(n); ipc.sendBlackout(n); }}
+              className={`px-2 h-6 rounded text-[10px] ${isBlackout ? "bg-red-700 text-red-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
+              ● 블랙
+            </button>
+            <button onClick={() => setIsClear((v) => !v)}
+              className={`px-2 h-6 rounded text-[10px] ${isClear ? "bg-orange-700 text-orange-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
+              지우기
+            </button>
+          </div>
+        </>)}
+
+        {ribbonTab === "review" && (<>
+          <div className="flex items-center gap-2">
+            <span className="text-zinc-400 text-[10px]">예배 메모</span>
+            <input
+              type="text"
+              placeholder="운영 메모 (로컬 저장)..."
+              value={serviceNotes}
+              onChange={(e) => {
+                setServiceNotes(e.target.value);
+                if (currentService) localStorage.setItem(`notes_${currentService.id}`, e.target.value);
+              }}
+              className="bg-[#3c3c3c] border border-zinc-600 rounded px-2 py-0.5 text-white w-72 text-xs outline-none focus:border-blue-500"
+            />
+            <span className="text-zinc-600 text-[10px]">* 투사 화면에 표시되지 않음</span>
+          </div>
+        </>)}
+
+        {ribbonTab === "view" && (<>
+          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
+            <span className="text-zinc-400 text-[10px] mr-1">줌</span>
+            <input type="range" min={25} max={200} step={5} value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              className="w-20 accent-zinc-400" />
+            <span className="text-zinc-300 text-[10px] w-8 tabular-nums">{zoom}%</span>
+            {([50, 85, 100, 150] as const).map((z) => (
+              <button key={z} onClick={() => setZoom(z)}
+                className={`px-1.5 h-6 rounded text-[10px] ${zoom === z ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
+                {z}%
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setShowPanel((v) => !v)}
+            className={`flex flex-col items-center px-2 py-0.5 rounded ${showPanel ? "bg-zinc-600 text-white" : "hover:bg-zinc-700 text-zinc-300"}`}>
+            <span className="text-base leading-none">☰</span>
+            <span className="text-[9px] mt-0.5">패널</span>
           </button>
         </>)}
 
@@ -777,7 +1406,7 @@ export default function ControllerPage() {
               ))}
             </div>
             {/* Slide canvas */}
-            <div className="flex-1 flex items-center justify-center overflow-auto relative">
+            <div className="flex-1 flex items-center justify-center overflow-hidden relative">
               {!currentService && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#1e1e1e] z-10 text-center gap-3">
                   <span className="text-4xl">✝</span>
@@ -839,19 +1468,21 @@ export default function ControllerPage() {
         <div className="flex-1" />
 
         {/* 이전/다음 */}
-        <button onClick={isLoop ? undefined : prevLyricSlide} disabled={flatIdx <= 0 || isLoop}
+        <button onClick={() => { if (isLoop && flatIdx <= 0) useQueueStore.getState().setActiveFlatSlide(slides.length - 1); else prevLyricSlide(); }} disabled={!isLoop && flatIdx <= 0}
           className="px-1.5 py-0.5 rounded hover:bg-zinc-700 disabled:opacity-30 text-zinc-400">←</button>
-        <button onClick={isLoop ? undefined : nextLyricSlide} disabled={flatIdx >= slides.length - 1 || isLoop}
+        <button onClick={() => { if (isLoop && flatIdx >= slides.length - 1) useQueueStore.getState().setActiveFlatSlide(0); else nextLyricSlide(); }} disabled={!isLoop && flatIdx >= slides.length - 1}
           className="px-1.5 py-0.5 rounded hover:bg-zinc-700 disabled:opacity-30 text-zinc-400">→</button>
 
         <div className="w-px h-4 bg-zinc-700" />
 
         {/* 모니터 선택 */}
-        {displays.length > 1 && (
+        {displays.length > 0 && (
           <select value={selectedDisplayIdx} onChange={(e) => setOutputDisplayId(Number(e.target.value))}
             className="bg-zinc-800 border border-zinc-700 rounded px-1 py-0 text-zinc-400 outline-none">
             {displays.map((d, i) => (
-              <option key={d.id} value={i}>{d.name || `모니터 ${i + 1}`}</option>
+              <option key={d.id} value={i}>
+                {d.is_primary ? "주 모니터" : `모니터 ${i + 1}`} ({d.width}×{d.height})
+              </option>
             ))}
           </select>
         )}
@@ -881,6 +1512,8 @@ export default function ControllerPage() {
         <ServiceListModal
           onLoad={handleLoadService}
           onClose={() => setShowServiceList(false)}
+          currentServiceId={currentService?.id}
+          onDeleteCurrent={() => useQueueStore.getState().setCurrentService(null)}
         />
       )}
       {showSaveModal && (
@@ -890,6 +1523,15 @@ export default function ControllerPage() {
           onClose={() => setShowSaveModal(false)}
         />
       )}
+      {showQuickSearch && (
+        <QuickSearchModal
+          slides={slides}
+          activeIdx={flatIdx}
+          onSelect={(idx) => useQueueStore.getState().setActiveFlatSlide(idx)}
+          onClose={() => setShowQuickSearch(false)}
+        />
+      )}
+      {showCheatSheet && <ShortcutCheatSheet onClose={() => setShowCheatSheet(false)} />}
     </ErrorBoundary>
   );
 }

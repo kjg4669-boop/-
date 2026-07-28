@@ -1,0 +1,155 @@
+"use client";
+
+import type {
+  LayerConfig,
+  BlackoutTogglePayload,
+  SlideUpdatePayload,
+  PlaybackStatusPayload,
+  AlertPayload,
+  CountdownPayload,
+  SlideMeta,
+  VideoControlPayload,
+} from "./types";
+
+// Check if running inside Tauri
+export function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+// Dynamically import Tauri APIs to avoid SSR issues
+async function getTauriEvent() {
+  if (!isTauri()) return null;
+  return import("@tauri-apps/api/event");
+}
+
+async function getTauriCore() {
+  if (!isTauri()) return null;
+  return import("@tauri-apps/api/core");
+}
+
+// Emit an event to all windows
+export async function emitEvent<T>(event: string, payload: T): Promise<void> {
+  const tauriEvent = await getTauriEvent();
+  if (!tauriEvent) {
+    console.warn("[IPC] Not in Tauri, skipping emit:", event, payload);
+    return;
+  }
+  await tauriEvent.emit(event, payload);
+}
+
+// Listen to an event
+export async function listenEvent<T>(
+  event: string,
+  callback: (payload: T) => void
+): Promise<() => void> {
+  const tauriEvent = await getTauriEvent();
+  if (!tauriEvent) {
+    console.warn("[IPC] Not in Tauri, skipping listen:", event);
+    return () => {};
+  }
+  const unlisten = await tauriEvent.listen<T>(event, (e) => callback(e.payload));
+  return unlisten;
+}
+
+// Invoke a Tauri command
+export async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const tauriCore = await getTauriCore();
+  if (!tauriCore) {
+    throw new Error("[IPC] Not in Tauri environment");
+  }
+  return tauriCore.invoke<T>(command, args);
+}
+
+// Debounce: coalesce rapid slide updates to prevent subtitle flickering
+let _pendingSlideConfig: LayerConfig | null = null;
+let _pendingMeta: SlideMeta | undefined = undefined;
+let _slideDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+// High-level IPC helpers
+export const ipc = {
+  sendSlideUpdate: (layerConfig: LayerConfig, meta?: SlideMeta): void => {
+    _pendingSlideConfig = layerConfig;
+    _pendingMeta = meta;
+    if (_slideDebounceTimer) clearTimeout(_slideDebounceTimer);
+    _slideDebounceTimer = setTimeout(() => {
+      _slideDebounceTimer = null;
+      if (_pendingSlideConfig) {
+        emitEvent<SlideUpdatePayload>("slide:update", { layerConfig: _pendingSlideConfig, meta: _pendingMeta });
+        _pendingSlideConfig = null;
+        _pendingMeta = undefined;
+      }
+    }, 30);
+  },
+
+  sendSubtitleNext: () => emitEvent("subtitle:next", {}),
+
+  sendSubtitlePrev: () => emitEvent("subtitle:prev", {}),
+
+  sendBlackout: (active: boolean) =>
+    emitEvent<BlackoutTogglePayload>("blackout:toggle", { active }),
+
+  onSlideUpdate: (cb: (config: LayerConfig) => void) =>
+    listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig)),
+
+  onSubtitleNext: (cb: () => void) => listenEvent("subtitle:next", cb),
+
+  onSubtitlePrev: (cb: () => void) => listenEvent("subtitle:prev", cb),
+
+  onBlackout: (cb: (active: boolean) => void) =>
+    listenEvent<BlackoutTogglePayload>("blackout:toggle", (p) => cb(p.active)),
+
+  onOutputReady: (cb: () => void) => listenEvent("output:ready", cb),
+
+  onPlaybackStatus: (cb: (status: PlaybackStatusPayload) => void) =>
+    listenEvent<PlaybackStatusPayload>("playback:status", cb),
+
+  sendAlert: (text: string, visible: boolean) =>
+    emitEvent<AlertPayload>("alert:show", { text, visible }),
+
+  onAlert: (cb: (text: string, visible: boolean) => void) =>
+    listenEvent<AlertPayload>("alert:show", (p) => cb(p.text, p.visible)),
+
+  sendFreeze: (active: boolean) =>
+    emitEvent<{ active: boolean }>("freeze:toggle", { active }),
+
+  onFreeze: (cb: (active: boolean) => void) =>
+    listenEvent<{ active: boolean }>("freeze:toggle", (p) => cb(p.active)),
+
+  sendOutputReady: () => emitEvent("output:ready", {}),
+
+  sendHeartbeat: () => emitEvent("heartbeat:ping", {}),
+
+  onHeartbeat: (cb: () => void) => listenEvent("heartbeat:ping", cb),
+
+  openOutputWindow: (x: number, y: number, width: number, height: number) =>
+    invokeCommand("open_output_window", { x, y, width, height }),
+
+  closeOutputWindow: () => invokeCommand("close_output_window"),
+
+  getDisplays: () => invokeCommand("get_displays"),
+
+  // Stage Display
+  openStageWindow: () => invokeCommand("open_stage_display"),
+  closeStageWindow: () => invokeCommand("close_stage_display"),
+
+  // Countdown Timer
+  sendCountdown: (payload: CountdownPayload) =>
+    emitEvent<CountdownPayload>("countdown:update", payload),
+
+  onCountdown: (cb: (payload: CountdownPayload) => void) =>
+    listenEvent<CountdownPayload>("countdown:update", cb),
+
+  // Stage: listen to slide:update with meta
+  onSlideUpdateWithMeta: (cb: (layerConfig: LayerConfig, meta?: SlideMeta) => void) =>
+    listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig, p.meta)),
+
+  // Stage closed notification (emitted from stage page on beforeunload)
+  onStageClosed: (cb: () => void) => listenEvent("stage:closed", cb),
+
+  // Video playback control
+  sendVideoControl: (payload: VideoControlPayload) =>
+    emitEvent<VideoControlPayload>("video:control", payload),
+
+  onVideoControl: (cb: (payload: VideoControlPayload) => void) =>
+    listenEvent<VideoControlPayload>("video:control", cb),
+};

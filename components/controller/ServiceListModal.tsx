@@ -7,9 +7,11 @@ import type { Service } from "@/lib/types";
 interface Props {
   onLoad: (service: Service) => void;
   onClose: () => void;
+  currentServiceId?: number;
+  onDeleteCurrent?: () => void;
 }
 
-export default function ServiceListModal({ onLoad, onClose }: Props) {
+export default function ServiceListModal({ onLoad, onClose, currentServiceId, onDeleteCurrent }: Props) {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<number | null>(null);
@@ -41,6 +43,7 @@ export default function ServiceListModal({ onLoad, onClose }: Props) {
     try {
       await serviceDb.delete(id);
       setServices((prev) => prev.filter((s) => s.id !== id));
+      if (id === currentServiceId) onDeleteCurrent?.();
     } catch (err) {
       console.error("[ServiceListModal] Failed to delete service:", err);
     }

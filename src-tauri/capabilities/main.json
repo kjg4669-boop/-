@@ -1,0 +1,20 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema/acl/capability.schema.json",
+  "identifier": "main-capability",
+  "description": "Worship Projector main window capabilities",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-read-file",
+    "fs:allow-copy-file",
+    "fs:allow-mkdir",
+    "fs:allow-exists",
+    "fs:allow-appdata-read-recursive",
+    "fs:allow-appdata-write-recursive",
+    "sql:default",
+    "sql:allow-execute"
+  ]
+}
