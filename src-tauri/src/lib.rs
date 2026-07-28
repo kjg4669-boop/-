@@ -34,6 +34,12 @@ pub fn run() {
                         sql: include_str!("../migrations/003_bible.sql"),
                         kind: tauri_plugin_sql::MigrationKind::Up,
                     },
+                    tauri_plugin_sql::Migration {
+                        version: 4,
+                        description: "add_service_notes",
+                        sql: include_str!("../migrations/004_service_notes.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
                 ])
                 .build(),
         )
