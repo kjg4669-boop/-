@@ -1,6 +1,12 @@
 -- Fix FK constraints and add updated_at trigger
 
--- Recreate songs with proper FK on media_id (SQLite requires table recreation)
+-- Step 1: Save service_items data to a temp table (no FK constraints).
+--         This breaks the service_items → songs FK reference so songs can be dropped.
+CREATE TABLE _tmp_service_items AS SELECT * FROM service_items;
+DROP TABLE service_items;
+
+-- Step 2: Recreate songs with proper FK on media_id (SQLite requires table recreation).
+--         Safe now because service_items no longer references songs.
 CREATE TABLE songs_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,
@@ -15,8 +21,9 @@ DROP TABLE songs;
 ALTER TABLE songs_new RENAME TO songs;
 CREATE INDEX IF NOT EXISTS idx_songs_title ON songs(title);
 
--- Recreate service_items with ON DELETE SET NULL for song_id and media_id
-CREATE TABLE service_items_new (
+-- Step 3: Recreate service_items with ON DELETE SET NULL for song_id and media_id,
+--         then restore the saved data.
+CREATE TABLE service_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
   item_order INTEGER NOT NULL,
@@ -26,12 +33,11 @@ CREATE TABLE service_items_new (
   settings_json TEXT DEFAULT '{}',
   label TEXT DEFAULT ''
 );
-INSERT INTO service_items_new SELECT * FROM service_items;
-DROP TABLE service_items;
-ALTER TABLE service_items_new RENAME TO service_items;
+INSERT INTO service_items SELECT * FROM _tmp_service_items;
+DROP TABLE _tmp_service_items;
 CREATE INDEX IF NOT EXISTS idx_service_items_service ON service_items(service_id);
 
--- Auto-update updated_at on songs row changes
+-- Step 4: Auto-update updated_at on songs row changes.
 CREATE TRIGGER IF NOT EXISTS songs_updated_at
   AFTER UPDATE ON songs
   FOR EACH ROW
