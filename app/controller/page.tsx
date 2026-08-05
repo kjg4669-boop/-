@@ -43,6 +43,7 @@ import ErrorToast from "@/components/ErrorToast";
 import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
 import AboutDialog from "@/components/controller/AboutDialog";
+import OnboardingGuide from "@/components/controller/OnboardingGuide";
 
 type RightTab = "queue" | "songs" | "settings";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
@@ -112,6 +113,10 @@ export default function ControllerPage() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  useEffect(() => {
+    if (!localStorage.getItem("worship-onboarding-v1")) setShowOnboarding(true);
+  }, []);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
   const [isStageOpen, setIsStageOpen] = useState(false);
@@ -1209,6 +1214,7 @@ export default function ControllerPage() {
           onClose={() => setShowTemplateModal(false)}
         />
       )}
+      {showOnboarding && <OnboardingGuide onComplete={() => setShowOnboarding(false)} />}
       <ErrorToast />
     </ErrorBoundary>
   );
