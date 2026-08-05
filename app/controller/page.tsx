@@ -47,7 +47,7 @@ import OnboardingGuide from "@/components/controller/OnboardingGuide";
 import HelpOverlay from "@/components/controller/HelpOverlay";
 
 type RightTab = "queue" | "songs" | "settings";
-type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view" | "help";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert } = useOutputStore();
@@ -875,6 +875,9 @@ export default function ControllerPage() {
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), error ? 5000 : 2000);
     },
+    setShowHelp,
+    setShowOnboarding,
+    setShowAbout,
   });
 
   useKeyboardShortcuts({
@@ -1016,8 +1019,6 @@ export default function ControllerPage() {
         onInsertSound={handleInsertSound}
         onOpenDesignPanel={handleOpenDesignPanel}
         onShowAbout={() => setShowAbout(true)}
-        onShowHelp={() => setShowHelp(true)}
-        onResetOnboarding={() => { localStorage.removeItem("worship-onboarding-v1"); setShowOnboarding(true); }}
       />
       </div>
 

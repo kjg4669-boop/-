@@ -3,7 +3,7 @@
 import type { LayerConfig } from "@/lib/types";
 import { FONT_OPTIONS } from "@/lib/constants";
 
-type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view" | "help";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
 
 type FmtPatch = {
   fontFamily?: string;
@@ -73,13 +73,11 @@ interface Props {
   onToggleSound: () => void;
   onInsertSound: () => void;
   onShowAbout: () => void;
-  onShowHelp: () => void;
-  onResetOnboarding: () => void;
 }
 
 const TAB_LABELS: Record<RibbonTab, string> = {
   home: "홈", insert: "삽입", design: "디자인", transition: "전환",
-  animation: "애니메이션", slideshow: "슬라이드 쇼", review: "검토", view: "보기", help: "도움",
+  animation: "애니메이션", slideshow: "슬라이드 쇼", review: "검토", view: "보기",
 };
 
 export default function RibbonToolbar({
@@ -95,7 +93,7 @@ export default function RibbonToolbar({
   zoom, onSetZoom, showPanel, onTogglePanel,
   hasSlides, onNewSlide, onAddBlock, onInsertImage, onInsertVideo,
   soundName, soundPlaying, onToggleSound, onInsertSound,
-  onOpenDesignPanel, onShowAbout, onShowHelp, onResetOnboarding,
+  onOpenDesignPanel, onShowAbout,
 }: Props) {
   function setSubtitle(patch: Partial<LayerConfig["subtitle"]>) {
     onLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
@@ -116,6 +114,13 @@ export default function RibbonToolbar({
           </button>
         ))}
         <div className="flex-1" />
+        <button
+          onClick={onShowAbout}
+          title="Worship Projector 정보"
+          className="px-2 h-full text-zinc-500 hover:text-zinc-300 transition-colors text-sm"
+        >
+          ?
+        </button>
       </div>
 
       {/* Row 3: 탭 콘텐츠 */}
@@ -405,26 +410,6 @@ export default function RibbonToolbar({
           </div>
         </>)}
 
-        {ribbonTab === "help" && (<>
-          <div className="flex items-center gap-1">
-            <button onClick={onShowHelp}
-              className="flex flex-col items-center px-3 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 gap-0.5">
-              <span className="text-base leading-none">🗺️</span>
-              <span className="text-[9px]">UI 가이드</span>
-            </button>
-            <button onClick={onResetOnboarding}
-              className="flex flex-col items-center px-3 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 gap-0.5">
-              <span className="text-base leading-none">📖</span>
-              <span className="text-[9px]">시작 가이드</span>
-            </button>
-            <div className="w-px h-6 bg-zinc-600 mx-1" />
-            <button onClick={onShowAbout}
-              className="flex flex-col items-center px-3 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 gap-0.5">
-              <span className="text-base leading-none">ℹ️</span>
-              <span className="text-[9px]">정보</span>
-            </button>
-          </div>
-        </>)}
 
       </div>
     </>
