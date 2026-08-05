@@ -49,6 +49,11 @@ export default function LayerSidebar({
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setVolume(1);
+    if (layerConfig.background.type === "video" && layerConfig.background.src) {
+      void ipc.sendVideoControl({ action: "volume", value: 1 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layerConfig.background.src]);
 
   // playback:status 수신 — 영상 진행 상태 동기화
@@ -59,7 +64,7 @@ export default function LayerSidebar({
       setDuration(status.duration);
       setIsPlaying(status.playing);
     });
-    return () => { unlistenPromise.then((fn) => fn()); };
+    return () => { void unlistenPromise.then((fn) => fn()); };
   }, [layerConfig.background.type]);
 
   function showNotice(msg: string) {
@@ -190,7 +195,7 @@ export default function LayerSidebar({
             <div className="flex gap-1">
               <button
                 onClick={() => {
-                  ipc.sendVideoControl({ action: isPlaying ? "pause" : "play" });
+                  void ipc.sendVideoControl({ action: isPlaying ? "pause" : "play" });
                   setIsPlaying((v) => !v);
                 }}
                 className="flex-1 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600"
@@ -198,7 +203,7 @@ export default function LayerSidebar({
                 {isPlaying ? "⏸ 일시정지" : "▶ 재생"}
               </button>
               <button
-                onClick={() => { ipc.sendVideoControl({ action: "seek", value: 0 }); setCurrentTime(0); }}
+                onClick={() => { void ipc.sendVideoControl({ action: "seek", value: 0 }); setCurrentTime(0); }}
                 className="px-2 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600"
                 title="처음으로"
               >
@@ -218,7 +223,7 @@ export default function LayerSidebar({
                   onChange={(e) => {
                     const val = Number(e.target.value);
                     setCurrentTime(val);
-                    ipc.sendVideoControl({ action: "seek", value: val });
+                    void ipc.sendVideoControl({ action: "seek", value: val });
                   }}
                   className="w-full accent-blue-500"
                 />
@@ -237,7 +242,7 @@ export default function LayerSidebar({
                 onChange={(e) => {
                   const val = Number(e.target.value);
                   setVolume(val);
-                  ipc.sendVideoControl({ action: "volume", value: val });
+                  void ipc.sendVideoControl({ action: "volume", value: val });
                 }}
                 className="flex-1 accent-blue-500"
               />
@@ -251,7 +256,7 @@ export default function LayerSidebar({
                 checked={bg.loop ?? true}
                 onChange={(e) => {
                   setBackground({ loop: e.target.checked });
-                  ipc.sendVideoControl({ action: "loop", value: e.target.checked ? 1 : 0 });
+                  void ipc.sendVideoControl({ action: "loop", value: e.target.checked ? 1 : 0 });
                 }}
                 className="accent-blue-500"
               />
@@ -264,6 +269,45 @@ export default function LayerSidebar({
       {/* ── 자막 ─────────────────────────────────────── */}
       <section className="border-b border-zinc-700 p-3 space-y-2">
         <p className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">자막</p>
+
+        {/* Layout presets */}
+        <div className="flex items-center gap-1">
+          <span className="text-zinc-400 w-10 text-[10px]">프리셋</span>
+          {([
+            { label: "기본", position: "bottom", fontSize: 48, textAlign: "center", fontWeight: "normal" },
+            { label: "대형", position: "center", fontSize: 64, textAlign: "center", fontWeight: "bold" },
+            { label: "소자막", position: "bottom", fontSize: 32, textAlign: "center", fontWeight: "normal" },
+            { label: "상단", position: "top", fontSize: 48, textAlign: "center", fontWeight: "normal" },
+          ] as const).map((preset) => (
+            <button
+              key={preset.label}
+              onClick={() => setSubtitle({ position: preset.position, fontSize: preset.fontSize, textAlign: preset.textAlign, fontWeight: preset.fontWeight, layout: "full" })}
+              className="flex-1 py-0.5 rounded text-[10px] bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-colors"
+              title={`${preset.label}: 위치=${preset.position === "bottom" ? "하단" : preset.position === "center" ? "중앙" : "상단"}, 크기=${preset.fontSize}px`}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Layout (split) */}
+        <div className="flex items-center gap-1">
+          <span className="text-zinc-400 w-10 text-[10px]">배치</span>
+          {([
+            { key: "full", label: "전체" },
+            { key: "left-half", label: "좌½" },
+            { key: "right-half", label: "우½" },
+          ] as const).map((l) => (
+            <button
+              key={l.key}
+              onClick={() => setSubtitle({ layout: l.key })}
+              className={`flex-1 py-1 rounded text-[10px] ${(sub.layout ?? "full") === l.key ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+              title={l.key === "full" ? "전체 화면 자막" : l.key === "left-half" ? "좌측 절반에만 자막 (우측 이미지)" : "우측 절반에만 자막 (좌측 이미지)"}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
 
         {/* Position */}
         <div className="flex items-center gap-1">
@@ -313,6 +357,36 @@ export default function LayerSidebar({
             className="w-8 h-6 rounded cursor-pointer border border-zinc-600 bg-transparent"
           />
           <span className="text-zinc-500">{sub.color}</span>
+        </div>
+
+        {/* Text align + weight + style */}
+        <div className="flex items-center gap-1">
+          <span className="text-zinc-400 w-10">정렬</span>
+          {(["left", "center", "right"] as const).map((align) => (
+            <button
+              key={align}
+              onClick={() => setSubtitle({ textAlign: align })}
+              className={`flex-1 py-1 rounded text-xs ${
+                (sub.textAlign ?? "center") === align ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+              }`}
+            >
+              {align === "left" ? "좌" : align === "center" ? "중" : "우"}
+            </button>
+          ))}
+          <button
+            onClick={() => setSubtitle({ fontWeight: sub.fontWeight === "bold" ? "normal" : "bold" })}
+            className={`px-2 py-1 rounded text-xs font-bold ${
+              sub.fontWeight === "bold" ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+            }`}
+            title="굵게"
+          >B</button>
+          <button
+            onClick={() => setSubtitle({ fontStyle: sub.fontStyle === "italic" ? "normal" : "italic" })}
+            className={`px-2 py-1 rounded text-xs italic ${
+              sub.fontStyle === "italic" ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
+            }`}
+            title="이탤릭"
+          >I</button>
         </div>
 
         {/* Advanced toggle */}

@@ -1,18 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { songDb } from "@/lib/db";
+import { songDb, tagDb } from "@/lib/db";
+import type { Tag } from "@/lib/db";
 import type { Song, LyricSection, LyricSlide } from "@/lib/types";
 import { newSlideId } from "@/lib/utils";
+import { SECTION_LABEL } from "@/lib/constants";
 
-const SECTION_LABELS: Record<LyricSection, string> = {
-  intro: "인트로",
-  verse: "절",
-  "pre-chorus": "프리코러스",
-  chorus: "코러스",
-  bridge: "브릿지",
-  outro: "아웃트로",
-};
+const SECTION_LABELS: Record<LyricSection, string> = SECTION_LABEL as Record<LyricSection, string>;
 
 const SECTION_OPTIONS: LyricSection[] = [
   "intro", "verse", "pre-chorus", "chorus", "bridge", "outro",
@@ -83,6 +78,40 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
   ]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set());
+  const [newTagName, setNewTagName] = useState("");
+  const TAG_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#06b6d4"];
+  const [selectedTagColor, setSelectedTagColor] = useState(TAG_COLORS[0]);
+
+  useEffect(() => {
+    tagDb.list().then(setAllTags).catch(console.error);
+    if (song?.id) {
+      tagDb.getForSong(song.id).then((tags) => setSelectedTagIds(new Set(tags.map((t) => t.id)))).catch(console.error);
+    } else {
+      setSelectedTagIds(new Set());
+    }
+  }, [song?.id]);
+
+  async function handleCreateTag() {
+    if (!newTagName.trim()) return;
+    const color = selectedTagColor;
+    try {
+      const id = await tagDb.create(newTagName.trim(), color);
+      const newTag: Tag = { id, name: newTagName.trim(), color };
+      setAllTags((prev) => [...prev, newTag]);
+      setSelectedTagIds((prev) => new Set([...prev, id]));
+      setNewTagName("");
+    } catch { /* ignore */ }
+  }
+
+  function toggleTag(tagId: number) {
+    setSelectedTagIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagId)) next.delete(tagId); else next.add(tagId);
+      return next;
+    });
+  }
 
   useEffect(() => {
     setTitle(song?.title ?? "");
@@ -100,6 +129,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
     } else {
       setBlocks([{ id: nextId(), section: "verse", text: "" }]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [song?.id, song?.updated_at]);
 
   function addBlock() {
@@ -118,31 +148,38 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
     );
   }
 
+  function splitBlock(i: number) {
+    setBlocks((prev) => {
+      const block = prev[i];
+      const lines = block.text.split("\n").filter((l) => l.trim());
+      if (lines.length < 2) return prev;
+      const mid = Math.ceil(lines.length / 2);
+      const first: BlockInput = { id: nextId(), section: block.section, text: lines.slice(0, mid).join("\n") };
+      const second: BlockInput = { id: nextId(), section: block.section, text: lines.slice(mid).join("\n") };
+      return [...prev.slice(0, i), first, second, ...prev.slice(i + 1)];
+    });
+  }
+
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
     setError(null);
     try {
       const lyrics_json = parseBlocksToSlides(blocks);
+      let savedSong: Song;
       if (song) {
         await songDb.update(song.id, { title: title.trim(), artist: artist.trim(), lyrics_json });
-        onSave({ ...song, title: title.trim(), artist: artist.trim(), lyrics_json, updated_at: new Date().toISOString() });
+        savedSong = { ...song, title: title.trim(), artist: artist.trim(), lyrics_json, updated_at: new Date().toISOString() };
       } else {
-        const id = await songDb.create({
-          title: title.trim(),
-          artist: artist.trim(),
-          lyrics_json,
-        });
+        const savedId = await songDb.create({ title: title.trim(), artist: artist.trim(), lyrics_json });
         const now = new Date().toISOString();
-        onSave({
-          id,
-          title: title.trim(),
-          artist: artist.trim(),
-          lyrics_json,
-          created_at: now,
-          updated_at: now,
-        });
+        savedSong = { id: savedId, title: title.trim(), artist: artist.trim(), lyrics_json, created_at: now, updated_at: now };
       }
+      // Save tags first so parent refresh sees correct associations
+      await Promise.all(
+        allTags.map((tag) => tagDb.setSongTag(savedSong.id, tag.id, selectedTagIds.has(tag.id)))
+      );
+      onSave(savedSong);
     } catch {
       setError("저장에 실패했습니다. 다시 시도해 주세요.");
     } finally {
@@ -163,6 +200,31 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         <span className="flex-1 text-xs text-zinc-400 truncate">
           {song ? song.title : "새 찬양"}
         </span>
+        {blocks.some((b) => b.text.split("\n").filter((l) => l.trim()).length >= 4) && (
+          <button
+            onClick={() => {
+              setBlocks((prev) => {
+                const result: BlockInput[] = [];
+                for (let i = 0; i < prev.length; i++) {
+                  const block = prev[i];
+                  const lines = block.text.split("\n").filter((l) => l.trim());
+                  if (lines.length >= 4) {
+                    const mid = Math.ceil(lines.length / 2);
+                    result.push({ id: nextId(), section: block.section, text: lines.slice(0, mid).join("\n") });
+                    result.push({ id: nextId(), section: block.section, text: lines.slice(mid).join("\n") });
+                  } else {
+                    result.push(block);
+                  }
+                }
+                return result;
+              });
+            }}
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
+            title="4줄 이상인 블록을 모두 반으로 분할"
+          >
+            전체 분할
+          </button>
+        )}
         <button
           onClick={handleSave}
           disabled={saving || !title.trim()}
@@ -216,6 +278,15 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                 ))}
               </select>
               <span className="flex-1 text-xs text-zinc-500">블록 {i + 1}</span>
+              {block.text.split("\n").filter((l) => l.trim()).length >= 4 && (
+                <button
+                  onClick={() => splitBlock(i)}
+                  className="text-zinc-400 hover:text-blue-400 text-xs px-1"
+                  title="이 블록을 반으로 분할"
+                >
+                  분할
+                </button>
+              )}
               {blocks.length > 1 && (
                 <button
                   onClick={() => removeBlock(i)}
@@ -241,6 +312,57 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         >
           + 섹션 추가
         </button>
+
+        {/* Tags */}
+        <div className="border border-zinc-700 rounded p-2 space-y-1.5">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-wide">태그</p>
+          <div className="flex flex-wrap gap-1">
+            {allTags.map((tag) => (
+              <button
+                key={tag.id}
+                onClick={() => toggleTag(tag.id)}
+                className="px-2 py-0.5 rounded-full text-[10px] border transition-all"
+                style={
+                  selectedTagIds.has(tag.id)
+                    ? { backgroundColor: tag.color, borderColor: tag.color, color: "#fff" }
+                    : { borderColor: "#52525b", color: "#a1a1aa" }
+                }
+              >
+                {tag.name}
+              </button>
+            ))}
+            {allTags.length === 0 && (
+              <span className="text-[10px] text-zinc-600">태그 없음 — 아래에서 추가</span>
+            )}
+          </div>
+          {/* Tag color picker */}
+          <div className="flex gap-1 flex-wrap">
+            {TAG_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setSelectedTagColor(c)}
+                title={c}
+                style={{ backgroundColor: c, width: 18, height: 18, borderRadius: "50%", border: selectedTagColor === c ? "2px solid white" : "2px solid transparent", flexShrink: 0 }}
+              />
+            ))}
+          </div>
+          <div className="flex gap-1">
+            <input
+              type="text"
+              placeholder="새 태그..."
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleCreateTag(); } }}
+              className="flex-1 bg-zinc-900 text-white text-xs rounded px-2 py-0.5 border border-zinc-600 outline-none focus:border-blue-500"
+            />
+            <div style={{ width: 14, height: 14, borderRadius: "50%", backgroundColor: selectedTagColor, flexShrink: 0, alignSelf: "center" }} />
+            <button
+              onClick={handleCreateTag}
+              disabled={!newTagName.trim()}
+              className="text-xs px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded"
+            >추가</button>
+          </div>
+        </div>
       </div>
     </div>
   );

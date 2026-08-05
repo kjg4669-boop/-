@@ -1,6 +1,7 @@
 "use client";
 
-import type { Song, MediaItem, Service, ServiceItem } from "./types";
+import type { Song, MediaItem, Service, ServiceItem, ServiceItemSettings } from "./types";
+import { parseLyricSlides, parseServiceItemType, parseMediaType, parseServiceItemSettings, safeJsonParse } from "./validators";
 
 let dbPromise: ReturnType<typeof openDb> | null = null;
 
@@ -61,6 +62,7 @@ interface ServiceItemRow {
   media_file_path: string | null;
   media_name: string | null;
   media_thumbnail_path: string | null;
+  notes: string;
 }
 
 // ─── Songs ──────────────────────────────────────────────────────────────────
@@ -78,8 +80,8 @@ export const songDb = {
     const conn = await getDb();
     const escaped = query.replace(/[%_\\]/g, "\\$&");
     const rows = await conn.select<SongRow[]>(
-      "SELECT * FROM songs WHERE title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' ORDER BY title ASC",
-      [`%${escaped}%`, `%${escaped}%`]
+      "SELECT * FROM songs WHERE title LIKE ? ESCAPE '\\' OR artist LIKE ? ESCAPE '\\' OR lyrics_json LIKE ? ESCAPE '\\' ORDER BY title ASC",
+      [`%${escaped}%`, `%${escaped}%`, `%${escaped}%`]
     );
     return rows.map(parseSong);
   },
@@ -114,6 +116,20 @@ export const songDb = {
     await conn.execute(`UPDATE songs SET ${sets.join(", ")} WHERE id = ?`, values);
   },
 
+  async duplicate(id: number): Promise<Song> {
+    const original = await this.get(id);
+    if (!original) throw new Error("Song not found");
+    const newId = await this.create({
+      title: `${original.title} (복사)`,
+      artist: original.artist,
+      lyrics_json: original.lyrics_json,
+      media_id: undefined,
+    });
+    const newSong = await this.get(newId);
+    if (!newSong) throw new Error("Duplicate failed");
+    return newSong;
+  },
+
   async delete(id: number): Promise<void> {
     const conn = await getDb();
     await conn.execute("BEGIN");
@@ -129,14 +145,8 @@ export const songDb = {
 };
 
 function parseSong(row: SongRow): Song {
-  let lyrics_json: import("./types").LyricSlide[] = [];
-  try {
-    lyrics_json = typeof row.lyrics_json === "string"
-      ? JSON.parse(row.lyrics_json)
-      : (row.lyrics_json ?? []);
-  } catch {
-    console.error("[db] lyrics_json 파싱 실패 (song id:", row.id, ")");
-  }
+  const raw = safeJsonParse(row.lyrics_json, [] as unknown[]);
+  const lyrics_json = parseLyricSlides(raw);
   return { ...row, media_id: row.media_id ?? undefined, lyrics_json };
 }
 
@@ -267,6 +277,11 @@ export const serviceDb = {
     await conn.execute("DELETE FROM service_items WHERE id = ?", [itemId]);
   },
 
+  async updateItemNotes(itemId: number, notes: string): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("UPDATE service_items SET notes = ? WHERE id = ?", [notes, itemId]);
+  },
+
   async updateItemSettings(itemId: number, settings: import("./types").ServiceItemSettings): Promise<void> {
     const conn = await getDb();
     await conn.execute(
@@ -343,18 +358,19 @@ function parseServiceItem(row: ServiceItemRow): ServiceItem {
     id: row.id,
     service_id: row.service_id,
     item_order: row.item_order,
-    type: row.type as ServiceItem["type"],
+    type: parseServiceItemType(row.type),
     song_id: row.song_id ?? undefined,
     media_id: row.media_id ?? undefined,
-    settings_json: (() => { try { return typeof row.settings_json === "string" ? JSON.parse(row.settings_json) : (row.settings_json ?? {}); } catch { return {}; } })(),
+    settings_json: parseServiceItemSettings(safeJsonParse(row.settings_json, {})),
     label: row.label ?? "",
+    notes: row.notes ?? "",
   };
   if (row.song_title && row.song_id != null) {
     item.song = {
       id: row.song_id,
       title: row.song_title,
       artist: row.artist ?? "",
-      lyrics_json: (() => { try { return typeof row.lyrics_json === "string" ? JSON.parse(row.lyrics_json) : []; } catch { return []; } })(),
+      lyrics_json: parseLyricSlides(safeJsonParse(row.lyrics_json, [])),
       created_at: row.song_created_at ?? "",
       updated_at: row.song_updated_at ?? "",
     };
@@ -362,7 +378,7 @@ function parseServiceItem(row: ServiceItemRow): ServiceItem {
   if (row.media_id != null && row.media_file_path) {
     item.media = {
       id: row.media_id,
-      type: (row.media_type ?? "image") as import("./types").MediaType,
+      type: parseMediaType(row.media_type),
       file_path: row.media_file_path,
       thumbnail_path: row.media_thumbnail_path ?? undefined,
       name: row.media_name ?? "",
@@ -371,3 +387,161 @@ function parseServiceItem(row: ServiceItemRow): ServiceItem {
   }
   return item;
 }
+
+// ─── Templates ──────────────────────────────────────────────────────────────
+
+export interface TemplateItem {
+  type: string;
+  song_id: number | null;
+  media_id: number | null;
+  settings_json: ServiceItemSettings;
+  label: string;
+}
+
+export interface Template {
+  id: number;
+  name: string;
+  items: TemplateItem[];
+  created_at: string;
+}
+
+interface TemplateRow {
+  id: number;
+  name: string;
+  items_json: string;
+  created_at: string;
+}
+
+function parseTemplate(row: TemplateRow): Template {
+  const items = safeJsonParse<TemplateItem[]>(row.items_json, []);
+  return { id: row.id, name: row.name, items: Array.isArray(items) ? items : [], created_at: row.created_at };
+}
+
+export const templateDb = {
+  async list(): Promise<Template[]> {
+    const conn = await getDb();
+    const rows = await conn.select<TemplateRow[]>("SELECT * FROM templates ORDER BY created_at DESC");
+    return rows.map(parseTemplate);
+  },
+
+  async create(name: string, items: TemplateItem[]): Promise<number> {
+    const conn = await getDb();
+    const result = await conn.execute(
+      "INSERT INTO templates (name, items_json) VALUES (?, ?)",
+      [name, JSON.stringify(items)]
+    );
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (templates)");
+    return id;
+  },
+
+  async delete(id: number): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("DELETE FROM templates WHERE id = ?", [id]);
+  },
+
+  async createServiceFrom(templateId: number, name: string, date: string): Promise<Service | null> {
+    const conn = await getDb();
+    const rows = await conn.select<TemplateRow[]>("SELECT * FROM templates WHERE id = ?", [templateId]);
+    if (!rows[0]) return null;
+    const template = parseTemplate(rows[0]);
+
+    await conn.execute("BEGIN");
+    try {
+      const result = await conn.execute(
+        "INSERT INTO services (name, date) VALUES (?, ?)",
+        [name, date]
+      );
+      const serviceId = result.lastInsertId;
+      if (serviceId == null) throw new Error("INSERT failed (service from template)");
+      for (let i = 0; i < template.items.length; i++) {
+        const item = template.items[i];
+        await conn.execute(
+          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
+        );
+      }
+      await conn.execute("COMMIT");
+      return serviceDb.get(serviceId);
+    } catch (err) {
+      await conn.execute("ROLLBACK");
+      throw err;
+    }
+  },
+};
+
+// ─── Tags ────────────────────────────────────────────────────────────────────
+
+export interface Tag {
+  id: number;
+  name: string;
+  color: string;
+}
+
+export const tagDb = {
+  async list(): Promise<Tag[]> {
+    const conn = await getDb();
+    return conn.select<Tag[]>("SELECT * FROM tags ORDER BY name ASC");
+  },
+
+  async create(name: string, color: string): Promise<number> {
+    const conn = await getDb();
+    const result = await conn.execute(
+      "INSERT INTO tags (name, color) VALUES (?, ?)",
+      [name, color]
+    );
+    const id = result.lastInsertId;
+    if (id == null) throw new Error("INSERT failed: no lastInsertId (tags)");
+    return id;
+  },
+
+  async delete(id: number): Promise<void> {
+    const conn = await getDb();
+    await conn.execute("DELETE FROM tags WHERE id = ?", [id]);
+  },
+
+  async getForSong(songId: number): Promise<Tag[]> {
+    const conn = await getDb();
+    return conn.select<Tag[]>(
+      "SELECT t.* FROM tags t JOIN song_tags st ON t.id = st.tag_id WHERE st.song_id = ? ORDER BY t.name ASC",
+      [songId]
+    );
+  },
+
+  async setSongTag(songId: number, tagId: number, add: boolean): Promise<void> {
+    const conn = await getDb();
+    if (add) {
+      await conn.execute(
+        "INSERT OR IGNORE INTO song_tags (song_id, tag_id) VALUES (?, ?)",
+        [songId, tagId]
+      );
+    } else {
+      await conn.execute(
+        "DELETE FROM song_tags WHERE song_id = ? AND tag_id = ?",
+        [songId, tagId]
+      );
+    }
+  },
+
+  async getSongIdsForTag(tagId: number): Promise<number[]> {
+    const conn = await getDb();
+    const rows = await conn.select<{ song_id: number }[]>(
+      "SELECT song_id FROM song_tags WHERE tag_id = ?",
+      [tagId]
+    );
+    return rows.map((r) => r.song_id);
+  },
+
+  async getAllSongTagMap(): Promise<Record<number, Tag[]>> {
+    const conn = await getDb();
+    const rows = await conn.select<{ song_id: number; id: number; name: string; color: string }[]>(
+      "SELECT st.song_id, t.id, t.name, t.color FROM song_tags st JOIN tags t ON t.id = st.tag_id ORDER BY t.name ASC"
+    );
+    const map: Record<number, Tag[]> = {};
+    for (const row of rows) {
+      if (!map[row.song_id]) map[row.song_id] = [];
+      map[row.song_id].push({ id: row.id, name: row.name, color: row.color });
+    }
+    return map;
+  },
+};

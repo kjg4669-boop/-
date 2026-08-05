@@ -102,13 +102,16 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp }
     <div
       style={{
         position: "absolute",
-        inset: 0,
+        top: 0,
+        bottom: 0,
+        left: config.layout === "right-half" ? "50%" : 0,
+        right: config.layout === "left-half" ? "50%" : 0,
         zIndex: 20,
         display: "flex",
         flexDirection: "column",
         alignItems: alignItemsMap[config.textAlign ?? "center"],
         justifyContent: positionMap[config.position],
-        padding: "48px 64px",
+        padding: `48px ${config.layout === "left-half" || config.layout === "right-half" ? "32px" : "64px"}`,
         opacity: faded ? 0 : config.opacity,
         transform: (() => {
           const parts: string[] = [];

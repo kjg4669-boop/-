@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { useErrorStore } from "@/stores/errorStore";
 
 interface Props {
   children: ReactNode;
@@ -24,8 +25,8 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary] Caught error:", error);
-    console.error("[ErrorBoundary] Stack:", error.stack);
     console.error("[ErrorBoundary] Component stack:", info.componentStack);
+    useErrorStore.getState().addError(error.message, "ErrorBoundary");
   }
 
   render() {

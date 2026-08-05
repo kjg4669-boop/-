@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo } from "react";
 import type { FlatSlide } from "@/lib/types";
+import { SECTION_LABEL } from "@/lib/constants";
 
 interface Props {
   slides: FlatSlide[];
@@ -9,11 +10,6 @@ interface Props {
   onSelect: (flatIdx: number) => void;
   onClose: () => void;
 }
-
-const SECTION_LABEL: Record<string, string> = {
-  verse: "절", chorus: "후렴", bridge: "브릿지",
-  "pre-chorus": "프리코러스", intro: "인트로", outro: "아웃트로",
-};
 
 export default function QuickSearchModal({ slides, activeIdx, onSelect, onClose }: Props) {
   const [query, setQuery] = useState("");

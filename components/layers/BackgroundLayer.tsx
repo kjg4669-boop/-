@@ -16,7 +16,7 @@ export default function BackgroundLayer({ config }: Props) {
     if (videoRef.current && config.type === "video" && config.src) {
       const video = videoRef.current;
       video.load();
-      video.play().catch(() => {});
+      video.play().then(() => { video.muted = false; }).catch(() => {});
     }
   }, [config.src, config.type]);
 
@@ -30,11 +30,11 @@ export default function BackgroundLayer({ config }: Props) {
         case "play": vid.play().catch(() => {}); break;
         case "pause": vid.pause(); break;
         case "seek": if (payload.value !== undefined) vid.currentTime = payload.value; break;
-        case "volume": if (payload.value !== undefined) vid.volume = Math.max(0, Math.min(1, payload.value)); break;
+        case "volume": if (payload.value !== undefined) { vid.volume = Math.max(0, Math.min(1, payload.value)); vid.muted = payload.value === 0; } break;
         case "loop": vid.loop = payload.value === 1; break;
       }
     });
-    return () => { unlistenPromise.then((fn) => fn()); };
+    return () => { void unlistenPromise.then((fn) => fn()); };
   }, [config.type]);
 
   // playback:status 주기적 emit (500ms) — Controller의 진행 바에 사용
@@ -43,7 +43,7 @@ export default function BackgroundLayer({ config }: Props) {
     const interval = setInterval(() => {
       const vid = videoRef.current;
       if (vid && vid.duration) {
-        emitEvent("playback:status", {
+        void emitEvent("playback:status", {
           currentTime: vid.currentTime,
           duration: vid.duration,
           playing: !vid.paused,

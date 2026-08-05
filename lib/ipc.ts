@@ -74,7 +74,7 @@ export const ipc = {
     _slideDebounceTimer = setTimeout(() => {
       _slideDebounceTimer = null;
       if (_pendingSlideConfig) {
-        emitEvent<SlideUpdatePayload>("slide:update", { layerConfig: _pendingSlideConfig, meta: _pendingMeta });
+        void emitEvent<SlideUpdatePayload>("slide:update", { layerConfig: _pendingSlideConfig, meta: _pendingMeta });
         _pendingSlideConfig = null;
         _pendingMeta = undefined;
       }
@@ -152,4 +152,11 @@ export const ipc = {
 
   onVideoControl: (cb: (payload: VideoControlPayload) => void) =>
     listenEvent<VideoControlPayload>("video:control", cb),
+
+  // Database backup / restore
+  backupDatabase: (destPath: string) =>
+    invokeCommand<void>("backup_database", { dest_path: destPath }),
+
+  restoreDatabase: (srcPath: string) =>
+    invokeCommand<void>("restore_database", { src_path: srcPath }),
 };

@@ -80,6 +80,7 @@ export interface LayerConfig {
     fontStyle: "normal" | "italic";
     textAlign: "left" | "center" | "right";
     textEntrance?: "none" | "fade" | "slide-up" | "slide-down" | "zoom-in";
+    layout?: "full" | "left-half" | "right-half";
   };
   overlay: {
     visible: boolean;
@@ -131,6 +132,7 @@ export interface ServiceItem {
   media_id?: number;
   settings_json: ServiceItemSettings;
   label: string;
+  notes?: string;
   song?: Song;
   media?: MediaItem;
 }
@@ -163,6 +165,7 @@ export const DEFAULT_LAYER_CONFIG: LayerConfig = {
     fontStyle: "normal",
     textAlign: "center",
     textEntrance: "fade",
+    layout: "full",
   },
   overlay: { visible: false, x: 0, y: 0, width: 320, height: 180, opacity: 1 },
 };
@@ -210,6 +213,7 @@ export interface SlideMeta {
   totalItems: number;   // total items in service
   nextLines?: string[];
   nextSection?: string;
+  notes?: string;
 }
 
 export interface SlideUpdatePayload { layerConfig: LayerConfig; meta?: SlideMeta; }

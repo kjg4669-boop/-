@@ -141,7 +141,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     useEffect(() => {
       const block = selectedIds[0] ? (blocks.find((b) => b.id === selectedIds[0]) ?? null) : null;
       onSelectionRef.current?.(block);
-    }, [selectedIds, blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [selectedIds, blocks]);
 
     // Sync blocks from active slide
     useEffect(() => {
@@ -188,7 +188,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       const info = currentSlideRef.current;
       if (!info) return;
       onCanvasChangeRef.current?.(info.songId, info.slideId, { textBlocks: blocks });
-    }, [blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [blocks]);
 
     // ── Drag refs ─────────────────────────────────────────────────────
     const moveRef = useRef<{

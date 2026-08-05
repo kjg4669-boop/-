@@ -14,7 +14,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 async function closeWindow() {
   if (!isTauri()) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  getCurrentWindow().close();
+  void getCurrentWindow().close();
 }
 
 export default function OutputPage() {
@@ -66,7 +66,7 @@ export default function OutputPage() {
       // Heartbeat every 4s so controller can detect this window is alive
       if (mounted) {
         const heartbeatInterval = setInterval(() => {
-          if (mounted) ipc.sendHeartbeat();
+          if (mounted) void ipc.sendHeartbeat();
         }, 4000);
         unlistenRefs.current.push(() => clearInterval(heartbeatInterval));
       }
@@ -86,7 +86,7 @@ export default function OutputPage() {
       }
     }
 
-    setup();
+    void setup();
 
     return () => {
       mounted = false;
@@ -99,7 +99,7 @@ export default function OutputPage() {
   // Esc key closes the window
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeWindow();
+      if (e.key === "Escape") void closeWindow();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

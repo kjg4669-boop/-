@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc, emitEvent, isTauri } from "@/lib/ipc";
 import type { LayerConfig, SlideMeta } from "@/lib/types";
+import { SECTION_LABEL } from "@/lib/constants";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 function ClockDisplay() {
   const [time, setTime] = useState("");
@@ -16,6 +18,15 @@ function ClockDisplay() {
     return () => clearInterval(id);
   }, []);
   return <span className="font-mono tabular-nums">{time}</span>;
+}
+
+async function closeWindow() {
+  if (isTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().close();
+  } else {
+    window.close();
+  }
 }
 
 export default function StagePage() {
@@ -34,7 +45,7 @@ export default function StagePage() {
     async function setupCloseHandler() {
       if (!isTauri()) {
         // Browser fallback (best-effort, async may not complete before unload)
-        const onUnload = () => { emitEvent("stage:closed", {}); };
+        const onUnload = () => { void emitEvent("stage:closed", {}); };
         window.addEventListener("beforeunload", onUnload);
         unlisten = () => window.removeEventListener("beforeunload", onUnload);
         return;
@@ -48,7 +59,7 @@ export default function StagePage() {
         await win.destroy();
       });
     }
-    setupCloseHandler();
+    void setupCloseHandler();
     return () => { unlisten?.(); };
   }, []);
 
@@ -67,7 +78,7 @@ export default function StagePage() {
         unlisten();
       }
     }
-    setup();
+    void setup();
     return () => {
       mounted = false;
       unlistenRefs.current.forEach((fn) => fn());
@@ -79,12 +90,8 @@ export default function StagePage() {
   const nextLines = meta?.nextLines ?? [];
   const nextSection = meta?.nextSection ?? "";
 
-  const SECTION_LABEL: Record<string, string> = {
-    verse: "절", chorus: "후렴", bridge: "브릿지",
-    "pre-chorus": "프리코러스", intro: "인트로", outro: "아웃트로",
-  };
-
   return (
+    <ErrorBoundary>
     <div
       className="w-screen h-screen overflow-hidden select-none"
       style={{ background: "#0f0f1a", color: "#fff", fontFamily: "sans-serif", display: "flex", flexDirection: "column" }}
@@ -134,6 +141,25 @@ export default function StagePage() {
         <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginLeft: meta ? 0 : "auto" }}>
           <ClockDisplay />
         </span>
+        <button
+          onClick={() => void closeWindow()}
+          title="Stage Display 닫기"
+          style={{
+            marginLeft: 12,
+            background: "transparent",
+            border: "none",
+            color: "rgba(255,255,255,0.25)",
+            fontSize: 16,
+            cursor: "pointer",
+            lineHeight: 1,
+            padding: "2px 6px",
+            borderRadius: 4,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.7)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.25)"; (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+        >
+          ✕
+        </button>
       </div>
 
       {/* ── Main Area: Current Slide ────────────────────────────────── */}
@@ -174,47 +200,71 @@ export default function StagePage() {
         )}
       </div>
 
-      {/* ── Bottom Area: Next Slide Preview ────────────────────────── */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          padding: "16px 60px 24px",
-          background: "#12121f",
-        }}
-      >
-        <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.3)", marginBottom: 10, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
-          다음 슬라이드
-          {nextSection && (
-            <span style={{ marginLeft: 8, color: "rgba(255,255,255,0.2)" }}>
-              ({SECTION_LABEL[nextSection] ?? nextSection})
-            </span>
-          )}
-        </p>
-        {nextLines.length > 0 ? (
-          <div>
-            {nextLines.map((line, i) => (
-              <p
-                key={i}
-                style={{
-                  fontSize: 26,
-                  fontWeight: 500,
-                  color: "rgba(255,255,255,0.45)",
-                  lineHeight: 1.4,
-                  margin: "2px 0",
-                }}
-              >
-                {line}
-              </p>
-            ))}
-          </div>
-        ) : (
-          <p style={{ fontSize: 22, color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>
-            마지막 슬라이드
+      {/* ── Bottom Area ─────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", background: "#12121f" }}>
+        {/* Next Slide Preview */}
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            padding: "16px 40px 24px",
+            borderRight: meta?.notes ? "1px solid rgba(255,255,255,0.06)" : undefined,
+          }}
+        >
+          <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.3)", marginBottom: 10, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
+            다음 슬라이드
+            {nextSection && (
+              <span style={{ marginLeft: 8, color: "rgba(255,255,255,0.2)" }}>
+                ({SECTION_LABEL[nextSection] ?? nextSection})
+              </span>
+            )}
           </p>
+          {nextLines.length > 0 ? (
+            <div>
+              {nextLines.map((line, i) => (
+                <p
+                  key={i}
+                  style={{
+                    fontSize: 26,
+                    fontWeight: 500,
+                    color: "rgba(255,255,255,0.45)",
+                    lineHeight: 1.4,
+                    margin: "2px 0",
+                  }}
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: 22, color: "rgba(255,255,255,0.2)", fontStyle: "italic" }}>
+              마지막 슬라이드
+            </p>
+          )}
+        </div>
+        {/* Presenter Notes */}
+        {meta?.notes && (
+          <div
+            style={{
+              width: 280,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              padding: "16px 24px 24px",
+              background: "rgba(245,158,11,0.06)",
+            }}
+          >
+            <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(245,158,11,0.6)", marginBottom: 10, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>
+              발표자 메모
+            </p>
+            <p style={{ fontSize: 18, color: "rgba(245,158,11,0.9)", lineHeight: 1.6, whiteSpace: "pre-wrap" as const }}>
+              {meta.notes}
+            </p>
+          </div>
         )}
       </div>
     </div>
+    </ErrorBoundary>
   );
 }

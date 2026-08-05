@@ -1,12 +1,11 @@
 import { create } from "zustand";
-import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide, ServiceItemSettings } from "@/lib/types";
+import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide } from "@/lib/types";
 
 // Module-level cache: invalidates automatically when currentService reference changes (Zustand immutable updates)
 let _flatListCache: { serviceRef: import("@/lib/types").Service | null; list: import("@/lib/types").FlatSlide[] } = { serviceRef: null, list: [] };
 
 function getScriptureSlides(item: ServiceItem): ScriptureSlide[] {
-  const settings = item.settings_json as ServiceItemSettings;
-  return settings.scripture?.slides ?? [];
+  return item.settings_json.scripture?.slides ?? [];
 }
 
 function getItemSlideCount(item: ServiceItem): number {
@@ -14,6 +13,13 @@ function getItemSlideCount(item: ServiceItem): number {
   const ss = getScriptureSlides(item);
   return ss.length > 0 ? ss.length : 1;
 }
+
+interface HistoryEntry {
+  items: ServiceItem[];
+  activeItemIndex: number;
+}
+
+const MAX_HISTORY = 50;
 
 interface QueueState {
   currentService: Service | null;
@@ -29,9 +35,20 @@ interface QueueState {
   updateServiceItems: (items: ServiceItem[]) => void;
   reorderItemsAndActive: (items: ServiceItem[], newActiveIndex: number) => void;
   updateCurrentServiceNotes: (notes: string) => void;
+  updateItemNotesInStore: (itemId: number, notes: string) => void;
+  notesVersion: number;
   updateServiceData: (service: Service) => void;
   hiddenSlideKeys: Set<string>;
   toggleHiddenSlide: (key: string) => void;
+
+  // Undo/Redo
+  undoStack: HistoryEntry[];
+  redoStack: HistoryEntry[];
+  pushHistory: () => void;
+  popUndo: () => HistoryEntry | null;
+  popRedo: () => HistoryEntry | null;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 
   // Computed helpers
   getActiveItem: () => ServiceItem | null;
@@ -54,8 +71,41 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   activeLyricSlideIndex: 0,
   isDirty: false,
   hiddenSlideKeys: new Set<string>(),
+  undoStack: [],
+  redoStack: [],
+  notesVersion: 0,
 
-  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0, isDirty: false, hiddenSlideKeys: new Set() }),
+  setCurrentService: (service) => set({ currentService: service, activeItemIndex: -1, activeLyricSlideIndex: 0, isDirty: false, hiddenSlideKeys: new Set(), undoStack: [], redoStack: [] }),
+
+  pushHistory: () => {
+    const { currentService, activeItemIndex, undoStack } = get();
+    if (!currentService) return;
+    const entry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    const next = [...undoStack, entry];
+    if (next.length > MAX_HISTORY) next.shift();
+    set({ undoStack: next, redoStack: [] });
+  },
+
+  popUndo: () => {
+    const { undoStack, currentService, activeItemIndex, redoStack } = get();
+    if (undoStack.length === 0 || !currentService) return null;
+    const snapshot = undoStack[undoStack.length - 1];
+    const currentEntry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    set({ undoStack: undoStack.slice(0, -1), redoStack: [...redoStack, currentEntry] });
+    return snapshot;
+  },
+
+  popRedo: () => {
+    const { redoStack, currentService, activeItemIndex, undoStack } = get();
+    if (redoStack.length === 0 || !currentService) return null;
+    const snapshot = redoStack[redoStack.length - 1];
+    const currentEntry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    set({ redoStack: redoStack.slice(0, -1), undoStack: [...undoStack, currentEntry] });
+    return snapshot;
+  },
+
+  canUndo: () => get().undoStack.length > 0,
+  canRedo: () => get().redoStack.length > 0,
 
   toggleHiddenSlide: (key) => {
     const prev = get().hiddenSlideKeys;
@@ -115,6 +165,18 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     if (currentService) {
       set({ currentService: { ...currentService, items }, isDirty: true, activeItemIndex: newActiveIndex });
     }
+  },
+
+  updateItemNotesInStore: (itemId, notes) => {
+    const { currentService, notesVersion } = get();
+    if (!currentService) return;
+    set({
+      currentService: {
+        ...currentService,
+        items: currentService.items.map((it) => it.id === itemId ? { ...it, notes } : it),
+      },
+      notesVersion: notesVersion + 1,
+    });
   },
 
   updateCurrentServiceNotes: (notes) => {

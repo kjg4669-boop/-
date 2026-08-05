@@ -1,6 +1,28 @@
 mod commands;
 mod display;
 
+#[tauri::command]
+async fn backup_database(app: tauri::AppHandle, dest_path: String) -> Result<(), String> {
+    let src = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("worship.db");
+    std::fs::copy(&src, &dest_path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn restore_database(app: tauri::AppHandle, src_path: String) -> Result<(), String> {
+    let dest = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("worship.db");
+    std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     Emitter, Manager,
@@ -13,6 +35,7 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:worship.db", vec![
@@ -40,6 +63,24 @@ pub fn run() {
                         sql: include_str!("../migrations/004_service_notes.sql"),
                         kind: tauri_plugin_sql::MigrationKind::Up,
                     },
+                    tauri_plugin_sql::Migration {
+                        version: 5,
+                        description: "add_templates",
+                        sql: include_str!("../migrations/005_templates.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 6,
+                        description: "add_tags",
+                        sql: include_str!("../migrations/006_tags.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 7,
+                        description: "add_item_notes",
+                        sql: include_str!("../migrations/007_item_notes.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
                 ])
                 .build(),
         )
@@ -50,6 +91,8 @@ pub fn run() {
             commands::open_help_window,
             commands::open_stage_display,
             commands::close_stage_display,
+            backup_database,
+            restore_database,
         ])
         .setup(|app| {
             // ── 파일 메뉴 ──────────────────────────────────────────────────
@@ -92,8 +135,14 @@ pub fn run() {
                 &s_start, &s_current, &s_sep1, &s_hide,
             ])?;
 
+            // ── 데이터 메뉴 ────────────────────────────────────────────────
+            let d_backup  = MenuItem::with_id(app, "backup_db",  "데이터베이스 백업...", true, None::<&str>)?;
+            let d_restore = MenuItem::with_id(app, "restore_db", "데이터베이스 복원...", true, None::<&str>)?;
+
+            let data_menu = Submenu::with_items(app, "데이터", true, &[&d_backup, &d_restore])?;
+
             // ── 메뉴 등록 ──────────────────────────────────────────────────
-            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu])?;
+            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &data_menu])?;
             app.set_menu(menu)?;
 
             // ── 메뉴 이벤트 핸들러 ─────────────────────────────────────────
@@ -115,6 +164,8 @@ pub fn run() {
                         "show_from_start"  => { win.emit("menu:show-from-start", ()).ok(); }
                         "show_from_current"=> { win.emit("menu:show-from-current", ()).ok(); }
                         "hide_slide"       => { win.emit("menu:hide-slide", ()).ok(); }
+                        "backup_db"        => { win.emit("menu:backup-db", ()).ok(); }
+                        "restore_db"       => { win.emit("menu:restore-db", ()).ok(); }
                         _ => {}
                     }
                 }

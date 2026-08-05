@@ -38,6 +38,7 @@ export function AddItemPanel({ initialTab }: Props) {
   const [isScriptureSubmitting, setIsScriptureSubmitting] = useState(false);
 
   const { setActiveItem } = useQueueStore();
+  const pushHistory = () => useQueueStore.getState().pushHistory();
   const searchGenRef = useRef(0);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,6 +62,7 @@ export function AddItemPanel({ initialTab }: Props) {
         service_id: currentService.id, item_order, type: "song",
         song_id: song.id, media_id: undefined, settings_json: {}, label: song.title,
       });
+      pushHistory();
       const updated = await serviceDb.get(currentService.id);
       if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
@@ -79,6 +81,7 @@ export function AddItemPanel({ initialTab }: Props) {
         service_id: currentService.id, item_order, type: "announcement",
         song_id: undefined, media_id: undefined, settings_json: {}, label: addLabel.trim(),
       });
+      pushHistory();
       const updated = await serviceDb.get(currentService.id);
       if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
       setAddLabel("");
@@ -98,6 +101,7 @@ export function AddItemPanel({ initialTab }: Props) {
         service_id: currentService.id, item_order, type: "blank",
         song_id: undefined, media_id: undefined, settings_json: {}, label: "블랭크",
       });
+      pushHistory();
       const updated = await serviceDb.get(currentService.id);
       if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
@@ -120,6 +124,7 @@ export function AddItemPanel({ initialTab }: Props) {
         settings_json: { scripture: { book, reference, slides } },
         label,
       });
+      pushHistory();
       const updated = await serviceDb.get(currentService.id);
       if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
     } catch (e) {
@@ -146,6 +151,7 @@ export function AddItemPanel({ initialTab }: Props) {
         service_id: currentService.id, item_order, type: "song",
         song_id: songId, media_id: undefined, settings_json: {}, label: addDirectTitle.trim(),
       });
+      pushHistory();
       const updated = await serviceDb.get(currentService.id);
       if (updated) { useQueueStore.getState().updateServiceData(updated); setActiveItem(updated.items.length - 1); useQueueStore.getState().setIsDirty(true); }
       setAddDirectTitle(""); setAddDirectArtist(""); setAddDirectLyrics("");

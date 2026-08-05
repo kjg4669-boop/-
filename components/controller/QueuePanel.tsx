@@ -6,8 +6,9 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb } from "@/lib/db";
-import type { Service, ServiceItem, ServiceItemSettings, LyricSlide } from "@/lib/types";
+import type { ServiceItem, ServiceItemSettings, LyricSlide } from "@/lib/types";
 import { AddItemPanel } from "./AddItemPanel";
+import { SECTION_LABEL } from "@/lib/constants";
 
 const ITEM_TYPE_ICON: Record<string, string> = {
   song: "♪",
@@ -17,18 +18,14 @@ const ITEM_TYPE_ICON: Record<string, string> = {
   video: "▶",
 };
 
-const SECTION_LABEL: Record<string, string> = {
-  verse: "절", chorus: "후렴", bridge: "브릿지",
-  "pre-chorus": "프리", intro: "인트로", outro: "아웃트로",
-};
-
 function SortableQueueItem({
-  item, isActive, onActivate, onDelete,
+  item, isActive, onActivate, onDelete, onContextMenu,
 }: {
   item: ServiceItem;
   isActive: boolean;
   onActivate: () => void;
   onDelete: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
 
@@ -37,6 +34,7 @@ function SortableQueueItem({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
       onClick={onActivate}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
       className={`flex items-center px-2 py-1.5 text-xs border-b border-zinc-800 gap-1 group hover:bg-zinc-700 cursor-pointer transition-colors ${
         isActive ? "bg-blue-900 border-l-2 border-l-blue-400" : ""
       }`}
@@ -78,8 +76,24 @@ export default function QueuePanel() {
   const opNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameVal, setRenameVal] = useState("");
+  const [itemNotes, setItemNotes] = useState("");
+  const itemNotesRef = useRef("");
+  const activeItemIdRef = useRef<number | null>(null);
+  const itemNotesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: ServiceItem; itemIndex: number } | null>(null);
 
-  const { currentService, activeItemIndex, activeLyricSlideIndex, setCurrentService, setActiveItem, updateServiceItems, reorderItemsAndActive, setActiveFlatSlide, getFlatSlideList } = useQueueStore();
+  useEffect(() => {
+    const close = () => setContextMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setContextMenu(null); };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const { currentService, activeItemIndex, activeLyricSlideIndex, setCurrentService, setActiveItem, updateServiceItems, updateItemNotesInStore, reorderItemsAndActive, setActiveFlatSlide, getFlatSlideList, pushHistory } = useQueueStore();
 
   function showOpNotice(msg: string, error = false) {
     setOpNotice({ msg, error });
@@ -119,8 +133,29 @@ export default function QueuePanel() {
   useEffect(() => {
     return () => {
       if (opNoticeTimer.current) clearTimeout(opNoticeTimer.current);
+      if (itemNotesDebounceRef.current) clearTimeout(itemNotesDebounceRef.current);
     };
   }, []);
+
+  useEffect(() => { itemNotesRef.current = itemNotes; }, [itemNotes]);
+
+  // Sync itemNotes when active item changes; flush pending debounce to avoid losing edits
+  useEffect(() => {
+    if (itemNotesDebounceRef.current) {
+      clearTimeout(itemNotesDebounceRef.current);
+      itemNotesDebounceRef.current = null;
+      const prevId = activeItemIdRef.current;
+      if (prevId !== null) {
+        const notes = itemNotesRef.current;
+        updateItemNotesInStore(prevId, notes);
+        void serviceDb.updateItemNotes(prevId, notes).catch(() => {});
+      }
+    }
+    const items = useQueueStore.getState().currentService?.items ?? [];
+    const activeItem = activeItemIndex >= 0 ? items[activeItemIndex] : undefined;
+    activeItemIdRef.current = activeItem?.id ?? null;
+    setItemNotes(activeItem?.notes ?? "");
+  }, [activeItemIndex, currentService?.id, updateItemNotesInStore]);
 
   useEffect(() => {
     const handler = () => { setShowAddPanel(true); setAddItemTab("scripture"); };
@@ -205,6 +240,7 @@ export default function QueuePanel() {
     }
     try {
       await serviceDb.reorderItems(currentService.id, reordered.map((i) => i.id));
+      pushHistory();
       // Atomic: update items + activeItemIndex in one set() call to avoid intermediate render
       reorderItemsAndActive(reordered, newActiveIdx);
     } catch {
@@ -214,6 +250,7 @@ export default function QueuePanel() {
 
   async function deleteItem(itemId: number) {
     try {
+      pushHistory();
       await serviceDb.deleteItem(itemId);
       const liveItems = useQueueStore.getState().currentService?.items ?? [];
       const deletedIndex = liveItems.findIndex((i) => i.id === itemId);
@@ -254,7 +291,7 @@ export default function QueuePanel() {
                 autoFocus
                 value={renameVal}
                 onChange={(e) => setRenameVal(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setRenaming(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); if (e.key === "Escape") setRenaming(false); }}
                 className="flex-1 bg-zinc-900 text-white text-xs rounded px-2 py-1 border border-blue-500 outline-none min-w-0"
               />
               <button onClick={handleRename} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded">확인</button>
@@ -281,6 +318,15 @@ export default function QueuePanel() {
               >
                 + 새 예배
               </button>
+              {currentService && (
+                <button
+                  onClick={() => window.dispatchEvent(new CustomEvent("worship:quick-search"))}
+                  className="text-xs px-1.5 py-1 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded"
+                  title="슬라이드 빠른 검색 (/)"
+                >
+                  🔍
+                </button>
+              )}
               {currentService && (
                 <>
                   <button
@@ -369,8 +415,9 @@ export default function QueuePanel() {
                       isActive={isActive}
                       onActivate={() => setActiveItem(i)}
                       onDelete={() => {
-                        if (window.confirm(`"${item.song?.title ?? item.label ?? item.type}" 항목을 삭제할까요?`)) deleteItem(item.id);
+                        if (window.confirm(`"${item.song?.title ?? item.label ?? item.type}" 항목을 삭제할까요?`)) void deleteItem(item.id);
                       }}
+                      onContextMenu={(e) => setContextMenu({ x: e.clientX, y: e.clientY, item, itemIndex: i })}
                     />
                     {/* Slide thumbnail strip — only for active song items */}
                     {isActive && slides.length > 0 && (
@@ -406,6 +453,30 @@ export default function QueuePanel() {
                         })()}
                       </div>
                     )}
+                    {/* Item notes — shown for active item */}
+                    {isActive && (
+                      <div className="bg-zinc-950 border-b border-zinc-800 px-2 py-1.5">
+                        <p className="text-[9px] text-zinc-600 uppercase tracking-wide mb-1">발표자 메모</p>
+                        <textarea
+                          value={itemNotes}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setItemNotes(val);
+                            if (itemNotesDebounceRef.current) clearTimeout(itemNotesDebounceRef.current);
+                            itemNotesDebounceRef.current = setTimeout(async () => {
+                              itemNotesDebounceRef.current = null;
+                              try {
+                                await serviceDb.updateItemNotes(item.id, val);
+                                updateItemNotesInStore(item.id, val);
+                              } catch { /* ignore */ }
+                            }, 400);
+                          }}
+                          placeholder="이 순서에 대한 메모 (Stage Display에 표시)"
+                          rows={2}
+                          className="w-full bg-zinc-900 text-zinc-300 text-[10px] rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500 resize-none placeholder-zinc-700"
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -424,6 +495,50 @@ export default function QueuePanel() {
             {showAddPanel ? "▲ 닫기" : "+ 항목 추가"}
           </button>
           {showAddPanel && <AddItemPanel initialTab={addItemTab} />}
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <div
+          style={{ position: "fixed", top: Math.min(contextMenu.y, window.innerHeight - 160), left: Math.min(contextMenu.x, window.innerWidth - 160), zIndex: 9999 }}
+          className="bg-zinc-800 border border-zinc-600 rounded shadow-xl py-1 min-w-[130px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1 text-[10px] text-zinc-500 border-b border-zinc-700 truncate max-w-[180px]">
+            {contextMenu.item.song?.title ?? contextMenu.item.label ?? contextMenu.item.type}
+          </div>
+          <button
+            onClick={() => {
+              setActiveItem(contextMenu.itemIndex);
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700"
+          >
+            ▶ 선택
+          </button>
+          {contextMenu.item.type === "song" && contextMenu.item.song && (
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("worship:edit-song", { detail: contextMenu.item.song }));
+                setContextMenu(null);
+              }}
+              className="w-full text-left px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700"
+            >
+              ✎ 편집
+            </button>
+          )}
+          <button
+            onClick={() => {
+              if (window.confirm(`"${contextMenu.item.song?.title ?? contextMenu.item.label ?? contextMenu.item.type}" 항목을 삭제할까요?`)) {
+                void deleteItem(contextMenu.item.id);
+              }
+              setContextMenu(null);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-zinc-700 hover:text-red-300"
+          >
+            ✕ 삭제
+          </button>
         </div>
       )}
     </div>

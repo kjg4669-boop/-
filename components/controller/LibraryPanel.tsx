@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { songDb, mediaDb, serviceDb } from "@/lib/db";
+import { songDb, mediaDb, serviceDb, tagDb } from "@/lib/db";
+import type { Tag } from "@/lib/db";
 import { importMediaFile, toDisplayUrl, captureVideoThumbnail } from "@/lib/media";
 import { useQueueStore } from "@/stores/queueStore";
 import type { Song, MediaItem } from "@/lib/types";
@@ -10,12 +11,15 @@ import { openHelpWindow } from "./HelpWindow";
 import { parsePptx } from "@/lib/pptxParser";
 import PptxImportModal from "./PptxImportModal";
 import type { ParsedSlide } from "@/lib/pptxParser";
+import { parseOpenLyricsFile } from "@/lib/openLyricsParser";
 
 interface Props {
   mode?: "media" | "songs";
+  initialEditSong?: Song | null;
+  onEditSongConsumed?: () => void;
 }
 
-export default function LibraryPanel({ mode = "media" }: Props) {
+export default function LibraryPanel({ mode = "media", initialEditSong, onEditSongConsumed }: Props) {
   const [songs, setSongs] = useState<Song[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [search, setSearch] = useState("");
@@ -24,6 +28,11 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   const [notice, setNotice] = useState("");
   const [deletingSongId, setDeletingSongId] = useState<number | null>(null);
   const [hoveredSongId, setHoveredSongId] = useState<number | null>(null);
+  const [sort, setSort] = useState<"title" | "recent">("title");
+  const [openLPLoading, setOpenLPLoading] = useState(false);
+  const [allTags, setAllTags] = useState<Tag[]>([]);
+  const [filterTagId, setFilterTagId] = useState<number | null>(null);
+  const [songTagMap, setSongTagMap] = useState<Record<number, Tag[]>>({});
 
   const { currentService, setCurrentService } = useQueueStore();
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -31,6 +40,7 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGenRef = useRef(0);
   const pptxInputRef = useRef<HTMLInputElement | null>(null);
+  const openLPInputRef = useRef<HTMLInputElement | null>(null);
   const [pptxModal, setPptxModal] = useState<{ fileName: string; slides: ParsedSlide[] } | null>(null);
   const [pptxLoading, setPptxLoading] = useState(false);
 
@@ -43,6 +53,8 @@ export default function LibraryPanel({ mode = "media" }: Props) {
   useEffect(() => {
     if (mode === "songs") {
       songDb.list().then(setSongs).catch(console.error);
+      tagDb.list().then(setAllTags).catch(console.error);
+      tagDb.getAllSongTagMap().then(setSongTagMap).catch(console.error);
     } else {
       mediaDb.list().then((items) => {
         setMedia(items);
@@ -50,7 +62,7 @@ export default function LibraryPanel({ mode = "media" }: Props) {
         items.filter((m) => m.type === "video").forEach((m) => {
           const url = toDisplayUrl(m.file_path);
           if (url) {
-            captureVideoThumbnail(url).then((thumb) =>
+            void captureVideoThumbnail(url).then((thumb) =>
               setVideoThumbs((prev) => ({ ...prev, [m.id]: thumb }))
             );
           }
@@ -67,6 +79,15 @@ export default function LibraryPanel({ mode = "media" }: Props) {
       if (deleteMediaTimerRef.current !== null) clearTimeout(deleteMediaTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (initialEditSong) {
+      setEditSong(initialEditSong);
+      setEditMode(true);
+      onEditSongConsumed?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialEditSong]);
 
   function showNotice(msg: string) {
     setNotice(msg);
@@ -127,6 +148,9 @@ export default function LibraryPanel({ mode = "media" }: Props) {
         ? prev.map((s) => (s.id === saved.id ? saved : s))
         : [...prev, saved]
     );
+    // Refresh tags and tag map in case tags changed
+    tagDb.list().then(setAllTags).catch(console.error);
+    tagDb.getAllSongTagMap().then(setSongTagMap).catch(console.error);
   }
 
   function handleEditCancel() {
@@ -159,6 +183,39 @@ export default function LibraryPanel({ mode = "media" }: Props) {
         : [...prev, saved]
     );
     showNotice(`"${saved.title}" 임포트됨`);
+  }
+
+  async function handleOpenLPFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setOpenLPLoading(true);
+    let imported = 0;
+    let failed = 0;
+    const newSongs: Song[] = [];
+    for (const file of files) {
+      try {
+        const parsed = await parseOpenLyricsFile(file);
+        if (parsed.slides.length === 0) { failed++; continue; }
+        const id = await songDb.create({ title: parsed.title, artist: parsed.artist, lyrics_json: parsed.slides, media_id: undefined });
+        const song = await songDb.get(id);
+        if (song) { newSongs.push(song); imported++; }
+      } catch { failed++; }
+    }
+    setSongs((prev) => [...prev, ...newSongs]);
+    if (imported > 0) showNotice(`${imported}곡 임포트됨${failed > 0 ? ` (${failed}개 실패)` : ""}`);
+    else showNotice("임포트에 실패했습니다.");
+    setOpenLPLoading(false);
+  }
+
+  async function handleDuplicate(song: Song) {
+    try {
+      const duplicated = await songDb.duplicate(song.id);
+      setSongs((prev) => [...prev, duplicated]);
+      showNotice(`"${duplicated.title}" 복제됨`);
+    } catch {
+      showNotice("복제에 실패했습니다.");
+    }
   }
 
   async function handleAddMediaToService(item: MediaItem) {
@@ -233,19 +290,29 @@ export default function LibraryPanel({ mode = "media" }: Props) {
             className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
           />
           {/* 숨겨진 파일 입력 */}
-          <input
-            ref={pptxInputRef}
-            type="file"
-            accept=".pptx"
-            onChange={handlePptxFile}
-            className="hidden"
-          />
+          <input ref={pptxInputRef} type="file" accept=".pptx" onChange={handlePptxFile} className="hidden" />
+          <input ref={openLPInputRef} type="file" accept=".xml" multiple onChange={handleOpenLPFiles} className="hidden" />
           <button
             onClick={() => pptxInputRef.current?.click()}
             disabled={pptxLoading}
             className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap"
           >
             {pptxLoading ? "..." : "PPTX"}
+          </button>
+          <button
+            onClick={() => openLPInputRef.current?.click()}
+            disabled={openLPLoading}
+            title="OpenLP / OpenLyrics XML 파일 임포트"
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap"
+          >
+            {openLPLoading ? "..." : "OpenLP"}
+          </button>
+          <button
+            onClick={() => setSort((s) => s === "title" ? "recent" : "title")}
+            title={sort === "title" ? "제목순 정렬 중 (클릭: 최신순)" : "최신순 정렬 중 (클릭: 제목순)"}
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap text-zinc-400"
+          >
+            {sort === "title" ? "가나다↑" : "최신↓"}
           </button>
           <button
             onClick={handleNewSong}
@@ -261,8 +328,42 @@ export default function LibraryPanel({ mode = "media" }: Props) {
             ?
           </button>
         </div>
+        {/* Tag filter row */}
+        {allTags.length > 0 && (
+          <div className="px-2 py-1.5 border-b border-zinc-700 flex gap-1 flex-wrap">
+            <button
+              onClick={() => setFilterTagId(null)}
+              className={`px-2 py-0.5 rounded-full text-[10px] border transition-all ${
+                filterTagId === null
+                  ? "bg-zinc-400 border-zinc-400 text-zinc-900"
+                  : "border-zinc-600 text-zinc-400 hover:border-zinc-400"
+              }`}
+            >
+              전체
+            </button>
+            {allTags.map((tag) => (
+              <button
+                key={tag.id}
+                onClick={() => setFilterTagId((prev) => prev === tag.id ? null : tag.id)}
+                className="px-2 py-0.5 rounded-full text-[10px] border transition-all"
+                style={
+                  filterTagId === tag.id
+                    ? { backgroundColor: tag.color, borderColor: tag.color, color: "#fff" }
+                    : { borderColor: "#52525b", color: "#a1a1aa" }
+                }
+              >
+                {tag.name}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
-          {songs.map((song) => (
+          {(sort === "title"
+            ? [...songs].sort((a, b) => a.title.localeCompare(b.title, "ko"))
+            : [...songs].sort((a, b) => b.id - a.id)
+          ).filter((song) =>
+            filterTagId === null || (songTagMap[song.id] ?? []).some((t) => t.id === filterTagId)
+          ).map((song) => (
             <div
               key={song.id}
               className="flex items-center group px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none relative"
@@ -288,13 +389,30 @@ export default function LibraryPanel({ mode = "media" }: Props) {
               <div className="flex-1 min-w-0" onClick={() => handleAddToService(song)}>
                 <div className="font-medium text-white truncate">{song.title}</div>
                 {song.artist && <div className="text-zinc-500 truncate">{song.artist}</div>}
-                <div className="text-zinc-600">{song.lyrics_json.length}절</div>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-zinc-600 text-[10px]">{song.lyrics_json.length}절</span>
+                  {(songTagMap[song.id] ?? []).map((tag) => (
+                    <span
+                      key={tag.id}
+                      className="inline-block w-1.5 h-1.5 rounded-full"
+                      style={{ backgroundColor: tag.color }}
+                      title={tag.name}
+                    />
+                  ))}
+                </div>
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); setEditSong(song); setEditMode(true); }}
                 className="ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
               >
                 편집
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); void handleDuplicate(song); }}
+                className="ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
+                title="복제"
+              >
+                복제
               </button>
               <button
                 onClick={(e) => {
@@ -388,7 +506,7 @@ export default function LibraryPanel({ mode = "media" }: Props) {
                 showNotice(`"${item.name}" 추가됨`);
                 const url = toDisplayUrl(item.file_path);
                 if (url) {
-                  captureVideoThumbnail(url).then((thumb) =>
+                  void captureVideoThumbnail(url).then((thumb) =>
                     setVideoThumbs((prev) => ({ ...prev, [item.id]: thumb }))
                   );
                 }

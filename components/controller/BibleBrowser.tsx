@@ -157,14 +157,19 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
   // No versions yet — show import prompt
   if (versions.length === 0) {
     return (
-      <div className="p-2 space-y-2 text-center">
-        <p className="text-zinc-500 text-xs">성경 데이터 없음</p>
+      <div className="p-3 space-y-2 text-center">
+        <p className="text-zinc-300 text-xs font-medium">성경 데이터가 없습니다</p>
+        <p className="text-[11px] text-zinc-500 leading-relaxed text-left">
+          성경 JSON 파일을 먼저 가져와야 합니다.<br />
+          파일 형식: <span className="text-zinc-300">{"{ version, books: [...] }"}</span><br />
+          개역개정·NIV 등 원하는 버전을 JSON으로 준비 후 아래 버튼을 누르세요.
+        </p>
         <button
           onClick={handleImport}
           disabled={isImporting}
           className="w-full text-xs py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded"
         >
-          {isImporting ? "가져오는 중..." : "JSON 가져오기"}
+          {isImporting ? "가져오는 중..." : "📂 성경 JSON 가져오기"}
         </button>
       </div>
     );

@@ -9,7 +9,7 @@ import LayerSidebar from "@/components/controller/LayerSidebar";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { serviceDb, songDb } from "@/lib/db";
+import { serviceDb, songDb, templateDb } from "@/lib/db";
 import { importMediaFile } from "@/lib/media";
 import { ipc } from "@/lib/ipc";
 import {
@@ -21,14 +21,28 @@ import {
   type Service,
   type SlideMeta,
   type DisplayInfo,
+  type Song,
+  type PlaybackStatusPayload,
 } from "@/lib/types";
 import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId } from "@/lib/utils";
-import { FONT_OPTIONS } from "@/lib/constants";
+
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceListModal from "@/components/controller/ServiceListModal";
 import SaveServiceModal from "@/components/controller/SaveServiceModal";
 import QuickSearchModal from "@/components/controller/QuickSearchModal";
 import ShortcutCheatSheet from "@/components/controller/ShortcutCheatSheet";
+import TemplateModal from "@/components/controller/TemplateModal";
+import OutputPreview from "@/components/controller/OutputPreview";
+import { useCountdown } from "@/hooks/useCountdown";
+import { useClock } from "@/hooks/useClock";
+import { useOutputHeartbeat } from "@/hooks/useOutputHeartbeat";
+import { useMenuEvents } from "@/hooks/useMenuEvents";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useGlobalErrorCapture } from "@/hooks/useGlobalErrorCapture";
+import ErrorToast from "@/components/ErrorToast";
+import ControlBar from "@/components/controller/ControlBar";
+import RibbonToolbar from "@/components/controller/RibbonToolbar";
+import AboutDialog from "@/components/controller/AboutDialog";
 
 type RightTab = "queue" | "songs" | "settings";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
@@ -46,6 +60,8 @@ export default function ControllerPage() {
     updateServiceItems,
     getFlatSlideList,
     getActiveFlatSlideIndex,
+    undoStack,
+    redoStack,
   } = useQueueStore();
 
   const [isLive, setIsLive] = useState(true);
@@ -75,7 +91,8 @@ export default function ControllerPage() {
   const [isLoop, setIsLoop] = useState(false);
   const [alertInput, setAlertInput] = useState("");
   const [alertActive, setAlertActive] = useState(false);
-  const [clock, setClock] = useState("");
+  const [videoStatus, setVideoStatus] = useState<{ playing: boolean; currentTime: number; duration: number } | null>(null);
+  const clock = useClock();
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
@@ -93,19 +110,19 @@ export default function ControllerPage() {
   const pendingAddBlockRef = useRef(false);
   const [showServiceList, setShowServiceList] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [outputConnected, setOutputConnected] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const outputConnected = useOutputHeartbeat();
+  useGlobalErrorCapture();
   const [isStageOpen, setIsStageOpen] = useState(false);
+  const [pendingEditSong, setPendingEditSong] = useState<Song | null>(null);
 
-  // Countdown timer state
-  const [countdownMin, setCountdownMin] = useState(10);
-  const [countdownActive, setCountdownActive] = useState(false);
-  const [countdownRemainingMs, setCountdownRemainingMs] = useState(10 * 60 * 1000);
-  const countdownTotalMsRef = useRef(10 * 60 * 1000);
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countdownActiveRef = useRef(false);
-  const countdownRemainingMsRef = useRef(10 * 60 * 1000);
-  useEffect(() => { countdownActiveRef.current = countdownActive; }, [countdownActive]);
-  useEffect(() => { countdownRemainingMsRef.current = countdownRemainingMs; }, [countdownRemainingMs]);
+  const {
+    countdownMin, setCountdownMin,
+    countdownActive, countdownRemainingMs,
+    countdownActiveRef, countdownRemainingMsRef, countdownTotalMsRef,
+    onToggle: onToggleCountdown, onReset: onResetCountdown,
+  } = useCountdown();
 
   useEffect(() => () => { saveTimersRef.current.forEach(clearTimeout); saveTimersRef.current.clear(); }, []);
   useEffect(() => () => { if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current); }, []);
@@ -124,34 +141,18 @@ export default function ControllerPage() {
   // Autosave: 30초마다 isDirty면 저장
   useEffect(() => {
     const id = setInterval(() => {
-      if (useQueueStore.getState().isDirty) handleSaveRef.current();
+      if (useQueueStore.getState().isDirty) void handleSaveRef.current();
     }, 30000);
     return () => clearInterval(id);
   }, []);
 
-  // Countdown timer tick
+  // 세션 복원: 마지막 예배 ID를 localStorage에 저장/복원
   useEffect(() => {
-    if (!countdownActive) {
-      if (countdownIntervalRef.current) { clearInterval(countdownIntervalRef.current); countdownIntervalRef.current = null; }
-      return;
+    if (currentService && currentService.id > 0) {
+      localStorage.setItem("lastServiceId", String(currentService.id));
     }
-    const startTime = Date.now();
-    const startRemaining = countdownRemainingMs;
-    countdownIntervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, startRemaining - elapsed);
-      setCountdownRemainingMs(remaining);
-      ipc.sendCountdown({ active: true, remainingMs: remaining, totalMs: countdownTotalMsRef.current });
-      if (remaining <= 0) {
-        setCountdownActive(false);
-        clearInterval(countdownIntervalRef.current!);
-        countdownIntervalRef.current = null;
-        ipc.sendCountdown({ active: false, remainingMs: 0, totalMs: countdownTotalMsRef.current });
-      }
-    }, 250);
-    return () => { if (countdownIntervalRef.current) { clearInterval(countdownIntervalRef.current); countdownIntervalRef.current = null; } };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countdownActive]);
+  }, [currentService?.id]);
 
   // Auto-advance: 슬라이드 자동 넘기기 타이머 (EasyWorship 스타일)
   useEffect(() => {
@@ -183,39 +184,6 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
-  // Live clock
-  useEffect(() => {
-    const fmt = () => new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
-    setClock(fmt());
-    const id = setInterval(() => setClock(fmt()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Heartbeat: detect when output window connects/disconnects
-  useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const TIMEOUT_MS = 8000; // 2x heartbeat interval
-
-    const resetTimer = () => {
-      setOutputConnected(true);
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => setOutputConnected(false), TIMEOUT_MS);
-    };
-
-    let mounted = true;
-    let unlisten: (() => void) | null = null;
-    ipc.onHeartbeat(resetTimer).then((fn) => {
-      if (mounted) unlisten = fn;
-      else fn();
-    });
-
-    return () => {
-      mounted = false;
-      if (timeoutId) clearTimeout(timeoutId);
-      unlisten?.();
-    };
-  }, []);
-
   const { outputDisplayId, setOutputDisplayId } = useSettingsStore();
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const selectedDisplayIdx = outputDisplayId >= 0 ? outputDisplayId : 0;
@@ -243,7 +211,7 @@ export default function ControllerPage() {
   useEffect(() => {
     let mounted = true;
     let unlisten: (() => void) | null = null;
-    ipc.onOutputReady(() => {
+    void ipc.onOutputReady(() => {
       const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av } = useOutputStore.getState();
       const cleared = isClearRef.current;
       const toSend: LayerConfig = cleared
@@ -265,11 +233,12 @@ export default function ControllerPage() {
         totalItems: qState.currentService?.items.length ?? 0,
         nextLines: nextEntry?.slide.lines,
         nextSection: nextEntry?.slide.section,
+        notes: item.notes,
       } : undefined;
-      ipc.sendSlideUpdate(toSend, readyMeta);
-      ipc.sendBlackout(bo);
-      ipc.sendAlert(at, av);
-      ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
+      void ipc.sendSlideUpdate(toSend, readyMeta);
+      void ipc.sendBlackout(bo);
+      void ipc.sendAlert(at, av);
+      void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
     }).then((fn) => {
       if (mounted) unlisten = fn;
       else fn();
@@ -278,10 +247,11 @@ export default function ControllerPage() {
       mounted = false;
       unlisten?.();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!isLive) return;
+    if (!isLive || isFrozen) return;
     const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
     const item = getActiveItem();
     const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
@@ -326,157 +296,117 @@ export default function ControllerPage() {
       totalItems: currentService?.items.length ?? 0,
       nextLines: nextEntry?.slide.lines,
       nextSection: nextEntry?.slide.section,
+      notes: item.notes,
     };
 
     ipc.sendSlideUpdate(newConfig, slideMeta);
-  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, isLive, isClear, setLayerConfig]);
+  // notesVersion excluded intentionally: Stage Display notes refresh on slide navigation (avoids IPC per keystroke)
+  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, isFrozen, setLayerConfig]);
 
-  // Keyboard shortcuts
+  // ── Playback status listener ─────────────────────────────────────────
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // ⌘+S / Ctrl+S: 어디서든 저장
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-        e.preventDefault();
-        handleSaveRef.current();
-        return;
+    let mounted = true;
+    let unlisten: (() => void) | null = null;
+    void ipc.onPlaybackStatus((status: PlaybackStatusPayload) => setVideoStatus(status))
+      .then((fn) => { if (mounted) unlisten = fn; else fn(); });
+    return () => { mounted = false; unlisten?.(); };
+  }, []);
+
+  // ── Callbacks for ControlBar ──────────────────────────────────────────
+  const handleToggleLive = useCallback(() => setIsLive((v) => !v), []);
+  const handleToggleBlackout = useCallback(() => { const n = !isBlackout; setBlackout(n); void ipc.sendBlackout(n); }, [isBlackout, setBlackout]);
+  const handleToggleClear = useCallback(() => setIsClear((v) => !v), []);
+  const handleToggleFrozen = useCallback(() => {
+    setIsFrozen((prev) => {
+      void ipc.sendFreeze(!prev);
+      // Slide update on unfreeze is handled by the slide-update effect (isFrozen in deps)
+      return !prev;
+    });
+  }, []);
+  const handleToggleAutoAdvance = useCallback(() => setAutoAdvance((v) => !v), []);
+  const handleSendAlert = useCallback(() => {
+    if (!alertInput.trim()) return;
+    setAlert(alertInput.trim(), true);
+    setAlertActive(true);
+    void ipc.sendAlert(alertInput.trim(), true);
+  }, [alertInput, setAlert]);
+  const handleClearAlert = useCallback(() => {
+    setAlert("", false);
+    setAlertActive(false);
+    void ipc.sendAlert("", false);
+  }, [setAlert]);
+  const handleToggleVideoPlay = useCallback(() => {
+    if (videoStatus?.playing) {
+      void ipc.sendVideoControl({ action: "pause" });
+    } else {
+      void ipc.sendVideoControl({ action: "play" });
+    }
+  }, [videoStatus?.playing]);
+  const handleToggleStage = useCallback(() => {
+    if (isStageOpen) { ipc.closeStageWindow().catch(console.error); setIsStageOpen(false); }
+    else { ipc.openStageWindow().catch(console.error); setIsStageOpen(true); }
+  }, [isStageOpen]);
+  const handleToggleLoop = useCallback(() => setIsLoop((v) => !v), []);
+  const handleTogglePanel = useCallback(() => setShowPanel((v) => !v), []);
+  const handleShowCheatSheet = useCallback(() => setShowCheatSheet(true), []);
+  const handleDismissNotice = useCallback(() => setCtrlNotice(null), []);
+
+  // ── Callbacks for RibbonToolbar ───────────────────────────────────────
+  const handlePasteBlock = useCallback(() => canvasRef.current?.pasteBlock(), []);
+  const handleCutBlock = useCallback(() => canvasRef.current?.cutBlock(), []);
+  const handleCopyBlock = useCallback(() => canvasRef.current?.copyBlock(), []);
+  const handleActivateFmtPainter = useCallback(() => {
+    if (!selectedBlock) return;
+    const { fontFamily, fontSize, fontWeight, fontStyle, textDecoration, color, textAlign } = selectedBlock;
+    canvasRef.current?.activateFormatPainter({ fontFamily, fontSize, fontWeight, fontStyle, textDecoration, color, textAlign });
+    setFmtPainterOn(true);
+    setTimeout(() => setFmtPainterOn(canvasRef.current?.isFmtPainterActive() ?? false), 100);
+  }, [selectedBlock]);
+  const handleAddBlock = useCallback(() => {
+    const st = useQueueStore.getState();
+    const fi = st.getActiveFlatSlideIndex();
+    const fl = st.getFlatSlideList();
+    if (fi < 0) {
+      if (fl.length > 0) {
+        st.setActiveFlatSlide(0);
+        pendingAddBlockRef.current = true;
       }
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target as HTMLElement).isContentEditable) return;
-      // When a modal is open, only Escape should fire
-      if ((showQuickSearchRef.current || showCheatSheetRef.current) && e.key !== "Escape") return;
-      switch (e.key) {
-        case " ":
-          e.preventDefault();
-          if (isLoop) {
-            const st = useQueueStore.getState();
-            const fi = st.getActiveFlatSlideIndex();
-            const fl = st.getFlatSlideList();
-            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
-          } else {
-            nextLyricSlide();
-          }
-          break;
-        case "ArrowRight":
-          if (isLoop) {
-            const st = useQueueStore.getState();
-            const fi = st.getActiveFlatSlideIndex();
-            const fl = st.getFlatSlideList();
-            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
-          } else {
-            nextLyricSlide();
-          }
-          break;
-        case "ArrowLeft":
-          if (isLoop) {
-            const st = useQueueStore.getState();
-            const fi = st.getActiveFlatSlideIndex();
-            if (fi <= 0) { const fl = st.getFlatSlideList(); st.setActiveFlatSlide(fl.length - 1); }
-            else prevLyricSlide();
-          } else {
-            prevLyricSlide();
-          }
-          break;
-        case "ArrowDown":
-          if (isLoop) {
-            const st = useQueueStore.getState();
-            const fi = st.getActiveFlatSlideIndex();
-            const fl = st.getFlatSlideList();
-            if (fi >= fl.length - 1) st.setActiveFlatSlide(0); else nextLyricSlide();
-          } else {
-            nextLyricSlide();
-          }
-          break;
-        case "ArrowUp":
-          if (isLoop) {
-            const st = useQueueStore.getState();
-            const fi = st.getActiveFlatSlideIndex();
-            if (fi <= 0) { const fl = st.getFlatSlideList(); st.setActiveFlatSlide(fl.length - 1); }
-            else prevLyricSlide();
-          } else {
-            prevLyricSlide();
-          }
-          break;
-        case "F5":
-          e.preventDefault();
-          setIsLive((v) => !v);
-          break;
-        case "b":
-        case "B": {
-          const next = !isBlackout;
-          setBlackout(next);
-          ipc.sendBlackout(next);
-          break;
-        }
-        case "c":
-        case "C":
-          setIsClear((prev) => !prev);
-          break;
-        case "l":
-        case "L":
-          setIsLoop((prev) => !prev);
-          break;
-        case "o":
-        case "O":
-          openOutputRef.current();
-          break;
-        case "Home":
-          e.preventDefault();
-          useQueueStore.getState().setActiveFlatSlide(0);
-          break;
-        case "End": {
-          e.preventDefault();
-          const fl = useQueueStore.getState().getFlatSlideList();
-          if (fl.length > 0) useQueueStore.getState().setActiveFlatSlide(fl.length - 1);
-          break;
-        }
-        case "PageDown": {
-          const st = useQueueStore.getState();
-          const svc = st.currentService;
-          if (svc && st.activeItemIndex < svc.items.length - 1) st.setActiveItem(st.activeItemIndex + 1);
-          break;
-        }
-        case "PageUp": {
-          const st = useQueueStore.getState();
-          if (st.activeItemIndex > 0) st.setActiveItem(st.activeItemIndex - 1);
-          break;
-        }
-        case "f":
-        case "F":
-          setIsFrozen((prev) => {
-            ipc.sendFreeze(!prev);
-            if (prev) ipc.sendSlideUpdate(useOutputStore.getState().layerConfig);
-            return !prev;
-          });
-          break;
-        case "t":
-        case "T":
-          setAutoAdvance((v) => !v);
-          break;
-        case "/":
-          e.preventDefault();
-          setShowQuickSearch(true);
-          break;
-        case "?":
-          setShowCheatSheet(true);
-          break;
-        case "Escape":
-          if (isBlackout) { setBlackout(false); ipc.sendBlackout(false); }
-          setIsClear(false);
-          setShowQuickSearch(false);
-          setShowCheatSheet(false);
-          setCtrlNotice(null);
-          break;
-        case "1": case "2": case "3": case "4": case "5":
-        case "6": case "7": case "8": case "9": {
-          const idx = parseInt(e.key) - 1;
-          const svc = useQueueStore.getState().currentService;
-          if (svc && idx < svc.items.length) useQueueStore.getState().setActiveItem(idx);
-          break;
-        }
-      }
+      return;
+    }
+    canvasRef.current?.addBlock();
+  }, []);
+  const handleOpenDesignPanel = useCallback(() => { setShowPanel(true); setRightTab("settings"); }, []);
+  const handleCloseOutput = useCallback(() => ipc.closeOutputWindow().catch(() => {}), []);
+  const handleFromStart = useCallback(() => { useQueueStore.getState().setActiveFlatSlide(0); openOutputRef.current(); }, []);
+  const handleServiceNotesChange = useCallback((notes: string) => {
+    setServiceNotes(notes);
+    if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
+    notesDebounceRef.current = setTimeout(() => {
+      const svc = useQueueStore.getState().currentService;
+      if (!svc) return;
+      serviceDb.updateNotes(svc.id, notes).catch(console.error);
+      useQueueStore.getState().updateCurrentServiceNotes(notes);
+    }, 500);
+  }, []);
+
+  // Listen for quick-search trigger from QueuePanel button
+  useEffect(() => {
+    const handler = () => setShowQuickSearch(true);
+    window.addEventListener("worship:quick-search", handler);
+    return () => window.removeEventListener("worship:quick-search", handler);
+  }, []);
+
+  // Listen for edit-song trigger from QueuePanel context menu
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const song = (e as CustomEvent<Song>).detail;
+      setPendingEditSong(song);
+      setShowPanel(true);
+      setRightTab("songs");
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isBlackout, isLoop, nextLyricSlide, prevLyricSlide, setBlackout]);
+    window.addEventListener("worship:edit-song", handler);
+    return () => window.removeEventListener("worship:edit-song", handler);
+  }, []);
 
   const handleCanvasChange = useCallback(
     (songId: number, slideId: string, canvas: { textBlocks: TextBlock[] }) => {
@@ -537,6 +467,75 @@ export default function ControllerPage() {
     saveGlobalDefaults(config);
   }, []);
 
+  const handleSaveTemplate = useCallback(async () => {
+    const svc = useQueueStore.getState().currentService;
+    if (!svc || svc.items.length === 0) return;
+    const name = window.prompt("템플릿 이름을 입력하세요:", svc.name);
+    if (!name?.trim()) return;
+    try {
+      const items = svc.items.map((item) => ({
+        type: item.type,
+        song_id: item.song_id ?? null,
+        media_id: item.media_id ?? null,
+        settings_json: item.settings_json,
+        label: item.label,
+      }));
+      await templateDb.create(name.trim(), items);
+      setCtrlNotice({ msg: "템플릿 저장됨 ✓" });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
+    } catch (e) {
+      console.error("[template]", e);
+      setCtrlNotice({ msg: "템플릿 저장 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+    }
+  }, []);
+
+  const handleExportService = useCallback(async () => {
+    const svc = useQueueStore.getState().currentService;
+    if (!svc) return;
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const filePath = await save({
+        defaultPath: `${svc.name}.txt`,
+        filters: [{ name: "텍스트", extensions: ["txt"] }],
+      });
+      if (!filePath) return;
+      const lines: string[] = [`# ${svc.name}`, `날짜: ${svc.date}`, ""];
+      for (const item of svc.items) {
+        lines.push(`## ${item.label}`);
+        if (item.song) {
+          for (const slide of item.song.lyrics_json) {
+            lines.push(`[${slide.section} ${slide.sectionIndex}]`);
+            lines.push(...slide.lines);
+            lines.push("");
+          }
+        } else {
+          const scriptureSlides = (item.settings_json as import("@/lib/types").ServiceItemSettings)?.scripture?.slides;
+          if (scriptureSlides && scriptureSlides.length > 0) {
+            for (const slide of scriptureSlides) {
+              lines.push(...slide.lines);
+            }
+            lines.push("");
+          } else {
+            lines.push("");
+          }
+        }
+      }
+      await writeTextFile(filePath, lines.join("\n"));
+      setCtrlNotice({ msg: "내보내기 완료 ✓" });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
+    } catch (e) {
+      console.error("[export]", e);
+      setCtrlNotice({ msg: "내보내기 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+    }
+  }, []);
+
   const handleSaveItem = useCallback(
     async (itemId: number, config: LayerConfig) => {
       const settings = {
@@ -558,18 +557,16 @@ export default function ControllerPage() {
     [updateServiceItems]
   );
 
-  const setSubtitle = (patch: Partial<LayerConfig["subtitle"]>) => {
-    handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
-  };
-
   type FmtPatch = { fontFamily?: string; fontSize?: number; fontWeight?: "normal" | "bold"; fontStyle?: "normal" | "italic"; textDecoration?: "none" | "underline" | "line-through"; color?: string; textAlign?: "left" | "center" | "right" };
-  function applyFormat(patch: FmtPatch) {
+
+  const handleFormat = useCallback((patch: FmtPatch) => {
     if (selectedBlock && canvasRef.current) {
       canvasRef.current.updateBlock(selectedBlock.id, patch);
     } else {
-      setSubtitle(patch as Partial<LayerConfig["subtitle"]>);
+      handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...(patch as Partial<LayerConfig["subtitle"]>) } });
     }
-  }
+  }, [selectedBlock, layerConfig, handleLayerChange]);
+
   const fmt: Required<FmtPatch> = selectedBlock ? {
     fontFamily: selectedBlock.fontFamily,
     fontSize: selectedBlock.fontSize,
@@ -704,13 +701,12 @@ export default function ControllerPage() {
       if (!selected || typeof selected !== "string") return;
       const { convertFileSrc } = await import("@tauri-apps/api/core");
       const src = convertFileSrc(selected);
-      const name = selected.split("/").pop() ?? "audio";
-      if (audioRef.current) audioRef.current.pause();
+      const name = selected.replace(/\\/g, "/").split("/").pop() ?? "audio";
+      if (audioRef.current) { audioRef.current.onended = null; audioRef.current.pause(); }
       const audio = new Audio(src);
       audioRef.current = audio;
       setSoundName(name);
-      audio.play().catch(() => {});
-      setSoundPlaying(true);
+      audio.play().then(() => setSoundPlaying(true)).catch(() => setSoundPlaying(false));
       audio.onended = () => setSoundPlaying(false);
     } catch (e) { console.error("[handleInsertSound]", e); }
   }
@@ -724,8 +720,8 @@ export default function ControllerPage() {
 
   function openOutput() {
     const d = displays[selectedDisplayIdx];
-    if (d) ipc.openOutputWindow(d.x, d.y, d.width, d.height);
-    else ipc.openOutputWindow(1920, 0, 1920, 1080);
+    if (d) void ipc.openOutputWindow(d.x, d.y, d.width, d.height);
+    else void ipc.openOutputWindow(1920, 0, 1920, 1080);
   }
 
   // Keep openOutputRef current so menu listeners always call latest version
@@ -744,11 +740,62 @@ export default function ControllerPage() {
       const reloaded = await serviceDb.get(svc.id);
       if (reloaded) store.updateServiceData(reloaded);
       else store.setIsDirty(false);
+      setCtrlNotice({ msg: "저장됨 ✓", error: false });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
     } catch (e) {
       console.error("[save]", e);
       setCtrlNotice({ msg: "저장에 실패했습니다. 다시 시도해 주세요." , error: true });
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 5000);
+    }
+  }, []);
+
+  const isUndoRedoInProgressRef = useRef(false);
+
+  const handleUndo = useCallback(async () => {
+    if (isUndoRedoInProgressRef.current) return;
+    const store = useQueueStore.getState();
+    if (!store.canUndo()) return;
+    const svc = store.currentService;
+    if (!svc || svc.id <= 0) return;
+    const snapshot = store.popUndo();
+    if (!snapshot) return;
+    isUndoRedoInProgressRef.current = true;
+    try {
+      await serviceDb.saveItems(svc.id, snapshot.items);
+      const reloaded = await serviceDb.get(svc.id);
+      if (reloaded) {
+        store.updateServiceData(reloaded);
+        store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+      }
+    } catch (e) {
+      console.error("[undo]", e);
+    } finally {
+      isUndoRedoInProgressRef.current = false;
+    }
+  }, []);
+
+  const handleRedo = useCallback(async () => {
+    if (isUndoRedoInProgressRef.current) return;
+    const store = useQueueStore.getState();
+    if (!store.canRedo()) return;
+    const svc = store.currentService;
+    if (!svc || svc.id <= 0) return;
+    const snapshot = store.popRedo();
+    if (!snapshot) return;
+    isUndoRedoInProgressRef.current = true;
+    try {
+      await serviceDb.saveItems(svc.id, snapshot.items);
+      const reloaded = await serviceDb.get(svc.id);
+      if (reloaded) {
+        store.updateServiceData(reloaded);
+        store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+      }
+    } catch (e) {
+      console.error("[redo]", e);
+    } finally {
+      isUndoRedoInProgressRef.current = false;
     }
   }, []);
 
@@ -789,6 +836,10 @@ export default function ControllerPage() {
 
   const handleSaveRef = useRef(handleSave);
   useEffect(() => { handleSaveRef.current = handleSave; });
+  const handleUndoRef = useRef(handleUndo);
+  useEffect(() => { handleUndoRef.current = handleUndo; });
+  const handleRedoRef = useRef(handleRedo);
+  useEffect(() => { handleRedoRef.current = handleRedo; });
   const handleNewServiceRef = useRef(handleNewService);
   useEffect(() => { handleNewServiceRef.current = handleNewService; });
   const handleNewSlideRef = useRef(handleNewSlide);
@@ -798,50 +849,57 @@ export default function ControllerPage() {
   const handleInsertImageRef = useRef(handleInsertImage);
   useEffect(() => { handleInsertImageRef.current = handleInsertImage; });
 
-  // Tauri native menu event listeners
-  useEffect(() => {
-    let unlistens: Array<() => void> = [];
-    async function setup() {
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        unlistens = await Promise.all([
-          listen("menu:open-output",      () => openOutputRef.current()),
-          listen("menu:close-output",     () => ipc.closeOutputWindow().catch(() => {})),
-          listen("menu:show-from-start",  () => {
-            useQueueStore.getState().setActiveFlatSlide(0);
-            openOutputRef.current();
-          }),
-          listen("menu:show-from-current", () => openOutputRef.current()),
-          listen("menu:hide-slide",        () => setIsClear((v) => !v)),
-          listen("menu:add-song",          () => { setShowPanel(true); setRightTab("songs"); }),
-          listen("menu:new-service",       () => handleNewServiceRef.current()),
-          listen("menu:open-service",      () => setShowServiceList(true)),
-          listen("menu:save-service",      () => handleSaveRef.current()),
-          listen("menu:save-as",           () => setShowSaveModal(true)),
-          listen("menu:new-slide",         () => handleNewSlideRef.current()),
-          listen("menu:dup-slide",         () => handleDupSlideRef.current()),
-          listen("menu:add-media",         () => handleInsertImageRef.current()),
-          listen("menu:add-scripture",     () => {
-            setShowPanel(true);
-            setRightTab("queue");
-            window.dispatchEvent(new CustomEvent("worship:open-scripture-tab"));
-          }),
-          listen("menu:open-stage",        () => {
-            ipc.openStageWindow().catch(console.error);
-            setIsStageOpen(true);
-          }),
-          // Sync isStageOpen when stage window is closed via OS close button
-          ipc.onStageClosed(() => setIsStageOpen(false)),
-        ]);
-      } catch (e) { console.error("[menu setup]", e); }
-    }
-    setup();
-    return () => { unlistens.forEach((fn) => fn()); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useMenuEvents({
+    openOutputRef,
+    handleNewServiceRef,
+    handleSaveRef,
+    handleNewSlideRef,
+    handleDupSlideRef,
+    handleInsertImageRef,
+    setIsClear,
+    setShowPanel,
+    setRightTab,
+    setShowServiceList,
+    setShowSaveModal,
+    setShowQuickSearch,
+    setIsStageOpen,
+    showNotice: (msg: string, error?: boolean) => {
+      setCtrlNotice({ msg, error });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), error ? 5000 : 2000);
+    },
+  });
+
+  useKeyboardShortcuts({
+    isLoop,
+    isBlackout,
+    nextLyricSlide,
+    prevLyricSlide,
+    handleToggleLive,
+    handleToggleBlackout,
+    handleToggleClear,
+    handleToggleLoop,
+    handleToggleFrozen,
+    handleToggleAutoAdvance,
+    setBlackout,
+    setIsClear,
+    setShowQuickSearch,
+    setShowCheatSheet,
+    setCtrlNotice,
+    showQuickSearchRef,
+    showCheatSheetRef,
+    handleSaveRef,
+    handleUndoRef,
+    handleRedoRef,
+    openOutputRef,
+  });
 
   const slides = getFlatSlideList();
   const flatIdx = getActiveFlatSlideIndex();
+
+  const nextSlide = flatIdx >= 0 && flatIdx + 1 < slides.length ? slides[flatIdx + 1] : null;
+  const nextSlidePreview = nextSlide ? (nextSlide.slide.lines[0] ?? "빈 슬라이드") : null;
+  const nextSlideFull = nextSlide ? nextSlide.slide.lines.join(" / ") : null;
 
   // 슬라이드가 활성화된 후 대기 중인 addBlock 실행
   useEffect(() => {
@@ -855,509 +913,102 @@ export default function ControllerPage() {
     <ErrorBoundary>
     <div className="flex flex-col h-screen bg-zinc-900 text-white select-none overflow-hidden">
 
-      {/* ── Ribbon Row 1: 컨트롤 바 ───────────────────────────────────── */}
-      <div className="h-9 flex items-center gap-1.5 px-3 border-b border-zinc-700 bg-[#3c3c3c] flex-shrink-0 text-xs">
-        <span className="font-bold text-zinc-200 tracking-wide mr-1">✝ Worship</span>
-        <div className="w-px h-5 bg-zinc-600" />
-        <span className="text-zinc-400 truncate max-w-[120px]">
-          {currentService?.name ?? "예배 없음"}
-        </span>
-        {isDirty && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-600 text-amber-100 font-semibold shrink-0">미저장</span>
-        )}
-        {ctrlNotice && (
-          <span
-            className="text-[10px] px-1.5 py-0.5 rounded bg-red-800 text-red-100 font-semibold shrink-0 cursor-pointer"
-            onClick={() => setCtrlNotice(null)}
-            title="클릭하여 닫기"
-          >
-            ⚠ {ctrlNotice.msg} ✕
-          </span>
-        )}
-        {slides.length > 0 && (
-          <span className="text-[10px] text-zinc-500 shrink-0">{flatIdx + 1}/{slides.length}</span>
-        )}
-        {(() => {
-          const next = flatIdx >= 0 && flatIdx + 1 < slides.length ? slides[flatIdx + 1] : null;
-          const nextText = next ? (next.slide.lines[0] ?? "빈 슬라이드") : null;
-          return nextText ? (
-            <span className="text-[10px] text-zinc-500 shrink-0 max-w-[180px] truncate hidden md:inline" title={next!.slide.lines.join(" / ")}>
-              다음: <span className="text-zinc-300">{nextText}</span>
-            </span>
-          ) : null;
-        })()}
-        <div className="flex-1" />
+      <ControlBar
+        serviceName={currentService?.name ?? null}
+        isDirty={isDirty}
+        ctrlNotice={ctrlNotice}
+        onDismissNotice={handleDismissNotice}
+        slideCount={slides.length}
+        flatIdx={flatIdx}
+        nextSlidePreview={nextSlidePreview}
+        nextSlideFull={nextSlideFull}
+        isLive={isLive}
+        onToggleLive={handleToggleLive}
+        isBlackout={isBlackout}
+        onToggleBlackout={handleToggleBlackout}
+        isClear={isClear}
+        onToggleClear={handleToggleClear}
+        isFrozen={isFrozen}
+        onToggleFrozen={handleToggleFrozen}
+        autoAdvance={autoAdvance}
+        onToggleAutoAdvance={handleToggleAutoAdvance}
+        autoAdvanceMs={autoAdvanceMs}
+        onChangeAutoAdvanceMs={setAutoAdvanceMs}
+        autoProgress={autoProgress}
+        isVideoBackground={layerConfig.background.type === "video"}
+        videoSrc={layerConfig.background.src ?? ""}
+        videoPlaying={videoStatus?.playing ?? false}
+        onToggleVideoPlay={handleToggleVideoPlay}
+        alertInput={alertInput}
+        onSetAlertInput={setAlertInput}
+        alertActive={alertActive}
+        onSendAlert={handleSendAlert}
+        onClearAlert={handleClearAlert}
+        outputConnected={outputConnected}
+        onOpenOutput={openOutput}
+        isStageOpen={isStageOpen}
+        onToggleStage={handleToggleStage}
+        countdownMin={countdownMin}
+        onSetCountdownMin={setCountdownMin}
+        countdownActive={countdownActive}
+        countdownRemainingMs={countdownRemainingMs}
+        onToggleCountdown={onToggleCountdown}
+        onResetCountdown={onResetCountdown}
+        clock={clock}
+        showPanel={showPanel}
+        onTogglePanel={handleTogglePanel}
+        onShowCheatSheet={handleShowCheatSheet}
+      />
 
-        <button onClick={() => setIsLive((v) => !v)}
-          title="라이브/대기 전환 (F5)"
-          className={`flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${isLive ? "bg-green-700 hover:bg-green-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${isLive ? "bg-green-300" : "bg-zinc-500"}`} />
-          {isLive ? "라이브" : "대기"}
-        </button>
-
-        <button onClick={() => { const n = !isBlackout; setBlackout(n); ipc.sendBlackout(n); }}
-          className={`px-2 py-0.5 rounded font-semibold ${isBlackout ? "bg-red-700 hover:bg-red-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-          title="블랙아웃 (B)">
-          {isBlackout ? "● 블랙" : "블랙"}
-        </button>
-
-        <button onClick={() => setIsClear((v) => !v)}
-          className={`px-2 py-0.5 rounded font-semibold ${isClear ? "bg-orange-700 hover:bg-orange-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-          title="화면 지우기 (C)">
-          {isClear ? "● 지우기" : "지우기"}
-        </button>
-
-        <button
-          onClick={() => setIsFrozen((prev) => { ipc.sendFreeze(!prev); if (prev) ipc.sendSlideUpdate(useOutputStore.getState().layerConfig); return !prev; })}
-          className={`px-2 py-0.5 rounded font-semibold ${isFrozen ? "bg-purple-700 hover:bg-purple-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-          title="출력 고정 (F) - 탐색 중 화면 유지">
-          {isFrozen ? "● 고정" : "고정"}
-        </button>
-
-        <div className={`flex items-center rounded overflow-hidden border ${autoAdvance ? "border-teal-600" : "border-zinc-600"}`}>
-          <button
-            onClick={() => setAutoAdvance((v) => !v)}
-            className={`px-2 py-0.5 font-semibold relative overflow-hidden text-xs ${autoAdvance ? "bg-teal-700 hover:bg-teal-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-            title="자동 넘기기 (T)">
-            {autoAdvance ? `⏱ ${Math.max(1, Math.ceil((autoAdvanceMs * (1 - autoProgress / 100)) / 1000))}s` : "자동"}
-            {autoAdvance && <div style={{ position: "absolute", bottom: 0, left: 0, height: 2, width: `${autoProgress}%`, backgroundColor: "#2dd4bf" }} />}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setAutoAdvanceMs((v) => Math.max(1000, v - 1000)); }}
-            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs"
-            title="1초 감소">−</button>
-          <span className="px-1 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] min-w-[24px] text-center border-l border-zinc-600">
-            {autoAdvanceMs / 1000}s
-          </span>
-          <button
-            onClick={(e) => { e.stopPropagation(); setAutoAdvanceMs((v) => Math.min(30000, v + 1000)); }}
-            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs"
-            title="1초 증가">+</button>
-        </div>
-
-        <div className="w-px h-5 bg-zinc-600" />
-
-        <input type="text" placeholder="자막 경보..." value={alertInput}
-          onChange={(e) => setAlertInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && alertInput.trim()) { setAlert(alertInput.trim(), true); setAlertActive(true); ipc.sendAlert(alertInput.trim(), true); }}}
-          className="bg-zinc-700 border border-zinc-600 rounded px-2 py-0.5 text-white w-24 outline-none focus:border-orange-500" />
-        <button onClick={() => { if (alertInput.trim()) { setAlert(alertInput.trim(), true); setAlertActive(true); ipc.sendAlert(alertInput.trim(), true); }}}
-          disabled={!alertInput.trim()}
-          className={`px-2 py-0.5 rounded ${alertActive ? "bg-orange-600 hover:bg-orange-700" : "bg-zinc-700 hover:bg-zinc-600"} text-white disabled:opacity-40`}>
-          전송
-        </button>
-        {alertActive && (
-          <button onClick={() => { setAlert("", false); setAlertActive(false); ipc.sendAlert("", false); }}
-            className="px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400">✕</button>
-        )}
-
-        <div className="w-px h-5 bg-zinc-600" />
-
-        <button onClick={openOutput}
-          className="px-2 py-0.5 bg-blue-700 hover:bg-blue-600 rounded text-white font-medium" title="출력창 열기">
-          📺 출력창 <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: outputConnected ? "#4ade80" : "#6b7280", marginLeft: 2, verticalAlign: "middle" }} title={outputConnected ? "연결됨" : "연결 안됨"} />
-        </button>
-
-        <button
-          onClick={() => {
-            if (isStageOpen) {
-              ipc.closeStageWindow().catch(console.error);
-              setIsStageOpen(false);
-            } else {
-              ipc.openStageWindow().catch(console.error);
-              setIsStageOpen(true);
-            }
-          }}
-          className={`px-2 py-0.5 rounded font-medium ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-          title="Stage Display 발표자 모니터">
-          🎤 Stage
-        </button>
-
-        <div className="w-px h-5 bg-zinc-600" />
-
-        {/* Countdown Timer Control */}
-        <div className={`flex items-center rounded overflow-hidden border ${countdownActive ? "border-violet-600" : "border-zinc-600"}`}>
-          <button
-            onClick={() => {
-              if (countdownActive) {
-                setCountdownActive(false);
-                ipc.sendCountdown({ active: false, remainingMs: countdownRemainingMs, totalMs: countdownTotalMsRef.current });
-              } else {
-                const totalMs = countdownMin * 60 * 1000;
-                countdownTotalMsRef.current = totalMs;
-                setCountdownRemainingMs(totalMs);
-                setCountdownActive(true);
-                ipc.sendCountdown({ active: true, remainingMs: totalMs, totalMs });
-              }
-            }}
-            className={`px-2 py-0.5 font-semibold text-xs ${countdownActive ? "bg-violet-700 hover:bg-violet-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
-            title="카운트다운 시작/정지">
-            {countdownActive ? `⏳ ${Math.ceil(countdownRemainingMs / 60000) > 0 ? `${Math.floor(countdownRemainingMs / 60000)}:${String(Math.floor((countdownRemainingMs % 60000) / 1000)).padStart(2, "0")}` : "0:00"}` : "카운트"}
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); if (!countdownActive) setCountdownMin((v) => Math.max(1, v - 1)); }}
-            disabled={countdownActive}
-            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs disabled:opacity-40">−</button>
-          <span className="px-1 py-0.5 bg-zinc-800 text-zinc-400 text-[10px] min-w-[24px] text-center border-l border-zinc-600">{countdownMin}m</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); if (!countdownActive) setCountdownMin((v) => Math.min(60, v + 1)); }}
-            disabled={countdownActive}
-            className="px-1 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs disabled:opacity-40">+</button>
-          {(countdownActive || countdownRemainingMs < countdownMin * 60 * 1000) && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setCountdownActive(false);
-                const totalMs = countdownMin * 60 * 1000;
-                countdownTotalMsRef.current = totalMs;
-                setCountdownRemainingMs(totalMs);
-                ipc.sendCountdown({ active: false, remainingMs: totalMs, totalMs });
-              }}
-              className="px-1.5 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-white border-l border-zinc-600 text-xs"
-              title="리셋">↺</button>
-          )}
-        </div>
-
-        {clock && <span className="text-[11px] text-zinc-400 tabular-nums shrink-0 font-mono">{clock}</span>}
-
-        <button onClick={() => setShowCheatSheet(true)}
-          className="px-1.5 py-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700"
-          title="단축키 도움말 (?)">
-          ?
-        </button>
-
-        <button onClick={() => setShowPanel((v) => !v)}
-          className={`px-2 py-0.5 rounded ${showPanel ? "bg-zinc-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}
-          title="패널 열기/닫기">
-          ☰
-        </button>
-      </div>
-
-      {/* ── Ribbon Row 2: 탭 바 ──────────────────────────────────────── */}
-      <div className="h-7 flex items-end px-1 bg-[#2b2b2b] flex-shrink-0 text-xs border-b border-zinc-700">
-        {(["home", "insert"] as const).map((tab) => (
-          <button key={tab} onClick={() => setRibbonTab(tab)}
-            className={`px-3 h-full text-xs transition-colors ${
-              ribbonTab === tab
-                ? "text-white border-b-2 border-blue-500 bg-[#2d2d2d]"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}>
-            {tab === "home" ? "홈" : "삽입"}
-          </button>
-        ))}
-        {([
-          ["design", "디자인"],
-          ["transition", "전환"],
-          ["animation", "애니메이션"],
-          ["slideshow", "슬라이드 쇼"],
-          ["review", "검토"],
-          ["view", "보기"],
-        ] as [RibbonTab, string][]).map(([val, label]) => (
-          <button key={val} onClick={() => setRibbonTab(val)}
-            className={`px-3 h-full text-xs transition-colors ${
-              ribbonTab === val
-                ? "text-white border-b-2 border-blue-500 bg-[#2d2d2d]"
-                : "text-zinc-400 hover:text-zinc-200"
-            }`}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Ribbon Row 3: 탭 콘텐츠 ─────────────────────────────────── */}
-      <div className="h-9 flex items-center gap-0.5 px-2 border-b border-zinc-700 bg-[#2d2d2d] flex-shrink-0 text-xs">
-        {ribbonTab === "home" && (<>
-          {/* 클립보드 */}
-          <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
-            <button onClick={() => canvasRef.current?.pasteBlock()}
-              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">📋</span>
-              <span className="text-[8px] mt-0.5">붙여넣기</span>
-            </button>
-            <div className="flex flex-col gap-0.5">
-              <button onClick={() => canvasRef.current?.cutBlock()}
-                className="px-1 py-0 rounded hover:bg-zinc-700 text-zinc-400 text-[10px]">✂ 잘라내기</button>
-              <button onClick={() => canvasRef.current?.copyBlock()}
-                className="px-1 py-0 rounded hover:bg-zinc-700 text-zinc-400 text-[10px]">📄 복사하기</button>
-              <button
-                onClick={() => {
-                  if (!selectedBlock) return;
-                  const { fontFamily, fontSize, fontWeight, fontStyle, textDecoration, color, textAlign } = selectedBlock;
-                  canvasRef.current?.activateFormatPainter({ fontFamily, fontSize, fontWeight, fontStyle, textDecoration, color, textAlign });
-                  setFmtPainterOn(true);
-                  setTimeout(() => setFmtPainterOn(canvasRef.current?.isFmtPainterActive() ?? false), 100);
-                }}
-                disabled={!selectedBlock}
-                className={`px-1 py-0 rounded text-[10px] disabled:text-zinc-600 disabled:cursor-default ${fmtPainterOn ? "bg-orange-600 text-white" : "hover:bg-zinc-700 text-zinc-400"}`}
-                title="선택한 블록의 서식을 다른 블록에 적용">
-                🖌 서식복사
-              </button>
-            </div>
-          </div>
-
-          {/* 글꼴 */}
-          <select value={fmt.fontFamily} onChange={(e) => applyFormat({ fontFamily: e.target.value })}
-            className="bg-[#3c3c3c] border border-zinc-600 rounded px-1.5 py-0.5 text-white outline-none hover:border-zinc-400 w-28">
-            {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
-          </select>
-          <input type="number" min={12} max={200} value={fmt.fontSize}
-            onChange={(e) => applyFormat({ fontSize: Math.max(12, Math.min(200, Number(e.target.value))) })}
-            className="w-11 bg-[#3c3c3c] border border-zinc-600 rounded px-1 py-0.5 text-white outline-none text-center hover:border-zinc-400" />
-
-          <div className="w-px h-5 bg-zinc-600 mx-0.5" />
-
-          <button onClick={() => applyFormat({ fontWeight: fmt.fontWeight === "bold" ? "normal" : "bold" })}
-            className={`w-6 h-6 rounded font-bold ${fmt.fontWeight === "bold" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>B</button>
-          <button onClick={() => applyFormat({ fontStyle: fmt.fontStyle === "italic" ? "normal" : "italic" })}
-            className={`w-6 h-6 rounded italic ${fmt.fontStyle === "italic" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>I</button>
-          <button onClick={() => applyFormat({ textDecoration: fmt.textDecoration === "underline" ? "none" : "underline" })}
-            className={`w-6 h-6 rounded underline ${fmt.textDecoration === "underline" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>U</button>
-          <button onClick={() => applyFormat({ textDecoration: fmt.textDecoration === "line-through" ? "none" : "line-through" })}
-            className={`w-6 h-6 rounded line-through ${fmt.textDecoration === "line-through" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>S</button>
-
-          <div className="w-px h-5 bg-zinc-600 mx-0.5" />
-
-          <input type="color" value={fmt.color} onChange={(e) => applyFormat({ color: e.target.value })}
-            className="w-6 h-6 rounded cursor-pointer border border-zinc-600 bg-transparent p-0" title="글자 색상" />
-
-          <div className="w-px h-5 bg-zinc-600 mx-0.5" />
-
-          {(["left", "center", "right"] as const).map((align) => (
-            <button key={align} onClick={() => applyFormat({ textAlign: align })}
-              className={`w-6 h-6 rounded ${fmt.textAlign === align ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}
-              title={align === "left" ? "왼쪽" : align === "center" ? "가운데" : "오른쪽"}>
-              {align === "left" ? "⫷" : align === "center" ? "☰" : "⫸"}
-            </button>
-          ))}
-
-          {!selectedBlock && (<>
-            <div className="w-px h-5 bg-zinc-600 mx-0.5" />
-            {(["top", "center", "bottom"] as const).map((pos) => (
-              <button key={pos} onClick={() => setSubtitle({ position: pos })}
-                className={`px-1.5 h-6 rounded ${layerConfig.subtitle.position === pos ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
-                {pos === "top" ? "상▲" : pos === "center" ? "중" : "하▼"}
-              </button>
-            ))}
-          </>)}
-
-          <div className="flex-1" />
-          <button onClick={() => setIsLoop((v) => !v)}
-            className={`px-2 h-6 rounded ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-            ↺ {isLoop ? "루프 ON" : "루프"}
-          </button>
-        </>)}
-
-        {ribbonTab === "design" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
-            <span className="text-zinc-400 text-[10px] mr-1">테마</span>
-            {([
-              { label: "어두운", bg: "#000000", text: "#ffffff" },
-              { label: "밝은",   bg: "#ffffff", text: "#000000" },
-              { label: "파랑",   bg: "#001040", text: "#ffffff" },
-              { label: "붉은",   bg: "#1a0000", text: "#ff9090" },
-              { label: "남색",   bg: "#0a0a1e", text: "#e0e0ff" },
-            ] as const).map(({ label, bg, text }) => (
-              <button key={label} title={label}
-                onClick={() => handleLayerChange({
-                  ...layerConfig,
-                  background: { ...layerConfig.background, type: "color", color: bg },
-                  subtitle: { ...layerConfig.subtitle, color: text },
-                })}
-                className="flex flex-col items-center gap-0.5 px-1 py-0.5 rounded hover:bg-zinc-700">
-                <div className="w-8 h-5 rounded border border-zinc-600 flex items-center justify-center"
-                  style={{ background: bg }}>
-                  <span style={{ fontSize: 7, color: text, fontWeight: "bold" }}>Aa</span>
-                </div>
-                <span className="text-[8px] text-zinc-400">{label}</span>
-              </button>
-            ))}
-          </div>
-          <button onClick={() => { setShowPanel(true); setRightTab("settings"); }}
-            className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-            <span className="text-base leading-none">🎨</span>
-            <span className="text-[9px] mt-0.5">디자인 패널</span>
-          </button>
-        </>)}
-
-        {ribbonTab === "transition" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
-            <span className="text-zinc-400 text-[10px] mr-1">전환 속도</span>
-            {([
-              { label: "없음",   ms: 0 },
-              { label: "빠름",   ms: 150 },
-              { label: "보통",   ms: 300 },
-              { label: "느림",   ms: 600 },
-            ] as const).map(({ label, ms }) => (
-              <button key={ms}
-                onClick={() => handleLayerChange({ ...layerConfig, transitionMs: ms })}
-                className={`px-2 h-6 rounded text-[10px] ${
-                  (layerConfig.transitionMs ?? 250) === ms
-                    ? "bg-blue-600 text-white"
-                    : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-zinc-500 text-[10px]">슬라이드 간 페이드 전환 속도</span>
-        </>)}
-
-        {ribbonTab === "animation" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
-            <span className="text-zinc-400 text-[10px] mr-1">텍스트 입장</span>
-            {([
-              { label: "없음",      val: "none"       as const },
-              { label: "페이드인",   val: "fade"       as const },
-              { label: "위로↑",     val: "slide-up"   as const },
-              { label: "아래로↓",   val: "slide-down" as const },
-              { label: "줌인",      val: "zoom-in"    as const },
-            ]).map(({ label, val }) => (
-              <button key={val}
-                onClick={() => setSubtitle({ textEntrance: val })}
-                className={`px-2 h-6 rounded text-[10px] ${
-                  (layerConfig.subtitle.textEntrance ?? "fade") === val
-                    ? "bg-blue-600 text-white"
-                    : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"
-                }`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <span className="text-zinc-500 text-[10px]">새 슬라이드 표시 시 텍스트 효과</span>
-        </>)}
-
-        {ribbonTab === "slideshow" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-2">
-            <button onClick={() => { useQueueStore.getState().setActiveFlatSlide(0); openOutput(); }}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">⏮</span>
-              <span className="text-[9px] mt-0.5">처음부터</span>
-            </button>
-            <button onClick={openOutput}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">▶</span>
-              <span className="text-[9px] mt-0.5">현재부터</span>
-            </button>
-            <button onClick={() => ipc.closeOutputWindow().catch(() => {})}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
-              <span className="text-base leading-none">⏹</span>
-              <span className="text-[9px] mt-0.5">종료</span>
-            </button>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setIsLoop((v) => !v)}
-              className={`px-2 h-6 rounded text-[10px] ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              ↺ 루프
-            </button>
-            <button onClick={() => { const n = !isBlackout; setBlackout(n); ipc.sendBlackout(n); }}
-              className={`px-2 h-6 rounded text-[10px] ${isBlackout ? "bg-red-700 text-red-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              ● 블랙
-            </button>
-            <button onClick={() => setIsClear((v) => !v)}
-              className={`px-2 h-6 rounded text-[10px] ${isClear ? "bg-orange-700 text-orange-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              지우기
-            </button>
-          </div>
-        </>)}
-
-        {ribbonTab === "review" && (<>
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-400 text-[10px]">예배 메모</span>
-            <input
-              type="text"
-              placeholder="운영 메모..."
-              value={serviceNotes}
-              onChange={(e) => {
-                const notes = e.target.value;
-                setServiceNotes(notes);
-                if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
-                notesDebounceRef.current = setTimeout(() => {
-                  if (!currentService) return;
-                  serviceDb.updateNotes(currentService.id, notes).catch(console.error);
-                  useQueueStore.getState().updateCurrentServiceNotes(notes);
-                }, 500);
-              }}
-              className="bg-[#3c3c3c] border border-zinc-600 rounded px-2 py-0.5 text-white w-72 text-xs outline-none focus:border-blue-500"
-            />
-            <span className="text-zinc-600 text-[10px]">* 투사 화면에 표시되지 않음</span>
-          </div>
-        </>)}
-
-        {ribbonTab === "view" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
-            <span className="text-zinc-400 text-[10px] mr-1">줌</span>
-            <input type="range" min={25} max={200} step={5} value={zoom}
-              onChange={(e) => setZoom(Number(e.target.value))}
-              className="w-20 accent-zinc-400" />
-            <span className="text-zinc-300 text-[10px] w-8 tabular-nums">{zoom}%</span>
-            {([50, 85, 100, 150] as const).map((z) => (
-              <button key={z} onClick={() => setZoom(z)}
-                className={`px-1.5 h-6 rounded text-[10px] ${zoom === z ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
-                {z}%
-              </button>
-            ))}
-          </div>
-          <button onClick={() => setShowPanel((v) => !v)}
-            className={`flex flex-col items-center px-2 py-0.5 rounded ${showPanel ? "bg-zinc-600 text-white" : "hover:bg-zinc-700 text-zinc-300"}`}>
-            <span className="text-base leading-none">☰</span>
-            <span className="text-[9px] mt-0.5">패널</span>
-          </button>
-        </>)}
-
-        {ribbonTab === "insert" && (<>
-          <div className="border-r border-zinc-600 pr-3 mr-1 flex flex-col items-center">
-            <button onClick={handleNewSlide}
-              disabled={!currentService}
-              title={!currentService ? "순서 탭에서 예배를 먼저 선택하세요" : "새 슬라이드 추가"}
-              className={`flex flex-col items-center px-2 py-0.5 rounded ${!currentService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base leading-none">🗒</span>
-              <span className="text-[9px] mt-0.5">새 슬라이드</span>
-            </button>
-          </div>
-          <div className="border-r border-zinc-600 pr-3 mr-1 flex flex-col items-center">
-            <button onClick={() => {
-              if (flatIdx < 0) {
-                if (slides.length > 0) {
-                  useQueueStore.getState().setActiveFlatSlide(0);
-                  pendingAddBlockRef.current = true;
-                }
-                return;
-              }
-              canvasRef.current?.addBlock();
-            }}
-              disabled={slides.length === 0}
-              title={slides.length === 0 ? "순서 탭에서 예배와 찬양을 먼저 추가하세요" : "텍스트 상자 추가"}
-              className={`flex flex-col items-center px-2 py-0.5 rounded ${slides.length === 0 ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base font-bold leading-none">T</span>
-              <span className="text-[9px] mt-0.5">텍스트 상자</span>
-            </button>
-          </div>
-          <div className="flex gap-1">
-            <button onClick={handleInsertImage}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">🖼</span>
-              <span className="text-[9px] mt-0.5">이미지</span>
-            </button>
-            <button onClick={handleInsertVideo}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">🎬</span>
-              <span className="text-[9px] mt-0.5">비디오</span>
-            </button>
-            <button
-              onClick={soundName ? handleToggleSound : handleInsertSound}
-              className={`flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 ${soundPlaying ? "text-green-400" : "text-zinc-300"}`}
-              title={soundName ? `${soundName} — 클릭하여 ${soundPlaying ? "일시정지" : "재생"}` : "오디오 파일 열기"}>
-              <span className="text-base leading-none">🔊</span>
-              <span className="text-[9px] mt-0.5">{soundName ? (soundPlaying ? "▶ 재생중" : "⏸ 정지") : "사운드"}</span>
-            </button>
-            {soundName && (
-              <button onClick={handleInsertSound} className="flex flex-col items-center px-1 py-0.5 rounded hover:bg-zinc-700 text-zinc-500" title="다른 파일 열기">
-                <span className="text-[9px]">📂</span>
-              </button>
-            )}
-          </div>
-        </>)}
-      </div>
+      <RibbonToolbar
+        ribbonTab={ribbonTab}
+        onSetRibbonTab={setRibbonTab}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onUndo={() => handleUndoRef.current()}
+        onRedo={() => handleRedoRef.current()}
+        hasService={!!currentService}
+        serviceItemCount={currentService?.items.length ?? 0}
+        onSaveTemplate={handleSaveTemplate}
+        onExportService={handleExportService}
+        onOpenTemplateModal={() => setShowTemplateModal(true)}
+        onPasteBlock={handlePasteBlock}
+        onCutBlock={handleCutBlock}
+        onCopyBlock={handleCopyBlock}
+        onActivateFmtPainter={handleActivateFmtPainter}
+        fmtPainterOn={fmtPainterOn}
+        hasSelectedBlock={!!selectedBlock}
+        fmt={fmt}
+        onFormat={handleFormat}
+        layerConfig={layerConfig}
+        onLayerChange={handleLayerChange}
+        isLoop={isLoop}
+        onToggleLoop={handleToggleLoop}
+        isBlackout={isBlackout}
+        onToggleBlackout={handleToggleBlackout}
+        isClear={isClear}
+        onToggleClear={handleToggleClear}
+        onOpenOutput={openOutput}
+        onFromStart={handleFromStart}
+        onCloseOutput={handleCloseOutput}
+        serviceNotes={serviceNotes}
+        onServiceNotesChange={handleServiceNotesChange}
+        zoom={zoom}
+        onSetZoom={setZoom}
+        showPanel={showPanel}
+        onTogglePanel={handleTogglePanel}
+        hasSlides={slides.length > 0}
+        onNewSlide={handleNewSlide}
+        onAddBlock={handleAddBlock}
+        onInsertImage={handleInsertImage}
+        onInsertVideo={handleInsertVideo}
+        soundName={soundName}
+        soundPlaying={soundPlaying}
+        onToggleSound={handleToggleSound}
+        onInsertSound={handleInsertSound}
+        onOpenDesignPanel={handleOpenDesignPanel}
+        onShowAbout={() => setShowAbout(true)}
+      />
 
       {/* ── Main area ──────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
@@ -1433,6 +1084,10 @@ export default function ControllerPage() {
         {/* Right: Pane (PPT Format pane) */}
         {showPanel && (
           <div className="w-64 flex-shrink-0 border-l border-zinc-700 flex flex-col overflow-hidden bg-[#252526]">
+            {/* 출력 미리보기 */}
+            <div className="p-1.5 border-b border-zinc-700 flex-shrink-0 flex justify-center">
+              <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} />
+            </div>
             <div className="flex border-b border-zinc-700 flex-shrink-0">
               {(["queue", "songs", "settings"] as const).map((tab) => (
                 <button
@@ -1450,7 +1105,13 @@ export default function ControllerPage() {
             </div>
             <div className="flex-1 overflow-hidden">
               {rightTab === "queue" && <QueuePanel />}
-              {rightTab === "songs" && <LibraryPanel mode="songs" />}
+              {rightTab === "songs" && (
+                <LibraryPanel
+                  mode="songs"
+                  initialEditSong={pendingEditSong}
+                  onEditSongConsumed={() => setPendingEditSong(null)}
+                />
+              )}
               {rightTab === "settings" && (
                 <LayerSidebar
                   layerConfig={layerConfig}
@@ -1541,6 +1202,14 @@ export default function ControllerPage() {
         />
       )}
       {showCheatSheet && <ShortcutCheatSheet onClose={() => setShowCheatSheet(false)} />}
+      <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
+      {showTemplateModal && (
+        <TemplateModal
+          onCreateService={(svc) => { handleLoadService(svc); setShowTemplateModal(false); }}
+          onClose={() => setShowTemplateModal(false)}
+        />
+      )}
+      <ErrorToast />
     </ErrorBoundary>
   );
 }
