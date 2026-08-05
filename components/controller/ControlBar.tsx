@@ -75,7 +75,7 @@ export default function ControlBar({
     : "카운트";
 
   return (
-    <div className="h-9 border-b border-zinc-700 bg-[#3c3c3c] flex-shrink-0 text-xs overflow-x-auto">
+    <div data-help-id="controlbar" className="h-9 border-b border-zinc-700 bg-[#3c3c3c] flex-shrink-0 text-xs overflow-x-auto">
     <div className="flex items-center gap-1.5 px-3 h-full min-w-max">
       <span className="font-bold text-zinc-200 tracking-wide mr-1">✝ Worship</span>
       <div className="w-px h-5 bg-zinc-600" />

@@ -47,7 +47,7 @@ import OnboardingGuide from "@/components/controller/OnboardingGuide";
 import HelpOverlay from "@/components/controller/HelpOverlay";
 
 type RightTab = "queue" | "songs" | "settings";
-type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view" | "help";
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert } = useOutputStore();
@@ -920,7 +920,6 @@ export default function ControllerPage() {
     <ErrorBoundary>
     <div className="flex flex-col h-screen bg-zinc-900 text-white select-none overflow-hidden">
 
-      <div data-help-id="controlbar">
       <ControlBar
         serviceName={currentService?.name ?? null}
         isDirty={isDirty}
@@ -967,9 +966,8 @@ export default function ControllerPage() {
         onTogglePanel={handleTogglePanel}
         onShowCheatSheet={handleShowCheatSheet}
       />
-      </div>
 
-      <div data-help-id="ribbon">
+      <div data-help-id="ribbon" className="flex-shrink-0">
       <RibbonToolbar
         ribbonTab={ribbonTab}
         onSetRibbonTab={setRibbonTab}
@@ -1018,6 +1016,8 @@ export default function ControllerPage() {
         onInsertSound={handleInsertSound}
         onOpenDesignPanel={handleOpenDesignPanel}
         onShowAbout={() => setShowAbout(true)}
+        onShowHelp={() => setShowHelp(true)}
+        onResetOnboarding={() => { localStorage.removeItem("worship-onboarding-v1"); setShowOnboarding(true); }}
       />
       </div>
 
