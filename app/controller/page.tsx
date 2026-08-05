@@ -44,6 +44,7 @@ import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
 import AboutDialog from "@/components/controller/AboutDialog";
 import OnboardingGuide from "@/components/controller/OnboardingGuide";
+import HelpOverlay from "@/components/controller/HelpOverlay";
 
 type RightTab = "queue" | "songs" | "settings";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
@@ -114,6 +115,7 @@ export default function ControllerPage() {
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   useEffect(() => {
     if (!localStorage.getItem("worship-onboarding-v1")) setShowOnboarding(true);
   }, []);
@@ -918,6 +920,7 @@ export default function ControllerPage() {
     <ErrorBoundary>
     <div className="flex flex-col h-screen bg-zinc-900 text-white select-none overflow-hidden">
 
+      <div data-help-id="controlbar">
       <ControlBar
         serviceName={currentService?.name ?? null}
         isDirty={isDirty}
@@ -964,7 +967,9 @@ export default function ControllerPage() {
         onTogglePanel={handleTogglePanel}
         onShowCheatSheet={handleShowCheatSheet}
       />
+      </div>
 
+      <div data-help-id="ribbon">
       <RibbonToolbar
         ribbonTab={ribbonTab}
         onSetRibbonTab={setRibbonTab}
@@ -1014,17 +1019,18 @@ export default function ControllerPage() {
         onOpenDesignPanel={handleOpenDesignPanel}
         onShowAbout={() => setShowAbout(true)}
       />
+      </div>
 
       {/* ── Main area ──────────────────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Slides panel (PPT style) */}
-        <div className="w-56 flex-shrink-0 border-r border-zinc-700 overflow-hidden bg-[#252526]">
+        <div data-help-id="slide-list" className="w-56 flex-shrink-0 border-r border-zinc-700 overflow-hidden bg-[#252526]">
           <SlideThumbnailList onOpenDesignPanel={() => { setShowPanel(true); setRightTab("settings"); }} />
         </div>
 
         {/* Center: Canvas with PPT-style rulers */}
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0 bg-[#1e1e1e]">
+        <div data-help-id="canvas" className="flex-1 flex flex-col overflow-hidden min-w-0 bg-[#1e1e1e]">
           {/* Horizontal ruler */}
           <div className="flex flex-shrink-0 h-5 bg-[#2b2b2b] border-b border-[#1a1a1a] select-none">
             <div className="w-5 flex-shrink-0 border-r border-[#1a1a1a]" />
@@ -1088,7 +1094,7 @@ export default function ControllerPage() {
 
         {/* Right: Pane (PPT Format pane) */}
         {showPanel && (
-          <div className="w-64 flex-shrink-0 border-l border-zinc-700 flex flex-col overflow-hidden bg-[#252526]">
+          <div data-help-id="right-panel" className="w-64 flex-shrink-0 border-l border-zinc-700 flex flex-col overflow-hidden bg-[#252526]">
             {/* 출력 미리보기 */}
             <div className="p-1.5 border-b border-zinc-700 flex-shrink-0 flex justify-center">
               <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} />
@@ -1180,6 +1186,17 @@ export default function ControllerPage() {
 
         {/* 시계 */}
         <span className="text-zinc-500 font-mono tabular-nums">{clock}</span>
+
+        <div className="w-px h-4 bg-zinc-700" />
+
+        {/* UI 가이드 */}
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
+          className="w-5 h-5 rounded-full border border-zinc-600 text-zinc-500 hover:text-zinc-200 hover:border-zinc-400 flex items-center justify-center text-[11px] font-bold transition-colors"
+          title="UI 가이드 보기"
+        >
+          ?
+        </button>
       </div>
 
     </div>
@@ -1214,6 +1231,7 @@ export default function ControllerPage() {
           onClose={() => setShowTemplateModal(false)}
         />
       )}
+      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showOnboarding && <OnboardingGuide onComplete={() => setShowOnboarding(false)} />}
       <ErrorToast />
     </ErrorBoundary>
