@@ -1010,7 +1010,10 @@ export default function ControllerPage() {
         onTogglePanel={handleTogglePanel}
         hasSlides={slides.length > 0}
         onNewSlide={handleNewSlide}
+        onDupSlide={handleDupSlide}
         onAddBlock={handleAddBlock}
+        onAddSong={() => { setShowPanel(true); setRightTab("songs"); }}
+        onAddScripture={() => { setShowPanel(true); setRightTab("queue"); window.dispatchEvent(new CustomEvent("worship:open-scripture-tab")); }}
         onInsertImage={handleInsertImage}
         onInsertVideo={handleInsertVideo}
         soundName={soundName}

@@ -65,7 +65,10 @@ interface Props {
 
   hasSlides: boolean;
   onNewSlide: () => void;
+  onDupSlide: () => void;
   onAddBlock: () => void;
+  onAddSong: () => void;
+  onAddScripture: () => void;
   onInsertImage: () => void;
   onInsertVideo: () => void;
   soundName: string | null;
@@ -91,7 +94,7 @@ export default function RibbonToolbar({
   isBlackout, onToggleBlackout, isClear, onToggleClear, onOpenOutput, onFromStart, onCloseOutput,
   serviceNotes, onServiceNotesChange,
   zoom, onSetZoom, showPanel, onTogglePanel,
-  hasSlides, onNewSlide, onAddBlock, onInsertImage, onInsertVideo,
+  hasSlides, onNewSlide, onDupSlide, onAddBlock, onAddSong, onAddScripture, onInsertImage, onInsertVideo,
   soundName, soundPlaying, onToggleSound, onInsertSound,
   onOpenDesignPanel, onShowAbout,
 }: Props) {
@@ -368,12 +371,32 @@ export default function RibbonToolbar({
         </>)}
 
         {ribbonTab === "insert" && (<>
-          <div className="border-r border-zinc-600 pr-3 mr-1 flex flex-col items-center">
+          <div className="border-r border-zinc-600 pr-3 mr-1 flex items-center gap-1">
             <button onClick={onNewSlide} disabled={!hasService}
               title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "새 슬라이드 추가"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
               <span className="text-base leading-none">🗒</span>
               <span className="text-[9px] mt-0.5">새 슬라이드</span>
+            </button>
+            <button onClick={onDupSlide} disabled={!hasSlides}
+              title={!hasSlides ? "슬라이드가 없습니다" : "현재 슬라이드 복제"}
+              className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasSlides ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
+              <span className="text-base leading-none">⧉</span>
+              <span className="text-[9px] mt-0.5">복제</span>
+            </button>
+          </div>
+          <div className="border-r border-zinc-600 pr-3 mr-1 flex items-center gap-1">
+            <button onClick={onAddSong} disabled={!hasService}
+              title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "찬양 추가"}
+              className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
+              <span className="text-base leading-none">🎵</span>
+              <span className="text-[9px] mt-0.5">찬양</span>
+            </button>
+            <button onClick={onAddScripture} disabled={!hasService}
+              title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "성경 구절 추가"}
+              className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
+              <span className="text-base leading-none">📖</span>
+              <span className="text-[9px] mt-0.5">성경</span>
             </button>
           </div>
           <div className="border-r border-zinc-600 pr-3 mr-1 flex flex-col items-center">
