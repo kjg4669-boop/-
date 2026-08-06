@@ -492,7 +492,7 @@ export default function RibbonToolbar({
             {soundName && (
               <button onClick={onInsertSound}
                 className="flex flex-col items-center px-1 py-0.5 rounded hover:bg-zinc-700 text-zinc-500" title="다른 파일 열기">
-                <span className="text-[10px]">📂</span>
+                <span className="text-xs">📂</span>
               </button>
             )}
           </div>
