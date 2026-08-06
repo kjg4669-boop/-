@@ -9,6 +9,11 @@ import type {
   CountdownPayload,
   SlideMeta,
   VideoControlPayload,
+  AudioPlayPayload,
+  LookApplyPayload,
+  RemoteCommand,
+  AnnouncementShowPayload,
+  StageMessagePayload,
 } from "./types";
 
 // Check if running inside Tauri
@@ -103,11 +108,14 @@ export const ipc = {
   onPlaybackStatus: (cb: (status: PlaybackStatusPayload) => void) =>
     listenEvent<PlaybackStatusPayload>("playback:status", cb),
 
-  sendAlert: (text: string, visible: boolean) =>
-    emitEvent<AlertPayload>("alert:show", { text, visible }),
+  sendAlert: (payload: AlertPayload) =>
+    emitEvent<AlertPayload>("alert:show", payload),
 
-  onAlert: (cb: (text: string, visible: boolean) => void) =>
-    listenEvent<AlertPayload>("alert:show", (p) => cb(p.text, p.visible)),
+  sendAlertHide: (position: AlertPayload["position"] = "bottom", backgroundColor?: string, textColor?: string) =>
+    emitEvent<AlertPayload>("alert:show", { text: "", visible: false, duration: 0, position, backgroundColor, textColor }),
+
+  onAlert: (cb: (payload: AlertPayload) => void) =>
+    listenEvent<AlertPayload>("alert:show", (p) => cb(p)),
 
   sendFreeze: (active: boolean) =>
     emitEvent<{ active: boolean }>("freeze:toggle", { active }),
@@ -159,4 +167,60 @@ export const ipc = {
 
   restoreDatabase: (srcPath: string) =>
     invokeCommand<void>("restore_database", { src_path: srcPath }),
+
+  // Backing track audio
+  sendAudioPlay: (payload: AudioPlayPayload) =>
+    emitEvent<AudioPlayPayload>("audio:play", payload),
+
+  sendAudioStop: () =>
+    emitEvent("audio:stop", {}),
+
+  onAudioPlay: (cb: (payload: AudioPlayPayload) => void) =>
+    listenEvent<AudioPlayPayload>("audio:play", cb),
+
+  onAudioStop: (cb: () => void) =>
+    listenEvent("audio:stop", cb),
+
+  // Looks presets
+  sendLookApply: (payload: LookApplyPayload) =>
+    emitEvent<LookApplyPayload>("look:apply", payload),
+
+  onLookApply: (cb: (payload: LookApplyPayload) => void) =>
+    listenEvent<LookApplyPayload>("look:apply", cb),
+
+  // Web Remote Control
+  startRemoteServer: (port: number) =>
+    invokeCommand<void>("start_remote_server", { port }),
+  stopRemoteServer: () =>
+    invokeCommand<void>("stop_remote_server"),
+  getLocalIp: () =>
+    invokeCommand<string>("get_local_ip"),
+  sendRemoteState: (slideText: string, slideIndex: number, totalSlides: number) =>
+    invokeCommand<void>("send_remote_state", {
+      payload: JSON.stringify({ type: "state", slideText, slideIndex, totalSlides }),
+    }),
+  onRemoteCommand: (cb: (cmd: RemoteCommand) => void) =>
+    listenEvent<RemoteCommand>("remote:command", cb),
+
+  // NDI Output
+  isNdiAvailable: () =>
+    invokeCommand<boolean>("is_ndi_available"),
+  startNdiOutput: (sourceName: string, width?: number, height?: number, fps?: number) =>
+    invokeCommand<void>("start_ndi_output", { source_name: sourceName, width, height, fps }),
+  stopNdiOutput: () =>
+    invokeCommand<void>("stop_ndi_output"),
+  onNdiError: (cb: (msg: string) => void) =>
+    listenEvent<string>("ndi:error", cb),
+
+  // Announcement loop
+  sendAnnouncementShow: (payload: AnnouncementShowPayload) =>
+    emitEvent<AnnouncementShowPayload>("announcement:show", payload),
+  onAnnouncementShow: (cb: (payload: AnnouncementShowPayload) => void) =>
+    listenEvent<AnnouncementShowPayload>("announcement:show", cb),
+
+  // Stage private messages (visible only on stage display)
+  sendStageMessage: (payload: StageMessagePayload) =>
+    emitEvent<StageMessagePayload>("stage:message", payload),
+  onStageMessage: (cb: (payload: StageMessagePayload) => void) =>
+    listenEvent<StageMessagePayload>("stage:message", cb),
 };

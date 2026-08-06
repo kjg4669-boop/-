@@ -40,6 +40,11 @@ interface Props {
   onOpenOutput: () => void;
   isStageOpen: boolean;
   onToggleStage: () => void;
+  stageMsgText: string;
+  onSetStageMsgText: (v: string) => void;
+  stageMsgActive: boolean;
+  onSendStageMsg: () => void;
+  onClearStageMsg: () => void;
 
   countdownMin: number;
   onSetCountdownMin: (n: number) => void;
@@ -65,6 +70,7 @@ export default function ControlBar({
   alertInput, onSetAlertInput, alertActive, onSendAlert, onClearAlert,
   outputConnected, onOpenOutput,
   isStageOpen, onToggleStage,
+  stageMsgText, onSetStageMsgText, stageMsgActive, onSendStageMsg, onClearStageMsg,
   countdownMin, onSetCountdownMin, countdownActive, countdownRemainingMs, onToggleCountdown, onResetCountdown,
   clock, showPanel, onTogglePanel, onShowCheatSheet,
 }: Props) {
@@ -184,6 +190,25 @@ export default function ControlBar({
         className={`px-2 py-0.5 rounded font-medium ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}>
         🎤 Stage
       </button>
+
+      {/* Stage message quick send */}
+      <div className="flex gap-1 items-center">
+        <input
+          type="text"
+          value={stageMsgText}
+          onChange={(e) => onSetStageMsgText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") onSendStageMsg(); }}
+          placeholder="스테이지 메시지..."
+          className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-yellow-500 min-w-0 w-28"
+        />
+        <button
+          onClick={stageMsgActive ? onClearStageMsg : onSendStageMsg}
+          disabled={!stageMsgActive && !stageMsgText.trim()}
+          className={`px-2 py-1 text-xs rounded shrink-0 disabled:opacity-40 ${stageMsgActive ? "bg-yellow-600 hover:bg-yellow-500 text-black" : "bg-zinc-700 hover:bg-zinc-600 text-white"}`}
+        >
+          {stageMsgActive ? "지우기" : "전송"}
+        </button>
+      </div>
 
       <div className="w-px h-5 bg-zinc-600" />
 

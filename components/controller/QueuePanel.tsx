@@ -8,7 +8,8 @@ import { useQueueStore } from "@/stores/queueStore";
 import { serviceDb } from "@/lib/db";
 import type { ServiceItem, ServiceItemSettings, LyricSlide } from "@/lib/types";
 import { AddItemPanel } from "./AddItemPanel";
-import { SECTION_LABEL } from "@/lib/constants";
+import { SECTION_LABEL, SECTION_COLORS } from "@/lib/constants";
+import { getSlidesInOrder } from "@/lib/utils";
 
 const ITEM_TYPE_ICON: Record<string, string> = {
   song: "♪",
@@ -406,7 +407,7 @@ export default function QueuePanel() {
               {items.map((item, i) => {
                 const isActive = i === activeItemIndex;
                 const scriptureSlides = (item.settings_json as ServiceItemSettings)?.scripture?.slides;
-                const slides: LyricSlide[] = item.song?.lyrics_json ??
+                const slides: LyricSlide[] = item.song ? getSlidesInOrder(item.song) :
                   scriptureSlides?.map((s, i) => ({ id: `scripture-${i}`, section: "verse" as const, sectionIndex: i + 1, lines: s.lines })) ?? [];
                 return (
                   <div key={item.id}>
@@ -439,9 +440,19 @@ export default function QueuePanel() {
                                   : "border-l-transparent text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
                               }`}
                             >
-                              <span className={`flex-shrink-0 px-1 rounded text-[9px] font-semibold mt-px ${
-                                isActiveSlide ? "bg-blue-700 text-blue-100" : "bg-zinc-700 text-zinc-400"
-                              }`}>
+                              <span
+                                style={{
+                                  backgroundColor: SECTION_COLORS[slide.section] ?? "#6b7280",
+                                  opacity: isActiveSlide ? 1 : 0.55,
+                                  color: "#fff",
+                                  flexShrink: 0,
+                                  padding: "0px 4px",
+                                  borderRadius: 3,
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  marginTop: 1,
+                                }}
+                              >
                                 {SECTION_LABEL[slide.section] ?? slide.section}{slide.sectionIndex}
                               </span>
                               <span className="truncate leading-relaxed">

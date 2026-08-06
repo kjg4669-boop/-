@@ -35,6 +35,8 @@ export interface LyricSlide {
   section: LyricSection;
   sectionIndex: number;
   lines: string[];
+  lines2?: string[];
+  chords?: string;   // chord line for musicians e.g. "C  G  Am  F"
   canvas?: {
     textBlocks: TextBlock[];
   };
@@ -46,6 +48,11 @@ export interface Song {
   artist: string;
   lyrics_json: LyricSlide[];
   media_id?: number;
+  ccli_number?: string;
+  copyright_text?: string;
+  publisher?: string;
+  verse_order?: string[];
+  bpm?: number;
   created_at: string;
   updated_at: string;
 }
@@ -79,8 +86,17 @@ export interface LayerConfig {
     fontWeight: "normal" | "bold";
     fontStyle: "normal" | "italic";
     textAlign: "left" | "center" | "right";
+    bilingualEnabled?: boolean;
+    lines2?: string[];
+    fontSize2?: number;
+    color2?: string;
+    fontWeight2?: "normal" | "bold";
+    fontStyle2?: "normal" | "italic";
+    lineHeight?: number;   // e.g. 1.3; default 1.3
+    letterSpacing?: number; // in px; default 0
     textEntrance?: "none" | "fade" | "slide-up" | "slide-down" | "zoom-in";
     layout?: "full" | "left-half" | "right-half";
+    showCopyright?: boolean;
   };
   overlay: {
     visible: boolean;
@@ -164,8 +180,17 @@ export const DEFAULT_LAYER_CONFIG: LayerConfig = {
     fontWeight: "normal",
     fontStyle: "normal",
     textAlign: "center",
+    bilingualEnabled: false,
+    lines2: [],
+    fontSize2: 28,
+    color2: "#cccccc",
+    fontWeight2: "normal",
+    fontStyle2: "normal",
     textEntrance: "fade",
     layout: "full",
+    showCopyright: true,
+    lineHeight: 1.3,
+    letterSpacing: 0,
   },
   overlay: { visible: false, x: 0, y: 0, width: 320, height: 180, opacity: 1 },
 };
@@ -213,17 +238,88 @@ export interface SlideMeta {
   totalItems: number;   // total items in service
   nextLines?: string[];
   nextSection?: string;
+  bpm?: number;
+  chords?: string;
   notes?: string;
+  copyright?: string;
 }
 
 export interface SlideUpdatePayload { layerConfig: LayerConfig; meta?: SlideMeta; }
 export interface OverlayTogglePayload { id: string; visible: boolean; }
 export interface PlaybackStatusPayload { currentTime: number; duration: number; playing: boolean; }
-export interface AlertPayload { text: string; visible: boolean; }
+export interface AlertPayload {
+  text: string;
+  visible: boolean;
+  duration: number;        // ms; 0 = manual dismiss only
+  position: "top" | "bottom" | "center";
+  backgroundColor?: string;
+  textColor?: string;
+}
+
+export interface RemoteCommand {
+  type: "next" | "prev" | "blackout" | "goto";
+  slideIndex?: number;
+}
+
+export interface BackingTrack {
+  id: number;
+  song_id: number;
+  file_path: string;
+  volume: number;
+  repeat: boolean;
+  start_paused: boolean;
+  created_at: string;
+}
+
+export interface AudioPlayPayload {
+  filePath: string;
+  volume: number;
+  repeat: boolean;
+}
 
 // Countdown timer payload
 export interface CountdownPayload {
   active: boolean;
   remainingMs: number;
   totalMs: number;
+}
+
+export interface Look {
+  id: number;
+  name: string;
+  showBackground: boolean;
+  showSubtitle: boolean;
+  showOverlay: boolean;
+  showCanvas: boolean;
+  showCountdown: boolean;
+}
+
+export interface LookApplyPayload {
+  lookId: number | null;
+  showBackground: boolean;
+  showSubtitle: boolean;
+  showOverlay: boolean;
+  showCanvas: boolean;
+  showCountdown: boolean;
+}
+
+export interface Announcement {
+  id: number;
+  title: string;
+  body: string;
+  duration_sec: number;
+  order_num: number;
+  active: boolean;
+  created_at: string;
+}
+
+export interface AnnouncementShowPayload {
+  visible: boolean;
+  title: string;
+  body: string;
+}
+
+export interface StageMessagePayload {
+  text: string;
+  visible: boolean;
 }

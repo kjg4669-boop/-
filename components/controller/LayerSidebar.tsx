@@ -389,6 +389,91 @@ export default function LayerSidebar({
           >I</button>
         </div>
 
+        {/* 줄 간격 */}
+        <div className="flex items-center gap-2">
+          <label className="text-zinc-400 text-[11px] w-16 shrink-0">줄 간격</label>
+          <input
+            type="range" min={0.8} max={3.0} step={0.05}
+            value={layerConfig.subtitle.lineHeight ?? 1.3}
+            onChange={(e) => setSubtitle({ lineHeight: Number(e.target.value) })}
+            className="flex-1 accent-blue-500"
+          />
+          <span className="text-zinc-300 text-[11px] w-8 text-right">
+            {(layerConfig.subtitle.lineHeight ?? 1.3).toFixed(2)}
+          </span>
+        </div>
+        {/* 자간 */}
+        <div className="flex items-center gap-2">
+          <label className="text-zinc-400 text-[11px] w-16 shrink-0">자간</label>
+          <input
+            type="range" min={-5} max={20} step={0.5}
+            value={layerConfig.subtitle.letterSpacing ?? 0}
+            onChange={(e) => setSubtitle({ letterSpacing: Number(e.target.value) })}
+            className="flex-1 accent-blue-500"
+          />
+          <span className="text-zinc-300 text-[11px] w-8 text-right">
+            {(layerConfig.subtitle.letterSpacing ?? 0).toFixed(1)}px
+          </span>
+        </div>
+
+        {/* ── 이중언어 ─── */}
+        <div className="border-t border-zinc-700 pt-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-400 text-[11px] font-medium uppercase tracking-wider">이중언어</span>
+            <button
+              onClick={() => setSubtitle({ bilingualEnabled: !sub.bilingualEnabled })}
+              className={`text-[11px] px-2 py-0.5 rounded ${sub.bilingualEnabled ? "bg-yellow-600 text-white" : "bg-zinc-700 text-zinc-400"}`}
+            >
+              {sub.bilingualEnabled ? "켜짐" : "꺼짐"}
+            </button>
+          </div>
+          {sub.bilingualEnabled && (
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <label className="text-zinc-400 text-[11px] w-14 shrink-0">번역 크기</label>
+                <input
+                  type="number" min={12} max={80}
+                  value={sub.fontSize2 ?? 28}
+                  onChange={(e) => setSubtitle({ fontSize2: Number(e.target.value) })}
+                  className="w-16 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none"
+                />
+                <span className="text-zinc-500 text-[11px]">px</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-zinc-400 text-[11px] w-14 shrink-0">번역 색상</label>
+                <input
+                  type="color"
+                  value={sub.color2 ?? "#cccccc"}
+                  onChange={(e) => setSubtitle({ color2: e.target.value })}
+                  className="w-8 h-6 rounded cursor-pointer border border-zinc-600 bg-transparent"
+                />
+                <span className="text-zinc-500 text-[11px]">{sub.color2 ?? "#cccccc"}</span>
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setSubtitle({ fontWeight2: sub.fontWeight2 === "bold" ? "normal" : "bold" })}
+                  className={`px-2 py-1 rounded text-xs font-bold ${sub.fontWeight2 === "bold" ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300"}`}
+                >B</button>
+                <button
+                  onClick={() => setSubtitle({ fontStyle2: sub.fontStyle2 === "italic" ? "normal" : "italic" })}
+                  className={`px-2 py-1 rounded text-xs italic ${sub.fontStyle2 === "italic" ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300"}`}
+                >I</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Copyright toggle */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sub.showCopyright ?? true}
+            onChange={(e) => setSubtitle({ showCopyright: e.target.checked })}
+            className="rounded"
+          />
+          <span className="text-zinc-300">저작권 표시</span>
+        </label>
+
         {/* Advanced toggle */}
         <button
           onClick={() => setShowAdvanced((v) => !v)}

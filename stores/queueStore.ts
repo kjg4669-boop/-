@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide } from "@/lib/types";
+import { getSlidesInOrder } from "@/lib/utils";
 
 // Module-level cache: invalidates automatically when currentService reference changes (Zustand immutable updates)
 let _flatListCache: { serviceRef: import("@/lib/types").Service | null; list: import("@/lib/types").FlatSlide[] } = { serviceRef: null, list: [] };
@@ -9,7 +10,7 @@ function getScriptureSlides(item: ServiceItem): ScriptureSlide[] {
 }
 
 function getItemSlideCount(item: ServiceItem): number {
-  if (item.song) return item.song.lyrics_json.length;
+  if (item.song) return getSlidesInOrder(item.song).length;
   const ss = getScriptureSlides(item);
   return ss.length > 0 ? ss.length : 1;
 }
@@ -205,7 +206,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const { activeItemIndex, activeLyricSlideIndex, currentService } = get();
     const item = currentService?.items[activeItemIndex] ?? null;
     if (!item) return null;
-    if (item.song) return item.song.lyrics_json[activeLyricSlideIndex] ?? null;
+    if (item.song) return getSlidesInOrder(item.song)[activeLyricSlideIndex] ?? null;
     const ss = getScriptureSlides(item);
     if (ss.length > 0) {
       const s = ss[activeLyricSlideIndex];
@@ -227,7 +228,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const result: import("@/lib/types").FlatSlide[] = [];
     currentService.items.forEach((item, serviceItemIndex) => {
       if (item.song) {
-        item.song.lyrics_json.forEach((slide, slideIndex) => {
+        getSlidesInOrder(item.song).forEach((slide, slideIndex) => {
           result.push({ slide, songId: item.song!.id, songTitle: item.song!.title, serviceItemIndex, slideIndex });
         });
         return;

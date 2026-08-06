@@ -32,7 +32,10 @@ async function closeWindow() {
 export default function StagePage() {
   const [layerConfig, setLayerConfig] = useState<LayerConfig | null>(null);
   const [meta, setMeta] = useState<SlideMeta | null>(null);
+  const [stageAlert, setStageAlert] = useState<{ text: string; position: string; bgColor: string; textColor: string; } | null>(null);
+  const [stageMsg, setStageMsg] = useState<{ text: string } | null>(null);
   const unlistenRefs = useRef<Array<() => void>>([]);
+  const stageAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleUpdate = useCallback((config: LayerConfig, m?: SlideMeta) => {
     setLayerConfig(config);
@@ -69,18 +72,51 @@ export default function StagePage() {
       const unlisten = await ipc.onSlideUpdateWithMeta((config, m) => {
         if (mounted) handleUpdate(config, m);
       });
+
+      const unlistenAlert = await ipc.onAlert((payload) => {
+        if (!mounted) return;
+        if (stageAlertTimerRef.current !== null) {
+          clearTimeout(stageAlertTimerRef.current);
+          stageAlertTimerRef.current = null;
+        }
+        if (payload.visible && payload.text) {
+          setStageAlert({
+            text: payload.text,
+            position: payload.position,
+            bgColor: payload.backgroundColor ?? "rgba(0,0,0,0.85)",
+            textColor: payload.textColor ?? "#ffffff",
+          });
+          if (payload.duration > 0) {
+            stageAlertTimerRef.current = setTimeout(() => {
+              stageAlertTimerRef.current = null;
+              if (mounted) setStageAlert(null);
+            }, payload.duration);
+          }
+        } else {
+          setStageAlert(null);
+        }
+      });
+
+      const unlistenStageMsg = await ipc.onStageMessage((p) => {
+        if (!mounted) return;
+        setStageMsg(p.visible && p.text ? { text: p.text } : null);
+      });
+
       if (mounted) {
-        unlistenRefs.current.push(unlisten);
+        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg);
         // Signal ready so controller re-sends current state
         await ipc.sendOutputReady();
       } else {
-        // Unmounted before setup completed — immediately release the listener
+        // Unmounted before setup completed — immediately release the listeners
         unlisten();
+        unlistenAlert();
+        unlistenStageMsg();
       }
     }
     void setup();
     return () => {
       mounted = false;
+      if (stageAlertTimerRef.current !== null) clearTimeout(stageAlertTimerRef.current);
       unlistenRefs.current.forEach((fn) => fn());
       unlistenRefs.current = [];
     };
@@ -128,6 +164,9 @@ export default function StagePage() {
               {SECTION_LABEL[meta.section] ?? meta.section}
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+              {meta.bpm && (
+                <span style={{ fontSize: 13, color: "#f59e0b", marginLeft: 8 }}>♩={meta.bpm}</span>
+              )}
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
                 슬라이드 {meta.slideIndex + 1}/{meta.totalSlides}
               </span>
@@ -176,6 +215,11 @@ export default function StagePage() {
       >
         {currentLines.length > 0 ? (
           <div style={{ textAlign: "center", maxWidth: 960 }}>
+            {meta?.chords && (
+              <div style={{ fontFamily: "monospace", fontSize: 22, color: "#60a5fa", letterSpacing: 2, marginBottom: 8, whiteSpace: "pre" }}>
+                {meta.chords}
+              </div>
+            )}
             {currentLines.map((line, i) => (
               <p
                 key={i}
@@ -264,6 +308,47 @@ export default function StagePage() {
           </div>
         )}
       </div>
+      {/* Stage message overlay (private, operator-to-stage) */}
+      {stageMsg && (
+        <div style={{
+          position: "fixed", top: 24, left: "50%", transform: "translateX(-50%)",
+          zIndex: 200, backgroundColor: "rgba(234,179,8,0.92)", color: "#000",
+          borderRadius: 8, padding: "12px 32px", fontSize: 28, fontWeight: "bold",
+          maxWidth: "80%", textAlign: "center", boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+          whiteSpace: "pre-wrap",
+        }}>
+          💬 {stageMsg.text}
+        </div>
+      )}
+      {/* Alert overlay */}
+      {stageAlert && (
+        <div
+          style={{
+            position: "absolute",
+            ...(stageAlert.position === "top"
+              ? { top: 0, left: 0, right: 0 }
+              : stageAlert.position === "center"
+              ? { top: "50%", left: 0, right: 0, transform: "translateY(-50%)" }
+              : { bottom: 0, left: 0, right: 0 }),
+            zIndex: 60,
+            background: stageAlert.bgColor,
+            ...(stageAlert.position === "bottom"
+              ? { borderTop: "3px solid #f97316" }
+              : stageAlert.position === "top"
+              ? { borderBottom: "3px solid #f97316" }
+              : {}),
+            color: stageAlert.textColor,
+            padding: "18px 40px",
+            textAlign: "center",
+            fontSize: 42,
+            fontWeight: 600,
+            letterSpacing: "0.01em",
+            pointerEvents: "none",
+          }}
+        >
+          {stageAlert.text}
+        </div>
+      )}
     </div>
     </ErrorBoundary>
   );

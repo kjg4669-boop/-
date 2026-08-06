@@ -10,6 +10,8 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { serviceDb, songDb, templateDb } from "@/lib/db";
+import { backingTrackDb } from "@/lib/backingTrackDb";
+import { looksDb } from "@/lib/looksDb";
 import { importMediaFile } from "@/lib/media";
 import { ipc } from "@/lib/ipc";
 import {
@@ -23,8 +25,10 @@ import {
   type DisplayInfo,
   type Song,
   type PlaybackStatusPayload,
+  type Look,
+  type LookApplyPayload,
 } from "@/lib/types";
-import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId } from "@/lib/utils";
+import { deepMerge, loadGlobalDefaults, saveGlobalDefaults, newSlideId, getSlidesInOrder } from "@/lib/utils";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
 import ServiceListModal from "@/components/controller/ServiceListModal";
@@ -33,21 +37,36 @@ import QuickSearchModal from "@/components/controller/QuickSearchModal";
 import ShortcutCheatSheet from "@/components/controller/ShortcutCheatSheet";
 import TemplateModal from "@/components/controller/TemplateModal";
 import OutputPreview from "@/components/controller/OutputPreview";
+import AlertPanel from "@/components/controller/AlertPanel";
+import AnnouncementPanel from "@/components/controller/AnnouncementPanel";
+import LooksPanel from "@/components/controller/LooksPanel";
 import { useCountdown } from "@/hooks/useCountdown";
 import { useClock } from "@/hooks/useClock";
 import { useOutputHeartbeat } from "@/hooks/useOutputHeartbeat";
 import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useGlobalErrorCapture } from "@/hooks/useGlobalErrorCapture";
+import { useAutoSave } from "@/hooks/useAutoSave";
 import ErrorToast from "@/components/ErrorToast";
 import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
 import AboutDialog from "@/components/controller/AboutDialog";
 import OnboardingGuide from "@/components/controller/OnboardingGuide";
 import HelpOverlay from "@/components/controller/HelpOverlay";
+import RemotePanel from "@/components/controller/RemotePanel";
+import NdiPanel from "@/components/controller/NdiPanel";
+import type { RemoteCommand } from "@/lib/types";
 
-type RightTab = "queue" | "songs" | "settings";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
+
+function buildCopyrightString(song?: { copyright_text?: string; ccli_number?: string; publisher?: string } | null): string {
+  const parts: string[] = [];
+  if (song?.copyright_text) parts.push(song.copyright_text);
+  if (song?.ccli_number) parts.push(`CCLI #${song.ccli_number}`);
+  if (song?.publisher) parts.push(song.publisher);
+  return parts.join(" | ");
+}
 
 export default function ControllerPage() {
   const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert } = useOutputStore();
@@ -121,7 +140,15 @@ export default function ControllerPage() {
   }, []);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
+  const handleAutoSaved = useCallback(() => {
+    setCtrlNotice({ msg: "자동 저장됨 ✓" });
+    if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+    ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+  }, []);
+  useAutoSave(currentService, handleAutoSaved);
   const [isStageOpen, setIsStageOpen] = useState(false);
+  const [stageMsgText, setStageMsgText] = useState("");
+  const [stageMsgActive, setStageMsgActive] = useState(false);
   const [pendingEditSong, setPendingEditSong] = useState<Song | null>(null);
 
   const {
@@ -191,9 +218,18 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
-  const { outputDisplayId, setOutputDisplayId } = useSettingsStore();
+  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId } = useSettingsStore();
+  const [looks, setLooks] = useState<Look[]>([]);
+  const looksRef = useRef<Look[]>([]);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const selectedDisplayIdx = outputDisplayId >= 0 ? outputDisplayId : 0;
+
+  // Load looks from DB
+  useEffect(() => {
+    looksDb.list().then(setLooks).catch((e) => console.error("Failed to load looks:", e));
+  }, []);
+  // Keep looksRef in sync so closures (e.g. output:ready handler) see current looks
+  useEffect(() => { looksRef.current = looks; }, [looks]);
 
   useEffect(() => {
     ipc.getDisplays().then((result) => {
@@ -235,17 +271,43 @@ export default function ControllerPage() {
         songTitle: item.song?.title ?? item.label ?? item.type,
         section: slide?.section ?? "verse",
         slideIndex: qState.activeLyricSlideIndex,
-        totalSlides: item.song?.lyrics_json.length ?? 1,
+        totalSlides: item.song ? getSlidesInOrder(item.song).length : 1,
         itemIndex: qState.activeItemIndex,
         totalItems: qState.currentService?.items.length ?? 0,
         nextLines: nextEntry?.slide.lines,
         nextSection: nextEntry?.slide.section,
+        bpm: item.song?.bpm,
+        chords: slide?.chords,
         notes: item.notes,
+        copyright: buildCopyrightString(item?.song),
       } : undefined;
       void ipc.sendSlideUpdate(toSend, readyMeta);
       void ipc.sendBlackout(bo);
-      void ipc.sendAlert(at, av);
+      void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
+      // Re-send current look if one is active
+      const currentLookIdNow = useSettingsStore.getState().currentLookId;
+      if (currentLookIdNow !== null) {
+        const foundLook = looksRef.current.find((l) => l.id === currentLookIdNow);
+        if (foundLook) {
+          void ipc.sendLookApply({
+            lookId: foundLook.id,
+            showBackground: foundLook.showBackground,
+            showSubtitle: foundLook.showSubtitle,
+            showOverlay: foundLook.showOverlay,
+            showCanvas: foundLook.showCanvas,
+            showCountdown: foundLook.showCountdown,
+          });
+        }
+      }
+      // Re-send audio state if current item is a song with backing tracks
+      if (item?.type === "song" && item.song) {
+        backingTrackDb.list(item.song.id).then((tracks) => {
+          if (tracks.length > 0 && !tracks[0].start_paused) {
+            void ipc.sendAudioPlay({ filePath: tracks[0].file_path, volume: tracks[0].volume, repeat: tracks[0].repeat });
+          }
+        }).catch(() => {});
+      }
     }).then((fn) => {
       if (mounted) unlisten = fn;
       else fn();
@@ -284,6 +346,7 @@ export default function ControllerPage() {
         ...merged.subtitle,
         visible: !isClear && canvasBlocks.length === 0 && !!slide,
         lines: !isClear && canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
+        lines2: !isClear ? (slide?.lines2 ?? []) : [],
       },
       canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
     };
@@ -298,17 +361,45 @@ export default function ControllerPage() {
       songTitle: item.song?.title ?? item.label ?? item.type,
       section: slide?.section ?? "verse",
       slideIndex: activeLyricSlideIndex,
-      totalSlides: item.song?.lyrics_json.length ?? 1,
+      totalSlides: item.song ? getSlidesInOrder(item.song).length : 1,
       itemIndex: activeItemIndex,
       totalItems: currentService?.items.length ?? 0,
       nextLines: nextEntry?.slide.lines,
       nextSection: nextEntry?.slide.section,
+      bpm: item.song?.bpm,
+      chords: slide?.chords,
       notes: item.notes,
+      copyright: buildCopyrightString(item.song),
     };
 
     ipc.sendSlideUpdate(newConfig, slideMeta);
+
+    // Sync state to any connected web remote clients
+    const slideText = slide?.lines.join(" ") ?? "";
+    void ipc.sendRemoteState(slideText, activeLyricSlideIndex, item.song?.lyrics_json.length ?? 1).catch(() => {});
   // notesVersion excluded intentionally: Stage Display notes refresh on slide navigation (avoids IPC per keystroke)
   }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, isFrozen, setLayerConfig]);
+
+  // ── Web Remote Control command listener ──────────────────────────────
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | null = null;
+    void ipc.onRemoteCommand((cmd: RemoteCommand) => {
+      if (cmd.type === "next") {
+        nextLyricSlide();
+      } else if (cmd.type === "prev") {
+        prevLyricSlide();
+      } else if (cmd.type === "blackout") {
+        const n = !useOutputStore.getState().isBlackout;
+        useOutputStore.getState().setBlackout(n);
+        void ipc.sendBlackout(n);
+      } else if (cmd.type === "goto" && cmd.slideIndex !== undefined) {
+        useQueueStore.getState().setActiveFlatSlide(cmd.slideIndex);
+      }
+    }).then((fn) => { if (mounted) unlisten = fn; else fn(); });
+    return () => { mounted = false; unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextLyricSlide, prevLyricSlide]);
 
   // ── Playback status listener ─────────────────────────────────────────
   useEffect(() => {
@@ -318,6 +409,28 @@ export default function ControllerPage() {
       .then((fn) => { if (mounted) unlisten = fn; else fn(); });
     return () => { mounted = false; unlisten?.(); };
   }, []);
+
+  // ── Backing track auto-play ───────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    const items = useQueueStore.getState().currentService?.items ?? [];
+    const item = items[activeItemIndex];
+    if (!item || item.type !== "song" || !item.song) {
+      void ipc.sendAudioStop();
+      return () => { cancelled = true; };
+    }
+    backingTrackDb.list(item.song.id).then((tracks) => {
+      if (cancelled) return;
+      if (tracks.length > 0) {
+        if (!tracks[0].start_paused) {
+          void ipc.sendAudioPlay({ filePath: tracks[0].file_path, volume: tracks[0].volume, repeat: tracks[0].repeat });
+        }
+      } else {
+        void ipc.sendAudioStop();
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeItemIndex]);
 
   // ── Callbacks for ControlBar ──────────────────────────────────────────
   const handleToggleLive = useCallback(() => setIsLive((v) => !v), []);
@@ -335,12 +448,12 @@ export default function ControllerPage() {
     if (!alertInput.trim()) return;
     setAlert(alertInput.trim(), true);
     setAlertActive(true);
-    void ipc.sendAlert(alertInput.trim(), true);
+    void ipc.sendAlert({ text: alertInput.trim(), visible: true, duration: 0, position: "bottom" });
   }, [alertInput, setAlert]);
   const handleClearAlert = useCallback(() => {
     setAlert("", false);
     setAlertActive(false);
-    void ipc.sendAlert("", false);
+    void ipc.sendAlertHide();
   }, [setAlert]);
   const handleToggleVideoPlay = useCallback(() => {
     if (videoStatus?.playing) {
@@ -353,8 +466,43 @@ export default function ControllerPage() {
     if (isStageOpen) { ipc.closeStageWindow().catch(console.error); setIsStageOpen(false); }
     else { ipc.openStageWindow().catch(console.error); setIsStageOpen(true); }
   }, [isStageOpen]);
+  const handleSendStageMsg = useCallback(() => {
+    if (!stageMsgText.trim()) return;
+    setStageMsgActive(true);
+    void ipc.sendStageMessage({ text: stageMsgText.trim(), visible: true });
+  }, [stageMsgText]);
+  const handleClearStageMsg = useCallback(() => {
+    setStageMsgActive(false);
+    void ipc.sendStageMessage({ text: "", visible: false });
+  }, []);
   const handleToggleLoop = useCallback(() => setIsLoop((v) => !v), []);
   const handleTogglePanel = useCallback(() => setShowPanel((v) => !v), []);
+
+  const handleApplyLook = useCallback((look: Look | null) => {
+    if (look === null) {
+      setCurrentLookId(null);
+      const payload: LookApplyPayload = {
+        lookId: null,
+        showBackground: true,
+        showSubtitle: true,
+        showOverlay: true,
+        showCanvas: true,
+        showCountdown: true,
+      };
+      void ipc.sendLookApply(payload);
+    } else {
+      setCurrentLookId(look.id);
+      const payload: LookApplyPayload = {
+        lookId: look.id,
+        showBackground: look.showBackground,
+        showSubtitle: look.showSubtitle,
+        showOverlay: look.showOverlay,
+        showCanvas: look.showCanvas,
+        showCountdown: look.showCountdown,
+      };
+      void ipc.sendLookApply(payload);
+    }
+  }, [setCurrentLookId]);
   const handleShowCheatSheet = useCallback(() => setShowCheatSheet(true), []);
   const handleDismissNotice = useCallback(() => setCtrlNotice(null), []);
 
@@ -428,6 +576,7 @@ export default function ControllerPage() {
             ...lc.subtitle,
             visible: !isClear && !hasBlocks,
             lines: !isClear && !hasBlocks ? (slide?.lines ?? []) : [],
+            lines2: !isClear ? (slide?.lines2 ?? []) : [],
           },
           canvas: !isClear && hasBlocks ? { textBlocks: canvas.textBlocks } : undefined,
         };
@@ -461,6 +610,7 @@ export default function ControllerPage() {
           ...config.subtitle,
           visible: !isClear && canvasBlocks.length === 0 && !!slide,
           lines: !isClear && canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
+          lines2: !isClear ? (slide?.lines2 ?? []) : [],
         },
         canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
       };
@@ -547,7 +697,7 @@ export default function ControllerPage() {
     async (itemId: number, config: LayerConfig) => {
       const settings = {
         background: { ...config.background },
-        subtitle: (({ visible: _v, lines: _l, ...rest }) => rest)(config.subtitle),
+        subtitle: (({ visible: _v, lines: _l, lines2: _l2, ...rest }) => rest)(config.subtitle),
         overlay: { ...config.overlay },
       };
       try {
@@ -841,6 +991,44 @@ export default function ControllerPage() {
     } catch (e) { console.error("[newService]", e); }
   }, []);
 
+  const handleBackupDb = useCallback(async () => {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const destPath = await save({
+        filters: [{ name: "데이터베이스", extensions: ["db"] }],
+        defaultPath: "worship-backup.db",
+      });
+      if (!destPath) return;
+      await ipc.backupDatabase(destPath);
+      setCtrlNotice({ msg: "백업 완료 ✓" });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
+    } catch (e) {
+      console.error("[backup-db]", e);
+      setCtrlNotice({ msg: "백업 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 5000);
+    }
+  }, []);
+
+  const handleRestoreDb = useCallback(async () => {
+    try {
+      const { ask, open } = await import("@tauri-apps/plugin-dialog");
+      const yes = await ask("복원하면 현재 데이터가 교체됩니다. 계속하시겠습니까?", { title: "데이터베이스 복원", kind: "warning" });
+      if (!yes) return;
+      const srcPath = await open({ filters: [{ name: "데이터베이스", extensions: ["db"] }] });
+      if (!srcPath || typeof srcPath !== "string") return;
+      await ipc.restoreDatabase(srcPath);
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (e) {
+      console.error("[restore-db]", e);
+      setCtrlNotice({ msg: "복원 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 5000);
+    }
+  }, []);
+
   const handleSaveRef = useRef(handleSave);
   useEffect(() => { handleSaveRef.current = handleSave; });
   const handleUndoRef = useRef(handleUndo);
@@ -958,6 +1146,11 @@ export default function ControllerPage() {
         onOpenOutput={openOutput}
         isStageOpen={isStageOpen}
         onToggleStage={handleToggleStage}
+        stageMsgText={stageMsgText}
+        onSetStageMsgText={setStageMsgText}
+        stageMsgActive={stageMsgActive}
+        onSendStageMsg={handleSendStageMsg}
+        onClearStageMsg={handleClearStageMsg}
         countdownMin={countdownMin}
         onSetCountdownMin={setCountdownMin}
         countdownActive={countdownActive}
@@ -1009,6 +1202,11 @@ export default function ControllerPage() {
         showPanel={showPanel}
         onTogglePanel={handleTogglePanel}
         hasSlides={slides.length > 0}
+        onNewService={handleNewService}
+        onOpenService={() => setShowServiceList(true)}
+        onSave={handleSave}
+        onBackupDb={handleBackupDb}
+        onRestoreDb={handleRestoreDb}
         onNewSlide={handleNewSlide}
         onDupSlide={handleDupSlide}
         onAddBlock={handleAddBlock}
@@ -1022,6 +1220,9 @@ export default function ControllerPage() {
         onInsertSound={handleInsertSound}
         onOpenDesignPanel={handleOpenDesignPanel}
         onShowAbout={() => setShowAbout(true)}
+        looks={looks}
+        currentLookId={currentLookId}
+        onApplyLook={handleApplyLook}
       />
       </div>
 
@@ -1104,7 +1305,7 @@ export default function ControllerPage() {
               <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} />
             </div>
             <div className="flex border-b border-zinc-700 flex-shrink-0">
-              {(["queue", "songs", "settings"] as const).map((tab) => (
+              {(["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setRightTab(tab)}
@@ -1114,7 +1315,7 @@ export default function ControllerPage() {
                       : "text-zinc-400 hover:text-white hover:bg-zinc-800"
                   }`}
                 >
-                  {tab === "queue" ? "순서" : tab === "songs" ? "찬양" : "디자인"}
+                  {tab === "queue" ? "순서" : tab === "songs" ? "찬양" : tab === "settings" ? "디자인" : tab === "alert" ? "공지" : tab === "looks" ? "룩" : tab === "remote" ? "원격" : tab === "ndi" ? "NDI" : "공지루프"}
                 </button>
               ))}
             </div>
@@ -1136,6 +1337,17 @@ export default function ControllerPage() {
                   onSaveItem={handleSaveItem}
                 />
               )}
+              {rightTab === "alert" && <AlertPanel />}
+              {rightTab === "looks" && (
+                <LooksPanel
+                  currentLookId={currentLookId}
+                  onApplyLook={handleApplyLook}
+                  onLooksChanged={() => { looksDb.list().then(setLooks).catch((e) => console.error(e)); }}
+                />
+              )}
+              {rightTab === "remote" && <RemotePanel />}
+              {rightTab === "ndi" && <NdiPanel />}
+              {rightTab === "announcement" && <AnnouncementPanel />}
             </div>
           </div>
         )}
@@ -1195,7 +1407,7 @@ export default function ControllerPage() {
 
         {/* UI 가이드 */}
         <button
-          onClick={(e) => { e.stopPropagation(); setShowHelp(true); }}
+          onClick={(e) => { e.stopPropagation(); setShowPanel(true); setShowHelp(true); }}
           className="w-5 h-5 rounded-full border border-zinc-600 text-zinc-500 hover:text-zinc-200 hover:border-zinc-400 flex items-center justify-center text-[11px] font-bold transition-colors"
           title="UI 가이드 보기"
         >

@@ -1,6 +1,6 @@
 "use client";
 
-import type { LayerConfig } from "@/lib/types";
+import type { LayerConfig, Look } from "@/lib/types";
 import { FONT_OPTIONS } from "@/lib/constants";
 
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
@@ -43,6 +43,12 @@ interface Props {
   layerConfig: LayerConfig;
   onLayerChange: (config: LayerConfig) => void;
 
+  onNewService: () => void;
+  onOpenService: () => void;
+  onSave: () => void;
+  onBackupDb: () => void;
+  onRestoreDb: () => void;
+
   isLoop: boolean;
   onToggleLoop: () => void;
 
@@ -76,6 +82,10 @@ interface Props {
   onToggleSound: () => void;
   onInsertSound: () => void;
   onShowAbout: () => void;
+
+  looks: Look[];
+  currentLookId: number | null;
+  onApplyLook: (look: Look | null) => void;
 }
 
 const TAB_LABELS: Record<RibbonTab, string> = {
@@ -90,6 +100,7 @@ export default function RibbonToolbar({
   onPasteBlock, onCutBlock, onCopyBlock, onActivateFmtPainter, fmtPainterOn, hasSelectedBlock,
   fmt, onFormat,
   layerConfig, onLayerChange,
+  onNewService, onOpenService, onSave, onBackupDb, onRestoreDb,
   isLoop, onToggleLoop,
   isBlackout, onToggleBlackout, isClear, onToggleClear, onOpenOutput, onFromStart, onCloseOutput,
   serviceNotes, onServiceNotesChange,
@@ -97,6 +108,7 @@ export default function RibbonToolbar({
   hasSlides, onNewSlide, onDupSlide, onAddBlock, onAddSong, onAddScripture, onInsertImage, onInsertVideo,
   soundName, soundPlaying, onToggleSound, onInsertSound,
   onOpenDesignPanel, onShowAbout,
+  looks, currentLookId, onApplyLook,
 }: Props) {
   function setSubtitle(patch: Partial<LayerConfig["subtitle"]>) {
     onLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
@@ -122,7 +134,7 @@ export default function RibbonToolbar({
           title="Worship Projector 정보"
           className="px-2 h-full text-zinc-500 hover:text-zinc-300 transition-colors text-sm"
         >
-          ?
+          ℹ
         </button>
       </div>
 
@@ -130,6 +142,25 @@ export default function RibbonToolbar({
       <div className="h-9 flex items-center gap-0.5 px-2 border-b border-zinc-700 bg-[#2d2d2d] flex-shrink-0 text-xs overflow-x-auto">
 
         {ribbonTab === "home" && (<>
+          {/* 파일 작업 */}
+          <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
+            <button onClick={onNewService} title="새 예배 (⌘N)"
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <span className="text-base leading-none">📄</span>
+              <span className="text-[8px] mt-0.5">새 예배</span>
+            </button>
+            <button onClick={onOpenService} title="예배 열기 (⌘O)"
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <span className="text-base leading-none">📂</span>
+              <span className="text-[8px] mt-0.5">열기</span>
+            </button>
+            <button onClick={onSave} disabled={!hasService} title="저장 (⌘S)"
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
+              <span className="text-base leading-none">💾</span>
+              <span className="text-[8px] mt-0.5">저장</span>
+            </button>
+          </div>
+
           {/* 실행 취소 / 다시 실행 */}
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
             <button onClick={onUndo} disabled={!canUndo} title="실행 취소 (⌘Z)"
@@ -230,7 +261,41 @@ export default function RibbonToolbar({
             ))}
           </>)}
 
+          {/* Looks 프리셋 */}
+          <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
+            <span className="text-zinc-400 text-[10px] mr-1">Look</span>
+            <select
+              value={currentLookId ?? ""}
+              onChange={(e) => {
+                const id = e.target.value === "" ? null : Number(e.target.value);
+                const look = id === null ? null : looks.find((l) => l.id === id) ?? null;
+                onApplyLook(look);
+              }}
+              className="bg-[#3c3c3c] border border-zinc-600 rounded px-1.5 py-0.5 text-white outline-none hover:border-zinc-400 text-[11px] max-w-[110px]"
+            >
+              <option value="">기본 (전체 표시)</option>
+              {looks.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex-1" />
+
+          {/* 데이터 */}
+          <div className="flex items-center gap-0.5 border-l border-zinc-600 pl-2 ml-1">
+            <button onClick={onBackupDb} title="데이터베이스 백업..."
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
+              <span className="text-base leading-none">🗄</span>
+              <span className="text-[8px] mt-0.5">백업</span>
+            </button>
+            <button onClick={onRestoreDb} title="데이터베이스 복원..."
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
+              <span className="text-base leading-none">⬆️</span>
+              <span className="text-[8px] mt-0.5">복원</span>
+            </button>
+          </div>
+
           <button onClick={onToggleLoop}
             className={`px-2 h-6 rounded ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
             ↺ {isLoop ? "루프 ON" : "루프"}

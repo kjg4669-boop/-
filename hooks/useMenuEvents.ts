@@ -4,7 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { ipc } from "@/lib/ipc";
 import { useQueueStore } from "@/stores/queueStore";
 
-type RightTab = "queue" | "songs" | "settings";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement";
 
 export interface MenuEventsOptions {
   openOutputRef: MutableRefObject<() => void>;
@@ -87,7 +87,7 @@ export function useMenuEvents(options: MenuEventsOptions): void {
               optionsRef.current.showNotice("백업 실패", true);
             }
           }),
-          listen("menu:show-help",        () => optionsRef.current.setShowHelp(true)),
+          listen("menu:show-help",        () => { optionsRef.current.setShowPanel(true); optionsRef.current.setShowHelp(true); }),
           listen("menu:reset-onboarding", () => {
             localStorage.removeItem("worship-onboarding-v1");
             optionsRef.current.setShowOnboarding(true);

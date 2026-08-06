@@ -3,6 +3,13 @@ export function newSlideId(): string {
   return `slide_${Date.now()}_${++_slideIdCounter}`;
 }
 
+export function getSlidesInOrder(song: { lyrics_json: import("./types").LyricSlide[]; verse_order?: string[] }): import("./types").LyricSlide[] {
+  if (!song.verse_order || song.verse_order.length === 0) return song.lyrics_json;
+  const map = new Map(song.lyrics_json.map((s) => [s.id, s]));
+  // Only return slides referenced in verse_order; omitted slides are intentionally excluded
+  return song.verse_order.filter((id) => map.has(id)).map((id) => map.get(id)!);
+}
+
 /**
  * Merges overrides into base (1 level deep for objects, not arrays).
  * Returns a new object — does not mutate base.

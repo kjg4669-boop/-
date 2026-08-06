@@ -8,7 +8,7 @@ import SubtitleLayer from "@/components/layers/SubtitleLayer";
 import OverlayLayer from "@/components/layers/OverlayLayer";
 import CanvasLayer from "@/components/layers/CanvasLayer";
 import CountdownLayer from "@/components/layers/CountdownLayer";
-import type { LayerConfig } from "@/lib/types";
+import type { LayerConfig, LookApplyPayload, AnnouncementShowPayload } from "@/lib/types";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 async function closeWindow() {
@@ -18,11 +18,16 @@ async function closeWindow() {
 }
 
 export default function OutputPage() {
-  const { layerConfig, isBlackout, alertText, alertVisible, countdown, setLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown } = useOutputStore();
+  const { layerConfig, isBlackout, alertText, alertVisible, alertDuration, alertPosition, alertBgColor, alertTextColor, countdown, setLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown } = useOutputStore();
   const unlistenRefs = useRef<Array<() => void>>([]);
   const [showControls, setShowControls] = useState(false);
+  const [lookVis, setLookVis] = useState({
+    background: true, subtitle: true, overlay: true, canvas: true, countdown: true,
+  });
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isFrozenRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [announcement, setAnnouncement] = useState<AnnouncementShowPayload>({ visible: false, title: "", body: "" });
 
   useEffect(() => {
     let mounted = true;
@@ -46,8 +51,8 @@ export default function OutputPage() {
       const unlistenBlackout = await ipc.onBlackout((active: boolean) => {
         if (mounted) setBlackout(active);
       });
-      const unlistenAlert = await ipc.onAlert((text: string, visible: boolean) => {
-        if (mounted) setAlert(text, visible);
+      const unlistenAlert = await ipc.onAlert((p) => {
+        if (mounted) setAlert(p.text, p.visible, p.duration, p.position, p.backgroundColor, p.textColor);
       });
 
       const unlistenCountdown = await ipc.onCountdown((payload) => {
@@ -58,7 +63,38 @@ export default function OutputPage() {
         unlistenSlide(); unlistenBlackout(); unlistenAlert(); unlistenCountdown();
         return;
       }
-      unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown);
+      const unlistenAudioPlay = await ipc.onAudioPlay(async (payload) => {
+        if (!mounted || !audioRef.current) return;
+        try {
+          const { convertFileSrc } = await import("@tauri-apps/api/core");
+          audioRef.current.src = convertFileSrc(payload.filePath);
+          audioRef.current.volume = payload.volume;
+          audioRef.current.loop = payload.repeat;
+          await audioRef.current.play();
+        } catch { /* user hasn't interacted yet or file missing */ }
+      });
+      const unlistenAudioStop = await ipc.onAudioStop(() => {
+        if (!mounted || !audioRef.current) return;
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      });
+
+      const unlistenLook = await ipc.onLookApply((payload: LookApplyPayload) => {
+        if (!mounted) return;
+        setLookVis({
+          background: payload.showBackground,
+          subtitle: payload.showSubtitle,
+          overlay: payload.showOverlay,
+          canvas: payload.showCanvas,
+          countdown: payload.showCountdown,
+        });
+      });
+
+      const unlistenAnnouncement = await ipc.onAnnouncementShow((p) => {
+        if (mounted) setAnnouncement({ visible: p.visible, title: p.title, body: p.body });
+      });
+
+      unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown, unlistenAudioPlay, unlistenAudioStop, unlistenLook, unlistenAnnouncement);
 
       await ipc.sendOutputReady();
       if (mounted) setOutputReady(true);
@@ -112,6 +148,27 @@ export default function OutputPage() {
     };
   }, []);
 
+  // Auto-dismiss alert after alertDuration ms
+  const alertDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (alertDismissTimerRef.current !== null) {
+      clearTimeout(alertDismissTimerRef.current);
+      alertDismissTimerRef.current = null;
+    }
+    if (alertVisible && alertDuration > 0) {
+      alertDismissTimerRef.current = setTimeout(() => {
+        alertDismissTimerRef.current = null;
+        setAlert("", false, 0, alertPosition, alertBgColor, alertTextColor);
+      }, alertDuration);
+    }
+    return () => {
+      if (alertDismissTimerRef.current !== null) {
+        clearTimeout(alertDismissTimerRef.current);
+        alertDismissTimerRef.current = null;
+      }
+    };
+  }, [alertVisible, alertDuration, alertPosition, alertBgColor, alertTextColor, setAlert]);
+
   const handleMouseMove = useCallback(() => {
     setShowControls(true);
     if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
@@ -129,32 +186,65 @@ export default function OutputPage() {
       onMouseMove={handleMouseMove}
     >
       {/* Layer 1: Background */}
-      <BackgroundLayer config={layerConfig.background} />
+      {lookVis.background && <BackgroundLayer config={layerConfig.background} />}
 
       {/* Layer 2: Subtitle */}
-      <SubtitleLayer config={layerConfig.subtitle} transitionMs={layerConfig.transitionMs} />
+      {lookVis.subtitle && <SubtitleLayer config={layerConfig.subtitle} transitionMs={layerConfig.transitionMs} />}
+
+      {/* Announcement Overlay */}
+      {announcement.visible && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 35,
+          display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            backgroundColor: "rgba(0,0,0,0.75)",
+            borderRadius: 12,
+            padding: "40px 80px",
+            textAlign: "center",
+            maxWidth: "80%",
+          }}>
+            <p style={{ fontSize: 52, fontWeight: "bold", color: "#ffffff", margin: 0, lineHeight: 1.3 }}>
+              {announcement.title}
+            </p>
+            {announcement.body && (
+              <p style={{ fontSize: 32, color: "#cccccc", margin: "16px 0 0", lineHeight: 1.4 }}>
+                {announcement.body}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Layer 3: Overlay */}
-      <OverlayLayer config={layerConfig.overlay} />
+      {lookVis.overlay && <OverlayLayer config={layerConfig.overlay} />}
 
       {/* Layer 4: Canvas (free-position text blocks) */}
-      <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />
+      {lookVis.canvas && <CanvasLayer blocks={layerConfig.canvas?.textBlocks ?? []} />}
 
       {/* Layer 5: Countdown overlay (z:50, below blackout) */}
-      <CountdownLayer countdown={countdown} />
+      {lookVis.countdown && <CountdownLayer countdown={countdown} />}
 
       {/* Alert banner — appears above content, below blackout */}
       {alertVisible && alertText && (
         <div
           style={{
             position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
+            ...(alertPosition === "top"
+              ? { top: 0, left: 0, right: 0 }
+              : alertPosition === "center"
+              ? { top: "50%", left: 0, right: 0, transform: "translateY(-50%)" }
+              : { bottom: 0, left: 0, right: 0 }),
             zIndex: 60,
-            background: "rgba(0,0,0,0.82)",
-            borderTop: "3px solid #f97316",
-            color: "#fff",
+            background: alertBgColor,
+            ...(alertPosition === "bottom"
+              ? { borderTop: "3px solid #f97316" }
+              : alertPosition === "top"
+              ? { borderBottom: "3px solid #f97316" }
+              : {}),
+            color: alertTextColor,
             padding: "18px 40px",
             textAlign: "center",
             fontSize: 42,
@@ -166,6 +256,9 @@ export default function OutputPage() {
           {alertText}
         </div>
       )}
+
+      {/* Audio element for backing tracks */}
+      <audio ref={audioRef} />
 
       {/* Blackout layer */}
       <div

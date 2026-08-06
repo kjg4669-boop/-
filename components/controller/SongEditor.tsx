@@ -1,11 +1,15 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, horizontalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { songDb, tagDb } from "@/lib/db";
 import type { Tag } from "@/lib/db";
-import type { Song, LyricSection, LyricSlide } from "@/lib/types";
+import type { Song, LyricSection, LyricSlide, BackingTrack } from "@/lib/types";
+import { backingTrackDb } from "@/lib/backingTrackDb";
 import { newSlideId } from "@/lib/utils";
-import { SECTION_LABEL } from "@/lib/constants";
+import { SECTION_LABEL, SECTION_COLORS } from "@/lib/constants";
 
 const SECTION_LABELS: Record<LyricSection, string> = SECTION_LABEL as Record<LyricSection, string>;
 
@@ -19,6 +23,8 @@ interface BlockInput {
   text: string;
   slideId?: string;               // original slide ID (undefined = new block)
   canvas?: LyricSlide["canvas"]; // preserve existing canvas positioning
+  text2?: string;   // secondary language lyrics
+  chords?: string;  // chord line for musicians e.g. "C  G  Am  F"
 }
 
 interface Props {
@@ -62,9 +68,37 @@ function parseBlocksToSlides(blocks: BlockInput[]): LyricSlide[] {
         section: block.section,
         sectionIndex: idx,
         lines,
+        lines2: block.text2 ? block.text2.split("\n").filter((l) => l.trim()) : undefined,
+        chords: block.chords || undefined,
         canvas,
       };
     });
+}
+
+function SortableVerseChip({ id, label, color }: { id: string; label: string; color: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        backgroundColor: color,
+        color: "#fff",
+        borderRadius: 4,
+        padding: "2px 8px",
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: "grab",
+        flexShrink: 0,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      {label}
+    </div>
+  );
 }
 
 export default function SongEditor({ song, onSave, onCancel }: Props) {
@@ -73,16 +107,27 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
 
   const [title, setTitle] = useState(song?.title ?? "");
   const [artist, setArtist] = useState(song?.artist ?? "");
+  const [ccliNumber, setCcliNumber] = useState(song?.ccli_number ?? "");
+  const [copyrightText, setCopyrightText] = useState(song?.copyright_text ?? "");
+  const [publisher, setPublisher] = useState(song?.publisher ?? "");
+  const [bpm, setBpm] = useState<number | undefined>(song?.bpm);
   const [blocks, setBlocks] = useState<BlockInput[]>(() => [
     { id: nextId(), section: "verse", text: "" },
   ]);
   const [saving, setSaving] = useState(false);
+  const [verseOrder, setVerseOrder] = useState<string[]>(song?.verse_order ?? []);
   const [error, setError] = useState<string | null>(null);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<number>>(new Set());
   const [newTagName, setNewTagName] = useState("");
   const TAG_COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#06b6d4"];
   const [selectedTagColor, setSelectedTagColor] = useState(TAG_COLORS[0]);
+  const [backingTracks, setBackingTracks] = useState<BackingTrack[]>([]);
+
+  useEffect(() => {
+    if (!song?.id) return;
+    backingTrackDb.list(song.id).then(setBackingTracks).catch(console.error);
+  }, [song?.id]);
 
   useEffect(() => {
     tagDb.list().then(setAllTags).catch(console.error);
@@ -92,6 +137,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
       setSelectedTagIds(new Set());
     }
   }, [song?.id]);
+
+  useEffect(() => {
+    const validIds = new Set(blocks.map((b) => b.slideId).filter(Boolean));
+    setVerseOrder((prev) => prev.filter((id) => validIds.has(id)));
+  }, [blocks]);
 
   async function handleCreateTag() {
     if (!newTagName.trim()) return;
@@ -116,6 +166,10 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
   useEffect(() => {
     setTitle(song?.title ?? "");
     setArtist(song?.artist ?? "");
+    setCcliNumber(song?.ccli_number ?? "");
+    setCopyrightText(song?.copyright_text ?? "");
+    setPublisher(song?.publisher ?? "");
+    setBpm(song?.bpm);
     if (song && song.lyrics_json.length > 0) {
       setBlocks(
         song.lyrics_json.map((slide) => ({
@@ -124,11 +178,14 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
           text: slide.lines.join("\n"),
           slideId: slide.id,
           canvas: slide.canvas,
+          text2: slide.lines2?.join("\n") ?? "",
+          chords: slide.chords ?? "",
         }))
       );
     } else {
       setBlocks([{ id: nextId(), section: "verse", text: "" }]);
     }
+    setVerseOrder(song?.verse_order ?? []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [song?.id, song?.updated_at]);
 
@@ -160,20 +217,35 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
     });
   }
 
+  async function handleAddTrack() {
+    if (!song?.id) return;
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "오디오", extensions: ["mp3", "wav", "ogg", "m4a", "aac", "flac"] }],
+      });
+      if (!path || typeof path !== "string") return;
+      await backingTrackDb.create(song.id, path);
+      setBackingTracks(await backingTrackDb.list(song.id));
+    } catch { /* ignore */ }
+  }
+
   async function handleSave() {
     if (!title.trim()) return;
     setSaving(true);
     setError(null);
     try {
       const lyrics_json = parseBlocksToSlides(blocks);
+      const verse_order = verseOrder.length > 0 ? verseOrder : undefined;
       let savedSong: Song;
       if (song) {
-        await songDb.update(song.id, { title: title.trim(), artist: artist.trim(), lyrics_json });
-        savedSong = { ...song, title: title.trim(), artist: artist.trim(), lyrics_json, updated_at: new Date().toISOString() };
+        await songDb.update(song.id, { title: title.trim(), artist: artist.trim(), lyrics_json, verse_order, ccli_number: ccliNumber.trim() || undefined, copyright_text: copyrightText.trim() || undefined, publisher: publisher.trim() || undefined, bpm });
+        savedSong = { ...song, title: title.trim(), artist: artist.trim(), lyrics_json, verse_order, ccli_number: ccliNumber.trim() || undefined, copyright_text: copyrightText.trim() || undefined, publisher: publisher.trim() || undefined, bpm, updated_at: new Date().toISOString() };
       } else {
-        const savedId = await songDb.create({ title: title.trim(), artist: artist.trim(), lyrics_json });
+        const savedId = await songDb.create({ title: title.trim(), artist: artist.trim(), lyrics_json, verse_order, ccli_number: ccliNumber.trim() || undefined, copyright_text: copyrightText.trim() || undefined, publisher: publisher.trim() || undefined, bpm });
         const now = new Date().toISOString();
-        savedSong = { id: savedId, title: title.trim(), artist: artist.trim(), lyrics_json, created_at: now, updated_at: now };
+        savedSong = { id: savedId, title: title.trim(), artist: artist.trim(), lyrics_json, verse_order, ccli_number: ccliNumber.trim() || undefined, copyright_text: copyrightText.trim() || undefined, publisher: publisher.trim() || undefined, bpm, created_at: now, updated_at: now };
       }
       // Save tags first so parent refresh sees correct associations
       await Promise.all(
@@ -257,6 +329,35 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
           onChange={(e) => setArtist(e.target.value)}
           className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
         />
+        <input
+          type="text"
+          placeholder="CCLI 번호"
+          value={ccliNumber}
+          onChange={(e) => setCcliNumber(e.target.value)}
+          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+        />
+        <input
+          type="text"
+          placeholder="저작권 텍스트"
+          value={copyrightText}
+          onChange={(e) => setCopyrightText(e.target.value)}
+          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+        />
+        <input
+          type="text"
+          placeholder="출판사"
+          value={publisher}
+          onChange={(e) => setPublisher(e.target.value)}
+          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+        />
+        <input
+          type="number"
+          placeholder="BPM (템포, 선택사항)"
+          value={bpm ?? ""}
+          onChange={(e) => setBpm(e.target.value ? Number(e.target.value) : undefined)}
+          min={40} max={300}
+          className="w-full bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-blue-500"
+        />
       </div>
 
       {/* Blocks */}
@@ -303,6 +404,20 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
               rows={3}
               className="w-full bg-zinc-900 text-white text-xs rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500 resize-none"
             />
+            <textarea
+              value={block.text2 ?? ""}
+              onChange={(e) => updateBlock(i, "text2", e.target.value)}
+              placeholder="번역 가사 (선택사항, Enter로 줄 구분)"
+              rows={2}
+              className="w-full bg-zinc-900 text-[11px] italic text-zinc-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-yellow-500 resize-none"
+            />
+            <input
+              type="text"
+              value={block.chords ?? ""}
+              onChange={(e) => updateBlock(i, "chords", e.target.value)}
+              placeholder="코드 (예: C  G  Am  F)"
+              className="w-full bg-zinc-900 text-[11px] font-mono text-blue-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500"
+            />
           </div>
         ))}
 
@@ -312,6 +427,57 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         >
           + 섹션 추가
         </button>
+
+        {/* Verse Order Editor */}
+        <div className="border border-zinc-700 rounded p-2 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wide">절 순서</p>
+            {verseOrder.length > 0 && (
+              <button
+                onClick={() => setVerseOrder([])}
+                className="text-[10px] text-zinc-500 hover:text-zinc-300"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+          {verseOrder.length === 0 ? (
+            <button
+              onClick={() => {
+                const ids = blocks.filter((b) => b.slideId).map((b) => b.slideId!);
+                if (ids.length > 0) setVerseOrder(ids);
+              }}
+              disabled={!blocks.some((b) => b.slideId)}
+              className="w-full text-[10px] py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-zinc-300"
+              title={blocks.some((b) => b.slideId) ? "현재 블록 순서로 절 순서 생성" : "저장 후 편집 가능"}
+            >
+              절 순서 편집 (저장 후 사용 가능)
+            </button>
+          ) : (
+            <DndContext
+              collisionDetection={closestCenter}
+              onDragEnd={(event: DragEndEvent) => {
+                const { active, over } = event;
+                if (!over || active.id === over.id) return;
+                const oldIdx = verseOrder.indexOf(String(active.id));
+                const newIdx = verseOrder.indexOf(String(over.id));
+                if (oldIdx !== -1 && newIdx !== -1) setVerseOrder(arrayMove(verseOrder, oldIdx, newIdx));
+              }}
+            >
+              <SortableContext items={verseOrder} strategy={horizontalListSortingStrategy}>
+                <div className="flex flex-wrap gap-1">
+                  {verseOrder.map((id) => {
+                    const block = blocks.find((b) => b.slideId === id);
+                    if (!block) return null;
+                    const label = `${SECTION_LABEL[block.section] ?? block.section}`;
+                    const color = SECTION_COLORS[block.section] ?? "#6b7280";
+                    return <SortableVerseChip key={id} id={id} label={label} color={color} />;
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+        </div>
 
         {/* Tags */}
         <div className="border border-zinc-700 rounded p-2 space-y-1.5">
@@ -363,6 +529,68 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
             >추가</button>
           </div>
         </div>
+
+        {/* Backing Tracks */}
+        {song?.id && (
+          <div className="border border-zinc-700 rounded p-2 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wide">배킹 트랙</p>
+              <button
+                onClick={handleAddTrack}
+                className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
+              >
+                + 파일 추가
+              </button>
+            </div>
+            {backingTracks.length === 0 && (
+              <p className="text-[10px] text-zinc-600">오디오 파일을 추가하면 슬라이드 첫 진입 시 자동 재생됩니다</p>
+            )}
+            {backingTracks.map((track) => (
+              <div key={track.id} className="space-y-1">
+                <div className="flex items-center gap-1">
+                  <span className="flex-1 text-[10px] text-zinc-300 truncate" title={track.file_path}>
+                    {track.file_path.split(/[\\/]/).pop() ?? track.file_path}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      const songId = song?.id;
+                      await backingTrackDb.delete(track.id);
+                      if (songId) setBackingTracks(await backingTrackDb.list(songId));
+                    }}
+                    className="text-zinc-600 hover:text-red-400 text-[10px] px-1"
+                  >✕</button>
+                </div>
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-zinc-500 text-[9px] w-8">볼륨</span>
+                  <input
+                    type="range" min={0} max={1} step={0.05}
+                    value={track.volume}
+                    onChange={async (e) => {
+                      const volume = Number(e.target.value);
+                      await backingTrackDb.update(track.id, { volume });
+                      setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, volume } : t));
+                    }}
+                    className="flex-1"
+                  />
+                  <span className="text-zinc-500 text-[9px] w-6">{Math.round(track.volume * 100)}%</span>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={track.repeat}
+                      onChange={async (e) => {
+                        const repeat = e.target.checked;
+                        await backingTrackDb.update(track.id, { repeat });
+                        setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, repeat } : t));
+                      }}
+                      className="rounded"
+                    />
+                    <span className="text-[9px] text-zinc-400">반복</span>
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

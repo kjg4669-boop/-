@@ -7,11 +7,22 @@ interface OutputState {
   isOutputReady: boolean;
   alertText: string;
   alertVisible: boolean;
+  alertDuration: number;
+  alertPosition: "top" | "bottom" | "center";
+  alertBgColor: string;
+  alertTextColor: string;
   countdown: CountdownPayload | null;
   setLayerConfig: (config: LayerConfig) => void;
   setBlackout: (active: boolean) => void;
   setOutputReady: (ready: boolean) => void;
-  setAlert: (text: string, visible: boolean) => void;
+  setAlert: (
+    text: string,
+    visible: boolean,
+    duration?: number,
+    position?: "top" | "bottom" | "center",
+    bgColor?: string,
+    textColor?: string
+  ) => void;
   setCountdown: (payload: CountdownPayload | null) => void;
 }
 
@@ -21,10 +32,22 @@ export const useOutputStore = create<OutputState>((set) => ({
   isOutputReady: false,
   alertText: "",
   alertVisible: false,
+  alertDuration: 0,
+  alertPosition: "bottom",
+  alertBgColor: "rgba(0,0,0,0.85)",
+  alertTextColor: "#ffffff",
   countdown: null,
   setLayerConfig: (config) => set({ layerConfig: config }),
   setBlackout: (active) => set({ isBlackout: active }),
   setOutputReady: (ready) => set({ isOutputReady: ready }),
-  setAlert: (text, visible) => set({ alertText: text, alertVisible: visible }),
+  setAlert: (text, visible, duration = 0, position = "bottom", bgColor = "rgba(0,0,0,0.85)", textColor = "#ffffff") =>
+    set({
+      alertText: text,
+      alertVisible: visible,
+      alertDuration: duration,
+      alertPosition: position,
+      alertBgColor: bgColor,
+      alertTextColor: textColor,
+    }),
   setCountdown: (payload) => set({ countdown: payload }),
 }));

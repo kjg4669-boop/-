@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { songDb, mediaDb, serviceDb, tagDb } from "@/lib/db";
 import type { Tag } from "@/lib/db";
+import { songUsageDb, type SongUsageStat } from "@/lib/songUsageDb";
 import { importMediaFile, toDisplayUrl, captureVideoThumbnail } from "@/lib/media";
 import { useQueueStore } from "@/stores/queueStore";
 import type { Song, MediaItem } from "@/lib/types";
@@ -33,6 +34,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [filterTagId, setFilterTagId] = useState<number | null>(null);
   const [songTagMap, setSongTagMap] = useState<Record<number, Tag[]>>({});
+  const [usageStats, setUsageStats] = useState<Map<number, SongUsageStat>>(new Map());
 
   const { currentService, setCurrentService } = useQueueStore();
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,6 +57,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
       songDb.list().then(setSongs).catch(console.error);
       tagDb.list().then(setAllTags).catch(console.error);
       tagDb.getAllSongTagMap().then(setSongTagMap).catch(console.error);
+      songUsageDb.getStats().then(setUsageStats).catch(console.error);
     } else {
       mediaDb.list().then((items) => {
         setMedia(items);
@@ -128,6 +131,9 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
       });
       const updated = await serviceDb.get(currentService.id);
       if (updated) { setCurrentService(updated); useQueueStore.getState().setActiveItem(updated.items.length - 1); }
+      void songUsageDb.record(song.id, currentService?.id).then(() =>
+        songUsageDb.getStats().then(setUsageStats).catch(console.error)
+      );
       showNotice(`"${song.title}" 추가됨`);
     } catch {
       showNotice("추가에 실패했습니다. 다시 시도해 주세요.");
@@ -206,6 +212,34 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
     if (imported > 0) showNotice(`${imported}곡 임포트됨${failed > 0 ? ` (${failed}개 실패)` : ""}`);
     else showNotice("임포트에 실패했습니다.");
     setOpenLPLoading(false);
+  }
+
+  async function handleExportCcliReport() {
+    try {
+      const rows = await songUsageDb.getDetailedReport();
+      if (rows.length === 0) {
+        showNotice("사용 기록이 없습니다.");
+        return;
+      }
+      const header = "곡 제목,아티스트,CCLI 번호,사용 횟수,마지막 사용일\n";
+      const body = rows.map(r => {
+        const date = r.last_used ? new Date(r.last_used).toLocaleDateString("ko-KR") : "";
+        return `"${r.title}","${r.artist}","${r.ccli_number ?? ""}",${r.count},"${date}"`;
+      }).join("\n");
+      const csv = header + body;
+
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const path = await save({
+        defaultPath: `CCLI_보고서_${new Date().toISOString().slice(0, 10)}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) return;
+      await writeTextFile(path, "\uFEFF" + csv); // BOM for Excel Korean compatibility
+      showNotice("CCLI 보고서 저장 완료");
+    } catch (e) {
+      showNotice("내보내기 실패: " + String(e));
+    }
   }
 
   async function handleDuplicate(song: Song) {
@@ -327,6 +361,13 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           >
             ?
           </button>
+          <button
+            onClick={handleExportCcliReport}
+            className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 shrink-0"
+            title="CCLI 사용 보고서 내보내기 (CSV)"
+          >
+            CCLI 보고서
+          </button>
         </div>
         {/* Tag filter row */}
         {allTags.length > 0 && (
@@ -391,6 +432,14 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                 {song.artist && <div className="text-zinc-500 truncate">{song.artist}</div>}
                 <div className="flex items-center gap-1 mt-0.5">
                   <span className="text-zinc-600 text-[10px]">{song.lyrics_json.length}절</span>
+                  {usageStats.has(song.id) && (
+                    <span className="text-zinc-600 text-[10px]">
+                      · {usageStats.get(song.id)!.count}회
+                      {usageStats.get(song.id)!.lastUsed && (
+                        <> · {new Date(usageStats.get(song.id)!.lastUsed!).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })}</>
+                      )}
+                    </span>
+                  )}
                   {(songTagMap[song.id] ?? []).map((tag) => (
                     <span
                       key={tag.id}

@@ -1,5 +1,7 @@
 mod commands;
 mod display;
+mod remote;
+mod ndi_output;
 
 #[tauri::command]
 async fn backup_database(app: tauri::AppHandle, dest_path: String) -> Result<(), String> {
@@ -81,6 +83,54 @@ pub fn run() {
                         sql: include_str!("../migrations/007_item_notes.sql"),
                         kind: tauri_plugin_sql::MigrationKind::Up,
                     },
+                    tauri_plugin_sql::Migration {
+                        version: 8,
+                        description: "add_copyright_fields",
+                        sql: include_str!("../migrations/008_copyright.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 9,
+                        description: "add_alert_templates",
+                        sql: include_str!("../migrations/009_alerts.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 10,
+                        description: "add_verse_order",
+                        sql: include_str!("../migrations/010_verse_order.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 11,
+                        description: "add_backing_tracks",
+                        sql: include_str!("../migrations/011_backing_track.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 12,
+                        description: "add_looks",
+                        sql: include_str!("../migrations/012_looks.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 13,
+                        description: "add_announcements",
+                        sql: include_str!("../migrations/013_announcements.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 14,
+                        description: "add_song_usage",
+                        sql: include_str!("../migrations/014_song_usage.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
+                    tauri_plugin_sql::Migration {
+                        version: 15,
+                        description: "add_bpm_chords",
+                        sql: include_str!("../migrations/015_bpm_chords.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
                 ])
                 .build(),
         )
@@ -93,8 +143,18 @@ pub fn run() {
             commands::close_stage_display,
             backup_database,
             restore_database,
+            remote::start_remote_server,
+            remote::stop_remote_server,
+            remote::get_local_ip,
+            remote::send_remote_state,
+            ndi_output::is_ndi_available,
+            ndi_output::start_ndi_output,
+            ndi_output::stop_ndi_output,
         ])
         .setup(|app| {
+            app.manage(remote::RemoteServerState::new());
+            app.manage(ndi_output::NdiOutputState::new());
+
             // ── 파일 메뉴 ──────────────────────────────────────────────────
             let f_new     = MenuItem::with_id(app, "new_service",      "새 예배",                true, Some("CmdOrCtrl+N"))?;
             let f_open    = MenuItem::with_id(app, "open_service",     "예배 열기",              true, Some("CmdOrCtrl+O"))?;

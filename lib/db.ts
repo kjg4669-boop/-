@@ -30,6 +30,11 @@ interface SongRow {
   artist: string;
   lyrics_json: string;
   media_id: number | null;
+  ccli_number: string | null;
+  copyright_text: string | null;
+  publisher: string | null;
+  verse_order: string | null;
+  bpm: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -95,8 +100,8 @@ export const songDb = {
   async create(song: Omit<Song, "id" | "created_at" | "updated_at">): Promise<number> {
     const conn = await getDb();
     const result = await conn.execute(
-      "INSERT INTO songs (title, artist, lyrics_json, media_id) VALUES (?, ?, ?, ?)",
-      [song.title, song.artist, JSON.stringify(song.lyrics_json), song.media_id ?? null]
+      "INSERT INTO songs (title, artist, lyrics_json, media_id, ccli_number, copyright_text, publisher, verse_order, bpm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [song.title, song.artist, JSON.stringify(song.lyrics_json), song.media_id ?? null, song.ccli_number ?? null, song.copyright_text ?? null, song.publisher ?? null, song.verse_order ? JSON.stringify(song.verse_order) : null, song.bpm ?? null]
     );
     const id = result.lastInsertId;
     if (id == null) throw new Error("INSERT failed: no lastInsertId (songs)");
@@ -111,6 +116,11 @@ export const songDb = {
     if (song.artist !== undefined) { sets.push("artist = ?"); values.push(song.artist); }
     if (song.lyrics_json !== undefined) { sets.push("lyrics_json = ?"); values.push(JSON.stringify(song.lyrics_json)); }
     if (song.media_id !== undefined) { sets.push("media_id = ?"); values.push(song.media_id); }
+    if (song.ccli_number !== undefined) { sets.push("ccli_number = ?"); values.push(song.ccli_number || null); }
+    if (song.copyright_text !== undefined) { sets.push("copyright_text = ?"); values.push(song.copyright_text || null); }
+    if (song.publisher !== undefined) { sets.push("publisher = ?"); values.push(song.publisher || null); }
+    if (song.verse_order !== undefined) { sets.push("verse_order = ?"); values.push(song.verse_order ? JSON.stringify(song.verse_order) : null); }
+    if (song.bpm !== undefined) { sets.push("bpm = ?"); values.push(song.bpm ?? null); }
     sets.push("updated_at = datetime('now')");
     values.push(id);
     await conn.execute(`UPDATE songs SET ${sets.join(", ")} WHERE id = ?`, values);
@@ -124,6 +134,11 @@ export const songDb = {
       artist: original.artist,
       lyrics_json: original.lyrics_json,
       media_id: undefined,
+      ccli_number: original.ccli_number,
+      copyright_text: original.copyright_text,
+      publisher: original.publisher,
+      verse_order: original.verse_order,
+      bpm: original.bpm,
     });
     const newSong = await this.get(newId);
     if (!newSong) throw new Error("Duplicate failed");
@@ -147,7 +162,16 @@ export const songDb = {
 function parseSong(row: SongRow): Song {
   const raw = safeJsonParse(row.lyrics_json, [] as unknown[]);
   const lyrics_json = parseLyricSlides(raw);
-  return { ...row, media_id: row.media_id ?? undefined, lyrics_json };
+  return {
+    ...row,
+    media_id: row.media_id ?? undefined,
+    ccli_number: row.ccli_number ?? undefined,
+    copyright_text: row.copyright_text ?? undefined,
+    publisher: row.publisher ?? undefined,
+    verse_order: row.verse_order ? (JSON.parse(row.verse_order) as string[]) : undefined,
+    bpm: row.bpm ?? undefined,
+    lyrics_json,
+  };
 }
 
 // ─── Media ──────────────────────────────────────────────────────────────────
