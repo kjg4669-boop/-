@@ -363,7 +363,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           </button>
           <button
             onClick={handleExportCcliReport}
-            className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 shrink-0"
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 shrink-0"
             title="CCLI 사용 보고서 내보내기 (CSV)"
           >
             CCLI 보고서
@@ -374,10 +374,10 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           <div className="px-2 py-1.5 border-b border-zinc-700 flex gap-1 flex-wrap">
             <button
               onClick={() => setFilterTagId(null)}
-              className={`px-2 py-0.5 rounded-full text-[10px] border transition-all ${
+              className={`px-2 py-1 rounded-full text-xs border transition-all ${
                 filterTagId === null
                   ? "bg-zinc-400 border-zinc-400 text-zinc-900"
-                  : "border-zinc-600 text-zinc-400 hover:border-zinc-400"
+                  : "border-zinc-600 text-zinc-500 hover:border-zinc-400"
               }`}
             >
               전체
@@ -386,7 +386,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
               <button
                 key={tag.id}
                 onClick={() => setFilterTagId((prev) => prev === tag.id ? null : tag.id)}
-                className="px-2 py-0.5 rounded-full text-[10px] border transition-all"
+                className="px-2 py-1 rounded-full text-xs border transition-all"
                 style={
                   filterTagId === tag.id
                     ? { backgroundColor: tag.color, borderColor: tag.color, color: "#fff" }
@@ -413,17 +413,17 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
             >
               {hoveredSongId === song.id && song.lyrics_json.length > 0 && (
                 <div className="absolute right-full top-0 mr-2 z-50 w-44 bg-zinc-800 border border-zinc-600 rounded shadow-xl p-2 pointer-events-none">
-                  <p className="text-[10px] text-zinc-400 font-medium mb-1 uppercase tracking-wide">
+                  <p className="text-xs text-zinc-500 font-medium mb-1 uppercase tracking-wide">
                     {song.lyrics_json[0]?.section ?? "verse"} 미리보기
                   </p>
                   {song.lyrics_json[0]?.lines.slice(0, 4).map((line, i) => (
-                    <p key={i} className="text-[10px] text-zinc-200 leading-snug truncate">{line}</p>
+                    <p key={i} className="text-xs text-zinc-200 leading-snug truncate">{line}</p>
                   ))}
                   {song.lyrics_json[0]?.lines.length === 0 && (
-                    <p className="text-[10px] text-zinc-600 italic">빈 슬라이드</p>
+                    <p className="text-xs text-zinc-600 italic">빈 슬라이드</p>
                   )}
                   {song.lyrics_json.length > 1 && (
-                    <p className="text-[10px] text-zinc-500 mt-1">+{song.lyrics_json.length - 1}절 더</p>
+                    <p className="text-xs text-zinc-500 mt-1">+{song.lyrics_json.length - 1}절 더</p>
                   )}
                 </div>
               )}
@@ -431,9 +431,9 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                 <div className="font-medium text-white truncate">{song.title}</div>
                 {song.artist && <div className="text-zinc-500 truncate">{song.artist}</div>}
                 <div className="flex items-center gap-1 mt-0.5">
-                  <span className="text-zinc-600 text-[10px]">{song.lyrics_json.length}절</span>
+                  <span className="text-zinc-500 text-xs">{song.lyrics_json.length}절</span>
                   {usageStats.has(song.id) && (
-                    <span className="text-zinc-600 text-[10px]">
+                    <span className="text-zinc-500 text-xs">
                       · {usageStats.get(song.id)!.count}회
                       {usageStats.get(song.id)!.lastUsed && (
                         <> · {new Date(usageStats.get(song.id)!.lastUsed!).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" })}</>
@@ -502,13 +502,13 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           {songs.length === 0 && (
             <div className="p-4 text-center space-y-2">
               <p className="text-xs text-zinc-400 font-medium">찬양이 없습니다</p>
-              <p className="text-[11px] text-zinc-600 leading-relaxed">
+              <p className="text-xs text-zinc-500 leading-relaxed">
                 <span className="text-zinc-400">+ 새 찬양</span> 버튼으로 가사를 입력하거나<br />
                 <span className="text-zinc-400">PPTX</span> 버튼으로 파일을 가져오세요
               </p>
               <button
                 onClick={openHelpWindow}
-                className="text-[11px] text-blue-400 hover:text-blue-300 underline"
+                className="text-xs text-blue-400 hover:text-blue-300 underline"
               >
                 처음이세요? 도움말 보기
               </button>
@@ -595,7 +595,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                 )}
               </div>
               {/* 파일명 */}
-              <div className="px-1.5 py-1 text-[10px] text-zinc-400 truncate">{item.name}</div>
+              <div className="px-1.5 py-1 text-xs text-zinc-500 truncate">{item.name}</div>
               {/* 삭제 버튼 */}
               <button
                 onClick={(e) => {
@@ -616,7 +616,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                     }, 3000);
                   }
                 }}
-                className={`absolute top-1 right-1 px-1.5 py-0.5 rounded text-[10px] transition-opacity ${
+                className={`absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs transition-opacity ${
                   isDeleting
                     ? "bg-red-600 text-white opacity-100"
                     : "bg-zinc-900/80 text-zinc-400 hover:text-red-400 opacity-0 group-hover:opacity-100"
@@ -630,7 +630,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
         {media.length === 0 && (
           <div className="col-span-2 p-4 text-center text-xs text-zinc-500 space-y-1">
             <p>미디어 파일이 없습니다</p>
-            <p className="text-[11px] text-zinc-600">위 버튼으로 이미지·영상을 추가하세요</p>
+            <p className="text-xs text-zinc-500">위 버튼으로 이미지·영상을 추가하세요</p>
           </div>
         )}
       </div>
