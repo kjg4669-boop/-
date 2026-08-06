@@ -117,7 +117,7 @@ export default function LayerSidebar({
     <div className="h-full flex flex-col overflow-y-auto text-xs">
       {/* ── 배경 ─────────────────────────────────────── */}
       <section className="border-b border-zinc-700 p-3 space-y-2">
-        <p className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">배경</p>
+        <p className="text-zinc-400 font-medium uppercase tracking-wider text-xs">배경</p>
 
         {/* Type tabs */}
         <div className="flex gap-1">
@@ -189,7 +189,7 @@ export default function LayerSidebar({
         {/* 영상 재생 컨트롤 */}
         {bg.type === "video" && (
           <div className="space-y-2 border-t border-zinc-700 pt-2">
-            <p className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider">영상 컨트롤</p>
+            <p className="text-xs text-zinc-400 font-semibold uppercase tracking-wider">영상 컨트롤</p>
 
             {/* 재생/일시정지 + 처음으로 */}
             <div className="flex gap-1">
@@ -227,7 +227,7 @@ export default function LayerSidebar({
                   }}
                   className="w-full accent-blue-500"
                 />
-                <div className="flex justify-between text-[10px] text-zinc-500">
+                <div className="flex justify-between text-xs text-zinc-500">
                   <span>{formatTime(currentTime)}</span>
                   <span>{formatTime(duration)}</span>
                 </div>
@@ -236,7 +236,7 @@ export default function LayerSidebar({
 
             {/* 볼륨 */}
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-zinc-400 w-8 flex-shrink-0">볼륨</span>
+              <span className="text-xs text-zinc-400 w-8 flex-shrink-0">볼륨</span>
               <input
                 type="range" min={0} max={1} step={0.05} value={volume}
                 onChange={(e) => {
@@ -246,7 +246,7 @@ export default function LayerSidebar({
                 }}
                 className="flex-1 accent-blue-500"
               />
-              <span className="text-[10px] text-zinc-500 w-8 text-right">{Math.round(volume * 100)}%</span>
+              <span className="text-xs text-zinc-500 w-8 text-right">{Math.round(volume * 100)}%</span>
             </div>
 
             {/* 루프 */}
@@ -268,11 +268,11 @@ export default function LayerSidebar({
 
       {/* ── 자막 ─────────────────────────────────────── */}
       <section className="border-b border-zinc-700 p-3 space-y-2">
-        <p className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">자막</p>
+        <p className="text-zinc-400 font-medium uppercase tracking-wider text-xs">자막</p>
 
         {/* Layout presets */}
         <div className="flex items-center gap-1">
-          <span className="text-zinc-400 w-10 text-[10px]">프리셋</span>
+          <span className="text-zinc-400 w-10 text-xs">프리셋</span>
           {([
             { label: "기본", position: "bottom", fontSize: 48, textAlign: "center", fontWeight: "normal" },
             { label: "대형", position: "center", fontSize: 64, textAlign: "center", fontWeight: "bold" },
@@ -282,7 +282,7 @@ export default function LayerSidebar({
             <button
               key={preset.label}
               onClick={() => setSubtitle({ position: preset.position, fontSize: preset.fontSize, textAlign: preset.textAlign, fontWeight: preset.fontWeight, layout: "full" })}
-              className="flex-1 py-0.5 rounded text-[10px] bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-colors"
+              className="flex-1 py-1 rounded text-xs bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-colors"
               title={`${preset.label}: 위치=${preset.position === "bottom" ? "하단" : preset.position === "center" ? "중앙" : "상단"}, 크기=${preset.fontSize}px`}
             >
               {preset.label}
@@ -292,7 +292,7 @@ export default function LayerSidebar({
 
         {/* Layout (split) */}
         <div className="flex items-center gap-1">
-          <span className="text-zinc-400 w-10 text-[10px]">배치</span>
+          <span className="text-zinc-400 w-10 text-xs">배치</span>
           {([
             { key: "full", label: "전체" },
             { key: "left-half", label: "좌½" },
@@ -301,7 +301,7 @@ export default function LayerSidebar({
             <button
               key={l.key}
               onClick={() => setSubtitle({ layout: l.key })}
-              className={`flex-1 py-1 rounded text-[10px] ${(sub.layout ?? "full") === l.key ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+              className={`flex-1 py-1 rounded text-xs ${(sub.layout ?? "full") === l.key ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
               title={l.key === "full" ? "전체 화면 자막" : l.key === "left-half" ? "좌측 절반에만 자막 (우측 이미지)" : "우측 절반에만 자막 (좌측 이미지)"}
             >
               {l.label}
@@ -391,27 +391,27 @@ export default function LayerSidebar({
 
         {/* 줄 간격 */}
         <div className="flex items-center gap-2">
-          <label className="text-zinc-400 text-[11px] w-16 shrink-0">줄 간격</label>
+          <label className="text-zinc-400 text-xs w-16 shrink-0">줄 간격</label>
           <input
             type="range" min={0.8} max={3.0} step={0.05}
             value={layerConfig.subtitle.lineHeight ?? 1.3}
             onChange={(e) => setSubtitle({ lineHeight: Number(e.target.value) })}
             className="flex-1 accent-blue-500"
           />
-          <span className="text-zinc-300 text-[11px] w-8 text-right">
+          <span className="text-zinc-300 text-xs w-8 text-right">
             {(layerConfig.subtitle.lineHeight ?? 1.3).toFixed(2)}
           </span>
         </div>
         {/* 자간 */}
         <div className="flex items-center gap-2">
-          <label className="text-zinc-400 text-[11px] w-16 shrink-0">자간</label>
+          <label className="text-zinc-400 text-xs w-16 shrink-0">자간</label>
           <input
             type="range" min={-5} max={20} step={0.5}
             value={layerConfig.subtitle.letterSpacing ?? 0}
             onChange={(e) => setSubtitle({ letterSpacing: Number(e.target.value) })}
             className="flex-1 accent-blue-500"
           />
-          <span className="text-zinc-300 text-[11px] w-8 text-right">
+          <span className="text-zinc-300 text-xs w-8 text-right">
             {(layerConfig.subtitle.letterSpacing ?? 0).toFixed(1)}px
           </span>
         </div>
@@ -419,10 +419,10 @@ export default function LayerSidebar({
         {/* ── 이중언어 ─── */}
         <div className="border-t border-zinc-700 pt-2 space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-zinc-400 text-[11px] font-medium uppercase tracking-wider">이중언어</span>
+            <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider">이중언어</span>
             <button
               onClick={() => setSubtitle({ bilingualEnabled: !sub.bilingualEnabled })}
-              className={`text-[11px] px-2 py-0.5 rounded ${sub.bilingualEnabled ? "bg-yellow-600 text-white" : "bg-zinc-700 text-zinc-400"}`}
+              className={`text-xs px-2 py-1 rounded ${sub.bilingualEnabled ? "bg-yellow-600 text-white" : "bg-zinc-700 text-zinc-400"}`}
             >
               {sub.bilingualEnabled ? "켜짐" : "꺼짐"}
             </button>
@@ -430,24 +430,24 @@ export default function LayerSidebar({
           {sub.bilingualEnabled && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
-                <label className="text-zinc-400 text-[11px] w-14 shrink-0">번역 크기</label>
+                <label className="text-zinc-400 text-xs w-14 shrink-0">번역 크기</label>
                 <input
                   type="number" min={12} max={80}
                   value={sub.fontSize2 ?? 28}
                   onChange={(e) => setSubtitle({ fontSize2: Number(e.target.value) })}
                   className="w-16 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none"
                 />
-                <span className="text-zinc-500 text-[11px]">px</span>
+                <span className="text-zinc-500 text-xs">px</span>
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-zinc-400 text-[11px] w-14 shrink-0">번역 색상</label>
+                <label className="text-zinc-400 text-xs w-14 shrink-0">번역 색상</label>
                 <input
                   type="color"
                   value={sub.color2 ?? "#cccccc"}
                   onChange={(e) => setSubtitle({ color2: e.target.value })}
                   className="w-8 h-6 rounded cursor-pointer border border-zinc-600 bg-transparent"
                 />
-                <span className="text-zinc-500 text-[11px]">{sub.color2 ?? "#cccccc"}</span>
+                <span className="text-zinc-500 text-xs">{sub.color2 ?? "#cccccc"}</span>
               </div>
               <div className="flex gap-1">
                 <button
@@ -555,7 +555,7 @@ export default function LayerSidebar({
             </div>
 
             {/* Overlay */}
-            <p className="text-zinc-500 text-[10px] uppercase tracking-wider pt-1">오버레이</p>
+            <p className="text-zinc-500 text-xs uppercase tracking-wider pt-1">오버레이</p>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
