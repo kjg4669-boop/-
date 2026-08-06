@@ -88,7 +88,7 @@ export default function AnnouncementPanel() {
     <div className="flex flex-col gap-3 p-3 text-xs text-zinc-200 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-sm">공지 루프</span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full ${looping ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
+        <span className={`text-xs px-2 py-0.5 rounded-full ${looping ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
           {looping ? `재생 중 (${currentIdx + 1}/${activeItems.length})` : "중지"}
         </span>
       </div>
@@ -150,8 +150,8 @@ export default function AnnouncementPanel() {
           >
             <div className="flex-1 min-w-0">
               <p className={`font-medium truncate ${a.active ? "text-zinc-200" : "text-zinc-500"}`}>{a.title}</p>
-              {a.body && <p className="text-zinc-500 truncate text-[11px]">{a.body}</p>}
-              <p className="text-zinc-600 text-[10px]">{a.duration_sec}초</p>
+              {a.body && <p className="text-zinc-500 truncate text-xs">{a.body}</p>}
+              <p className="text-zinc-600 text-xs">{a.duration_sec}초</p>
             </div>
             <button onClick={() => beginEdit(a)} className="text-zinc-400 hover:text-white px-1">편집</button>
             <button onClick={() => handleDelete(a.id)} className="text-zinc-500 hover:text-red-400 px-1">삭제</button>

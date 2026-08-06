@@ -44,7 +44,7 @@ export default function OutputPreview({ layerConfig, isBlackout }: Props) {
       {bg.type !== "video" && <div className="absolute inset-0" style={bgStyle} />}
       {bg.type === "video" && (
         <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center">
-          <span className="text-zinc-600 text-[10px]">▶ 영상</span>
+          <span className="text-zinc-600 text-xs">▶ 영상</span>
         </div>
       )}
 
@@ -95,7 +95,7 @@ export default function OutputPreview({ layerConfig, isBlackout }: Props) {
       )}
 
       {/* Label */}
-      <div className="absolute bottom-0.5 right-1 text-[8px] text-zinc-600 pointer-events-none">미리보기</div>
+      <div className="absolute bottom-0.5 right-1 text-xs text-zinc-600 pointer-events-none">미리보기</div>
     </div>
   );
 }

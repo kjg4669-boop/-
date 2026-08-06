@@ -409,14 +409,14 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
               onChange={(e) => updateBlock(i, "text2", e.target.value)}
               placeholder="번역 가사 (선택사항, Enter로 줄 구분)"
               rows={2}
-              className="w-full bg-zinc-900 text-[11px] italic text-zinc-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-yellow-500 resize-none"
+              className="w-full bg-zinc-900 text-xs italic text-zinc-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-yellow-500 resize-none"
             />
             <input
               type="text"
               value={block.chords ?? ""}
               onChange={(e) => updateBlock(i, "chords", e.target.value)}
               placeholder="코드 (예: C  G  Am  F)"
-              className="w-full bg-zinc-900 text-[11px] font-mono text-blue-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500"
+              className="w-full bg-zinc-900 text-xs font-mono text-blue-400 rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500"
             />
           </div>
         ))}
@@ -431,11 +431,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         {/* Verse Order Editor */}
         <div className="border border-zinc-700 rounded p-2 space-y-1.5">
           <div className="flex items-center justify-between">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wide">절 순서</p>
+            <p className="text-xs text-zinc-500 uppercase tracking-wide">절 순서</p>
             {verseOrder.length > 0 && (
               <button
                 onClick={() => setVerseOrder([])}
-                className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                className="text-xs text-zinc-500 hover:text-zinc-300"
               >
                 초기화
               </button>
@@ -448,7 +448,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                 if (ids.length > 0) setVerseOrder(ids);
               }}
               disabled={!blocks.some((b) => b.slideId)}
-              className="w-full text-[10px] py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-zinc-300"
+              className="w-full text-xs py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded text-zinc-300"
               title={blocks.some((b) => b.slideId) ? "현재 블록 순서로 절 순서 생성" : "저장 후 편집 가능"}
             >
               절 순서 편집 (저장 후 사용 가능)
@@ -481,13 +481,13 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
 
         {/* Tags */}
         <div className="border border-zinc-700 rounded p-2 space-y-1.5">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wide">태그</p>
+          <p className="text-xs text-zinc-500 uppercase tracking-wide">태그</p>
           <div className="flex flex-wrap gap-1">
             {allTags.map((tag) => (
               <button
                 key={tag.id}
                 onClick={() => toggleTag(tag.id)}
-                className="px-2 py-0.5 rounded-full text-[10px] border transition-all"
+                className="px-2 py-0.5 rounded-full text-xs border transition-all"
                 style={
                   selectedTagIds.has(tag.id)
                     ? { backgroundColor: tag.color, borderColor: tag.color, color: "#fff" }
@@ -498,7 +498,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
               </button>
             ))}
             {allTags.length === 0 && (
-              <span className="text-[10px] text-zinc-600">태그 없음 — 아래에서 추가</span>
+              <span className="text-xs text-zinc-600">태그 없음 — 아래에서 추가</span>
             )}
           </div>
           {/* Tag color picker */}
@@ -534,21 +534,21 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
         {song?.id && (
           <div className="border border-zinc-700 rounded p-2 space-y-1.5">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wide">배킹 트랙</p>
+              <p className="text-xs text-zinc-500 uppercase tracking-wide">배킹 트랙</p>
               <button
                 onClick={handleAddTrack}
-                className="text-[10px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
+                className="text-xs px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300"
               >
                 + 파일 추가
               </button>
             </div>
             {backingTracks.length === 0 && (
-              <p className="text-[10px] text-zinc-600">오디오 파일을 추가하면 슬라이드 첫 진입 시 자동 재생됩니다</p>
+              <p className="text-xs text-zinc-600">오디오 파일을 추가하면 슬라이드 첫 진입 시 자동 재생됩니다</p>
             )}
             {backingTracks.map((track) => (
               <div key={track.id} className="space-y-1">
                 <div className="flex items-center gap-1">
-                  <span className="flex-1 text-[10px] text-zinc-300 truncate" title={track.file_path}>
+                  <span className="flex-1 text-xs text-zinc-300 truncate" title={track.file_path}>
                     {track.file_path.split(/[\\/]/).pop() ?? track.file_path}
                   </span>
                   <button
@@ -557,11 +557,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                       await backingTrackDb.delete(track.id);
                       if (songId) setBackingTracks(await backingTrackDb.list(songId));
                     }}
-                    className="text-zinc-600 hover:text-red-400 text-[10px] px-1"
+                    className="text-zinc-600 hover:text-red-400 text-xs px-1"
                   >✕</button>
                 </div>
                 <div className="flex items-center gap-2 pl-1">
-                  <span className="text-zinc-500 text-[9px] w-8">볼륨</span>
+                  <span className="text-zinc-500 text-xs w-8">볼륨</span>
                   <input
                     type="range" min={0} max={1} step={0.05}
                     value={track.volume}
@@ -572,7 +572,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                     }}
                     className="flex-1"
                   />
-                  <span className="text-zinc-500 text-[9px] w-6">{Math.round(track.volume * 100)}%</span>
+                  <span className="text-zinc-500 text-xs w-6">{Math.round(track.volume * 100)}%</span>
                   <label className="flex items-center gap-1 cursor-pointer">
                     <input
                       type="checkbox"
@@ -584,7 +584,7 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                       }}
                       className="rounded"
                     />
-                    <span className="text-[9px] text-zinc-400">반복</span>
+                    <span className="text-xs text-zinc-400">반복</span>
                   </label>
                 </div>
               </div>

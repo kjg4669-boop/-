@@ -57,7 +57,7 @@ export default function AlertPanel() {
   return (
     <div className="flex flex-col h-full overflow-hidden text-xs text-white">
       <div className="p-3 space-y-2 flex-1 overflow-y-auto">
-        <p className="text-zinc-400 text-[10px] uppercase tracking-wider">공지 텍스트</p>
+        <p className="text-zinc-400 text-xs uppercase tracking-wider">공지 텍스트</p>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -72,7 +72,7 @@ export default function AlertPanel() {
           {(["top", "center", "bottom"] as const).map((pos) => (
             <button key={pos}
               onClick={() => setPosition(pos)}
-              className={`flex-1 py-1 rounded text-[10px] ${position === pos ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+              className={`flex-1 py-1 rounded text-xs ${position === pos ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
             >{pos === "top" ? "상단" : pos === "center" ? "중앙" : "하단"}</button>
           ))}
         </div>
@@ -112,14 +112,14 @@ export default function AlertPanel() {
           </button>
         </div>
         <button onClick={() => void handleSaveTemplate()}
-          className="w-full py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 text-[10px]">
+          className="w-full py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 text-xs">
           현재 공지 템플릿으로 저장
         </button>
 
         {/* Template list */}
         {templates.length > 0 && (
           <>
-            <p className="text-zinc-400 text-[10px] uppercase tracking-wider pt-2">저장된 템플릿</p>
+            <p className="text-zinc-400 text-xs uppercase tracking-wider pt-2">저장된 템플릿</p>
             <div className="space-y-1">
               {templates.map((t) => (
                 <div key={t.id} className="flex items-center gap-1 bg-zinc-800 rounded px-2 py-1">
@@ -128,7 +128,7 @@ export default function AlertPanel() {
                     {t.text}
                   </button>
                   <button onClick={() => void handleDeleteTemplate(t.id)}
-                    className="text-zinc-600 hover:text-red-400 text-[10px] px-1">✕</button>
+                    className="text-zinc-600 hover:text-red-400 text-xs px-1">✕</button>
                 </div>
               ))}
             </div>

@@ -41,7 +41,7 @@ export default function RemotePanel() {
     <div className="flex flex-col gap-3 p-3 text-xs text-zinc-200">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-sm">웹 원격 제어</span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full ${running ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
+        <span className={`text-xs px-2 py-0.5 rounded-full ${running ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
           {running ? "실행 중" : "중지됨"}
         </span>
       </div>
@@ -66,8 +66,8 @@ export default function RemotePanel() {
           >
             서버 시작
           </button>
-          {error && <p className="text-red-400 text-[11px]">{error}</p>}
-          <p className="text-zinc-500 text-[11px]">스마트폰과 같은 Wi-Fi에서 접속해야 합니다.</p>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+          <p className="text-zinc-500 text-xs">스마트폰과 같은 Wi-Fi에서 접속해야 합니다.</p>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3">
@@ -77,7 +77,7 @@ export default function RemotePanel() {
                 <QRCodeSVG value={url} size={160} />
               </div>
               <p className="text-zinc-300 text-center font-mono text-sm">{url}</p>
-              <p className="text-zinc-500 text-[11px] text-center">스마트폰으로 QR 코드를 스캔하거나 위 주소를 입력하세요.</p>
+              <p className="text-zinc-500 text-xs text-center">스마트폰으로 QR 코드를 스캔하거나 위 주소를 입력하세요.</p>
             </>
           )}
           <button

@@ -104,7 +104,7 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
 
   function renderLayerCheckboxes() {
     return (
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-[11px]">
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs">
         {([
           ["배경", editBg, setEditBg] as const,
           ["자막", editSub, setEditSub] as const,
@@ -125,7 +125,7 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
     <div className="flex flex-col gap-2 p-3 text-xs text-zinc-200">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-sm">출력 Looks</span>
-        <button onClick={startNew} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px]">+ 새 Look</button>
+        <button onClick={startNew} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs">+ 새 Look</button>
       </div>
 
       {/* Look list */}
@@ -139,8 +139,8 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
                   className="bg-zinc-700 border border-zinc-600 rounded px-1.5 py-0.5 text-white text-xs w-full outline-none focus:border-blue-500" />
                 {renderLayerCheckboxes()}
                 <div className="flex gap-1 mt-1">
-                  <button onClick={() => void handleSaveEdit()} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px]">저장</button>
-                  <button onClick={() => setEditingId(null)} className="px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-[11px]">취소</button>
+                  <button onClick={() => void handleSaveEdit()} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs">저장</button>
+                  <button onClick={() => setEditingId(null)} className="px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs">취소</button>
                 </div>
               </div>
             ) : (
@@ -149,7 +149,7 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
                   className="flex-1 text-left flex items-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${currentLookId === look.id ? "bg-blue-400" : "bg-zinc-600"}`} />
                   <span className="font-medium">{look.name}</span>
-                  <span className="text-zinc-500 text-[10px] ml-1">
+                  <span className="text-zinc-500 text-xs ml-1">
                     {[look.showBackground && "배경", look.showSubtitle && "자막", look.showOverlay && "오버레이", look.showCanvas && "캔버스", look.showCountdown && "타이머"]
                       .filter(Boolean).join(" · ")}
                   </span>
@@ -170,14 +170,14 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
             className="bg-zinc-700 border border-zinc-600 rounded px-1.5 py-0.5 text-white text-xs w-full outline-none focus:border-blue-500" />
           {renderLayerCheckboxes()}
           <div className="flex gap-1 mt-1">
-            <button onClick={() => void handleSaveNew()} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px]">저장</button>
-            <button onClick={() => setShowNew(false)} className="px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-[11px]">취소</button>
+            <button onClick={() => void handleSaveNew()} className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs">저장</button>
+            <button onClick={() => setShowNew(false)} className="px-2 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs">취소</button>
           </div>
         </div>
       )}
 
       {looks.length === 0 && !showNew && (
-        <p className="text-zinc-500 text-[11px] text-center py-2">Look이 없습니다. + 새 Look 버튼으로 추가하세요.</p>
+        <p className="text-zinc-500 text-xs text-center py-2">Look이 없습니다. + 새 Look 버튼으로 추가하세요.</p>
       )}
     </div>
   );

@@ -48,17 +48,17 @@ export default function ShortcutCheatSheet({ onClose }: Props) {
         <div className="grid grid-cols-3 gap-4">
           {SHORTCUTS.map(({ group, items }) => (
             <div key={group}>
-              <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wide mb-2">{group}</p>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wide mb-2">{group}</p>
               {items.map(([key, desc]) => (
                 <div key={key} className="flex items-center gap-2 mb-1.5">
-                  <kbd className="shrink-0 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-600 text-[10px] text-zinc-300 font-mono whitespace-nowrap">{key}</kbd>
-                  <span className="text-[11px] text-zinc-400">{desc}</span>
+                  <kbd className="shrink-0 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-600 text-xs text-zinc-300 font-mono whitespace-nowrap">{key}</kbd>
+                  <span className="text-xs text-zinc-400">{desc}</span>
                 </div>
               ))}
             </div>
           ))}
         </div>
-        <p className="mt-4 text-[10px] text-zinc-600 text-center">입력 필드에 포커스 있을 때는 단축키 비활성</p>
+        <p className="mt-4 text-xs text-zinc-600 text-center">입력 필드에 포커스 있을 때는 단축키 비활성</p>
       </div>
     </div>
   );

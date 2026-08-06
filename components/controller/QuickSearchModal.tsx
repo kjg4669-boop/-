@@ -63,7 +63,7 @@ export default function QuickSearchModal({ slides, activeIdx, onSelect, onClose 
             placeholder="슬라이드 검색... 곡명 또는 가사"
             className="flex-1 bg-transparent text-white text-sm outline-none placeholder:text-zinc-600"
           />
-          <span className="text-[10px] text-zinc-600">Esc 닫기</span>
+          <span className="text-xs text-zinc-600">Esc 닫기</span>
         </div>
         <div ref={listRef} className="overflow-y-auto flex-1">
           {filtered.length === 0 && (
@@ -78,9 +78,9 @@ export default function QuickSearchModal({ slides, activeIdx, onSelect, onClose 
               } ${s.flatIdx === activeIdx ? "ring-inset ring-1 ring-orange-400/40" : ""}`}
             >
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] text-zinc-600 w-6 shrink-0 text-right">{s.flatIdx + 1}</span>
+                <span className="text-xs text-zinc-600 w-6 shrink-0 text-right">{s.flatIdx + 1}</span>
                 <span className="text-xs font-medium text-zinc-300 truncate">{s.songTitle}</span>
-                <span className="text-[10px] text-zinc-600 shrink-0 ml-auto">{SECTION_LABEL[s.slide.section] ?? s.slide.section}</span>
+                <span className="text-xs text-zinc-600 shrink-0 ml-auto">{SECTION_LABEL[s.slide.section] ?? s.slide.section}</span>
               </div>
               <div className="text-xs text-zinc-500 truncate pl-8">
                 {s.slide.lines[0] ?? <span className="italic text-zinc-700">빈 슬라이드</span>}
@@ -88,7 +88,7 @@ export default function QuickSearchModal({ slides, activeIdx, onSelect, onClose 
             </button>
           ))}
         </div>
-        <div className="px-4 py-1.5 border-t border-zinc-800 text-[10px] text-zinc-600 flex gap-4">
+        <div className="px-4 py-1.5 border-t border-zinc-800 text-xs text-zinc-600 flex gap-4">
           <span>↑↓ 이동</span>
           <span>Enter 선택</span>
           <span>/ 열기</span>

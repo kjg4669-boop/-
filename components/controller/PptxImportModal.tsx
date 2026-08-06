@@ -81,7 +81,7 @@ export default function PptxImportModal({ fileName, slides, onSave, onCancel }: 
                     key={i}
                     className="bg-zinc-800 border border-zinc-700 rounded p-2 text-xs"
                   >
-                    <span className="text-zinc-500 text-[10px]">{i + 1}</span>
+                    <span className="text-zinc-500 text-xs">{i + 1}</span>
                     <p className="text-white mt-0.5 line-clamp-3 leading-snug whitespace-pre-line">
                       {slide.lines.join("\n")}
                     </p>

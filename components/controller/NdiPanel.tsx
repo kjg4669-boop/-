@@ -52,7 +52,7 @@ export default function NdiPanel() {
     <div className="flex flex-col gap-3 p-3 text-xs text-zinc-200">
       <div className="flex items-center justify-between">
         <span className="font-semibold text-sm">NDI 출력</span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+        <span className={`text-xs px-2 py-0.5 rounded-full ${
           running ? "bg-green-800 text-green-300" :
           ndiAvailable === false ? "bg-yellow-900 text-yellow-400" :
           "bg-zinc-700 text-zinc-400"
@@ -62,7 +62,7 @@ export default function NdiPanel() {
       </div>
 
       {ndiAvailable === false && (
-        <div className="rounded border border-yellow-800 bg-yellow-950 p-2 text-yellow-300 text-[11px] leading-relaxed">
+        <div className="rounded border border-yellow-800 bg-yellow-950 p-2 text-yellow-300 text-xs leading-relaxed">
           <p className="font-semibold mb-1">NDI SDK가 설치되지 않았습니다.</p>
           <p>1. <span className="font-mono">ndi.video/for-developers/ndi-sdk</span> 에서 SDK 다운로드</p>
           <p>2. 라이선스 동의 후 설치</p>
@@ -95,10 +95,10 @@ export default function NdiPanel() {
             <option value={60}>60 fps</option>
           </select>
         </div>
-        <div className="text-zinc-600 text-[10px]">해상도: 1920×1080 (Output 창 크기 기준)</div>
+        <div className="text-zinc-600 text-xs">해상도: 1920×1080 (Output 창 크기 기준)</div>
       </div>
 
-      {error && <p className="text-red-400 text-[11px] break-all">{error}</p>}
+      {error && <p className="text-red-400 text-xs break-all">{error}</p>}
 
       {!running ? (
         <button
@@ -117,7 +117,7 @@ export default function NdiPanel() {
         </button>
       )}
 
-      <p className="text-zinc-600 text-[10px]">OBS · vMix · Wirecast에서 NDI 소스를 추가하세요.</p>
+      <p className="text-zinc-600 text-xs">OBS · vMix · Wirecast에서 NDI 소스를 추가하세요.</p>
     </div>
   );
 }

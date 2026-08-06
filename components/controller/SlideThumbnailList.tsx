@@ -180,13 +180,13 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
               <SortableItem key={id} id={id}>
                 <div className="px-3">
                   {showSongHeader && (
-                    <div className="text-[9px] text-zinc-500 pt-1 pb-1 uppercase tracking-wide truncate">
+                    <div className="text-xs text-zinc-500 pt-1 pb-1 uppercase tracking-wide truncate">
                       {entry.songTitle}
                     </div>
                   )}
 
                   {/* 슬라이드 번호 (썸네일 위) */}
-                  <div className={`text-[10px] mb-0.5 select-none ${isActive ? "text-zinc-200" : "text-zinc-500"}`}>
+                  <div className={`text-xs mb-0.5 select-none ${isActive ? "text-zinc-200" : "text-zinc-500"}`}>
                     {flatIdx + 1}
                   </div>
 
@@ -435,7 +435,7 @@ function CtxMenuPanel({
             <CItem label="구역 추가" onClick={() => setShowSectionPicker(true)} disabled={!entry} />
           ) : (
             <div className="px-2 py-1">
-              <p className="text-[10px] text-zinc-500 mb-1 px-2">섹션 선택</p>
+              <p className="text-xs text-zinc-500 mb-1 px-2">섹션 선택</p>
               {([
                 ["verse", "절 (Verse)"],
                 ["chorus", "후렴 (Chorus)"],
@@ -485,7 +485,7 @@ function CItem({ label, shortcut, onClick, disabled, danger }: {
       }`}
     >
       <span>{label}</span>
-      {shortcut && <span className="text-zinc-500 text-[10px]">{shortcut}</span>}
+      {shortcut && <span className="text-zinc-500 text-xs">{shortcut}</span>}
     </button>
   );
 }

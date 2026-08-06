@@ -26,7 +26,7 @@ function IllustrationLayout() {
           {[1, 2, 3].map((i) => <div key={i} className="h-4 bg-zinc-700 rounded" />)}
         </div>
         <div className="flex-1 bg-blue-500/10 border border-blue-500/30 rounded flex items-center justify-center">
-          <div className="text-[8px] text-blue-400 font-medium">편집 캔버스</div>
+          <div className="text-xs text-blue-400 font-medium">편집 캔버스</div>
         </div>
         <div className="w-14 bg-zinc-800 rounded flex flex-col gap-1 p-1">
           <div className="text-[5px] text-zinc-500">라이브러리</div>
@@ -60,7 +60,7 @@ function IllustrationLibrary() {
   return (
     <div className="w-full h-full flex flex-col p-2 gap-1">
       <div className="flex items-center gap-1 bg-zinc-700 rounded px-1.5 py-1">
-        <span className="text-[8px] text-zinc-400">🔍</span>
+        <span className="text-xs text-zinc-400">🔍</span>
         <div className="flex-1 h-1.5 bg-zinc-600 rounded" />
       </div>
       <div className="flex gap-0.5 flex-wrap">
