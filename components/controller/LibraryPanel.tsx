@@ -420,7 +420,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                     <p key={i} className="text-xs text-zinc-200 leading-snug truncate">{line}</p>
                   ))}
                   {song.lyrics_json[0]?.lines.length === 0 && (
-                    <p className="text-xs text-zinc-600 italic">빈 슬라이드</p>
+                    <p className="text-xs text-zinc-500 italic">빈 슬라이드</p>
                   )}
                   {song.lyrics_json.length > 1 && (
                     <p className="text-xs text-zinc-500 mt-1">+{song.lyrics_json.length - 1}절 더</p>
@@ -452,13 +452,13 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); setEditSong(song); setEditMode(true); }}
-                className="ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
+                className="ml-1 px-1.5 py-1 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
               >
                 편집
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); void handleDuplicate(song); }}
-                className="ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
+                className="ml-1 px-1.5 py-1 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity text-zinc-400 hover:text-white hover:bg-zinc-800"
                 title="복제"
               >
                 복제
@@ -488,7 +488,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                     }, 3000);
                   }
                 }}
-                className={`ml-1 px-1.5 py-0.5 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity ${
+                className={`ml-1 px-1.5 py-1 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity ${
                   deletingSongId === song.id
                     ? "bg-red-600 text-white opacity-100"
                     : "text-zinc-500 hover:text-red-400 hover:bg-zinc-800"
@@ -589,7 +589,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                 {thumbSrc ? (
                   <img src={thumbSrc} alt={item.name} className="w-full h-full object-cover" />
                 ) : (
-                  <span className="text-2xl text-zinc-600">
+                  <span className="text-2xl text-zinc-500">
                     {item.type === "video" ? "▶" : "🖼"}
                   </span>
                 )}
@@ -616,7 +616,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
                     }, 3000);
                   }
                 }}
-                className={`absolute top-1 right-1 px-1.5 py-0.5 rounded text-xs transition-opacity ${
+                className={`absolute top-1 right-1 px-1.5 py-1 rounded text-xs transition-opacity ${
                   isDeleting
                     ? "bg-red-600 text-white opacity-100"
                     : "bg-zinc-900/80 text-zinc-400 hover:text-red-400 opacity-0 group-hover:opacity-100"

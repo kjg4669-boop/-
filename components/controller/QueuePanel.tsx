@@ -44,19 +44,19 @@ function SortableQueueItem({
         {...attributes}
         {...listeners}
         onClick={(e) => e.stopPropagation()}
-        className="cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-300 px-1 select-none"
+        className="cursor-grab active:cursor-grabbing text-zinc-500 hover:text-zinc-300 px-1 select-none"
         title="드래그하여 순서 변경"
       >
         ⠿
       </span>
-      <span className="text-zinc-500 text-[10px] w-4 flex-shrink-0">{ITEM_TYPE_ICON[item.type] ?? "•"}</span>
+      <span className="text-zinc-500 text-xs w-4 flex-shrink-0">{ITEM_TYPE_ICON[item.type] ?? "•"}</span>
       <div className="flex-1 min-w-0">
         <div className="text-white truncate">{item.song?.title ?? item.label ?? item.type}</div>
-        {item.song?.artist && <div className="text-zinc-600 text-[10px] truncate">{item.song.artist}</div>}
+        {item.song?.artist && <div className="text-zinc-500 text-xs truncate">{item.song.artist}</div>}
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onDelete(); }}
-        className="px-1 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+        className="px-1 text-zinc-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
       >
         ✕
       </button>
@@ -358,7 +358,7 @@ export default function QueuePanel() {
         </div>
         {showNewForm && (
           <div className="space-y-1 pt-1 border-t border-zinc-700">
-            <p className="text-[10px] text-zinc-400 font-medium">새 예배 만들기</p>
+            <p className="text-xs text-zinc-400 font-medium">새 예배 만들기</p>
             <input
               type="text" placeholder="예배 이름" value={newName}
               onChange={(e) => setNewName(e.target.value)}
@@ -434,7 +434,7 @@ export default function QueuePanel() {
                             <div
                               key={slide.id}
                               onClick={() => { if (flatIdx >= 0) setActiveFlatSlide(flatIdx); }}
-                              className={`flex items-start gap-1.5 px-3 py-1 text-[10px] cursor-pointer border-l-2 transition-colors ${
+                              className={`flex items-start gap-1.5 px-3 py-1 text-xs cursor-pointer border-l-2 transition-colors ${
                                 isActiveSlide
                                   ? "bg-blue-950 border-l-blue-400 text-white"
                                   : "border-l-transparent text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
@@ -467,7 +467,7 @@ export default function QueuePanel() {
                     {/* Item notes — shown for active item */}
                     {isActive && (
                       <div className="bg-zinc-950 border-b border-zinc-800 px-2 py-1.5">
-                        <p className="text-[9px] text-zinc-600 uppercase tracking-wide mb-1">발표자 메모</p>
+                        <p className="text-xs text-zinc-500 uppercase tracking-wide mb-1">발표자 메모</p>
                         <textarea
                           value={itemNotes}
                           onChange={(e) => {
@@ -484,7 +484,7 @@ export default function QueuePanel() {
                           }}
                           placeholder="이 순서에 대한 메모 (Stage Display에 표시)"
                           rows={2}
-                          className="w-full bg-zinc-900 text-zinc-300 text-[10px] rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500 resize-none placeholder-zinc-700"
+                          className="w-full bg-zinc-900 text-zinc-300 text-xs rounded px-2 py-1 border border-zinc-700 outline-none focus:border-blue-500 resize-none placeholder-zinc-700"
                         />
                       </div>
                     )}
@@ -516,7 +516,7 @@ export default function QueuePanel() {
           className="bg-zinc-800 border border-zinc-600 rounded shadow-xl py-1 min-w-[130px]"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-1 text-[10px] text-zinc-500 border-b border-zinc-700 truncate max-w-[180px]">
+          <div className="px-3 py-1 text-xs text-zinc-500 border-b border-zinc-700 truncate max-w-[180px]">
             {contextMenu.item.song?.title ?? contextMenu.item.label ?? contextMenu.item.type}
           </div>
           <button
