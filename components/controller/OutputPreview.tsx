@@ -114,10 +114,10 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
         setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
         setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = initTransform; return next; });
       });
-      requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         setActiveCanvasSlot(nextSlot);
         setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      });
+      }));
     } else {
       setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
       setActiveCanvasSlot(nextSlot);

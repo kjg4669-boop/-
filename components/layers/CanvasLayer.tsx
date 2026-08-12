@@ -101,33 +101,34 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance 
     currentSlot.current = nextSlot;
 
     if (textEntrance === "slide-up") {
-      // Paint new content at bottom (opacity:0) first, then animate up + fade in
+      // flushSync paints "from" state (opacity:0, translateY:40px),
+      // then double rAF ensures browser paints that frame before triggering transition
       flushSync(() => {
         setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(40px)"; return next; });
       });
-      requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         setActiveSlot(nextSlot);
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      });
+      }));
     } else if (textEntrance === "slide-down") {
       flushSync(() => {
         setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(-40px)"; return next; });
       });
-      requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         setActiveSlot(nextSlot);
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      });
+      }));
     } else if (textEntrance === "zoom-in") {
       flushSync(() => {
         setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "scale(0.82)"; return next; });
       });
-      requestAnimationFrame(() => {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
         setActiveSlot(nextSlot);
         setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      });
+      }));
     } else {
       // fade: two-slot ping-pong (no transform needed)
       setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });

@@ -79,13 +79,14 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
         // working around React 18 automatic batching which would otherwise skip the intermediate frame.
         if (config.textEntrance === "slide-up") {
           flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(40); });
-          requestAnimationFrame(() => { setFaded(false); setSlideY(0); });
+          // Double rAF: first frame paints the "from" state, second frame triggers the transition
+          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setSlideY(0); }));
         } else if (config.textEntrance === "slide-down") {
           flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(-40); });
-          requestAnimationFrame(() => { setFaded(false); setSlideY(0); });
+          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setSlideY(0); }));
         } else if (config.textEntrance === "zoom-in") {
           flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setScale(0.82); });
-          requestAnimationFrame(() => { setFaded(false); setScale(1); });
+          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setScale(1); }));
         } else {
           flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); });
           requestAnimationFrame(() => setFaded(false));
