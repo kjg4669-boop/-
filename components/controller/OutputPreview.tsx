@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import type { LayerConfig } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
@@ -37,6 +38,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   // ── 캔버스 블록 두 슬롯 크로스페이드 ───────────────────────────────
   const [canvasSlots, setCanvasSlots] = useState<[typeof canvasBlocks, typeof canvasBlocks]>([canvasBlocks, []]);
   const [activeCanvasSlot, setActiveCanvasSlot] = useState<0 | 1>(0);
+  const [canvasSlotTransforms, setCanvasSlotTransforms] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
   const currentCanvasSlot = useRef<0 | 1>(0);
   const isCanvasFirstRender = useRef(true);
 
@@ -100,12 +102,25 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
     }
     const nextSlot = (1 - currentCanvasSlot.current) as 0 | 1;
     currentCanvasSlot.current = nextSlot;
-    setCanvasSlots(prev => {
-      const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]];
-      next[nextSlot] = canvasBlocks;
-      return next;
-    });
-    setActiveCanvasSlot(nextSlot);
+
+    const entrance = sub.textEntrance;
+    if (entrance === "slide-up" || entrance === "slide-down" || entrance === "zoom-in") {
+      const initTransform =
+        entrance === "slide-up" ? "translateY(10px)"
+        : entrance === "slide-down" ? "translateY(-10px)"
+        : "scale(0.82)";
+      flushSync(() => {
+        setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
+        setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = initTransform; return next; });
+      });
+      requestAnimationFrame(() => {
+        setActiveCanvasSlot(nextSlot);
+        setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
+      });
+    } else {
+      setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
+      setActiveCanvasSlot(nextSlot);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasBlocksKey]);
 
@@ -198,13 +213,14 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
       )}
 
       {/* 캔버스 텍스트 블록 (두 슬롯 크로스페이드) */}
-      {[0, 1].map((idx) => (
+      {([0, 1] as const).map((idx) => (
         <div
           key={idx}
           className="absolute inset-0"
           style={{
             opacity: activeCanvasSlot === idx ? 1 : 0,
-            transition: `opacity ${fadeMsRef.current}ms ease`,
+            transform: canvasSlotTransforms[idx],
+            transition: `opacity ${fadeMsRef.current}ms ease, transform ${fadeMsRef.current}ms ease`,
             pointerEvents: "none",
           }}
         >

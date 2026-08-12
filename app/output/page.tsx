@@ -284,6 +284,7 @@ export default function OutputPage() {
             <CanvasLayer
               blocks={layerConfig.canvas?.textBlocks ?? []}
               transitionMs={layerConfig.subtitle?.textEntrance === "none" ? 0 : (layerConfig.transitionMs ?? 600)}
+              textEntrance={layerConfig.subtitle?.textEntrance}
             />
           )}
 

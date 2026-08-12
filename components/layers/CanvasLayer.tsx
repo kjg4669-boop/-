@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import type { TextBlock } from "@/lib/types";
 
 const OUTPUT_W = 1920;
@@ -10,6 +11,7 @@ interface Props {
   blocks: TextBlock[];
   /** 0 = instant (no fade); undefined = default 600ms */
   transitionMs?: number;
+  textEntrance?: string;
 }
 
 function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
@@ -61,7 +63,7 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
   );
 }
 
-export default function CanvasLayer({ blocks, transitionMs }: Props) {
+export default function CanvasLayer({ blocks, transitionMs, textEntrance }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -69,10 +71,11 @@ export default function CanvasLayer({ blocks, transitionMs }: Props) {
   const fadeMsRef = useRef(FADE_MS);
   fadeMsRef.current = FADE_MS;
 
-  // ── Two-slot crossfade (same ping-pong pattern as SubtitleLayer) ────────
+  // ── Two-slot crossfade with optional transform entrance ─────────────
   const blocksKey = blocks.map(b => `${b.id}:${b.text}`).join("\0");
   const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([blocks, []]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
+  const [slotTransforms, setSlotTransforms] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
   const currentSlot = useRef<0 | 1>(0);
   const isFirstRender = useRef(true);
 
@@ -81,8 +84,9 @@ export default function CanvasLayer({ blocks, transitionMs }: Props) {
       isFirstRender.current = false;
       return;
     }
-    if (fadeMsRef.current === 0) {
-      // Instant swap: update active slot in place (no crossfade)
+
+    // Instant swap
+    if (fadeMsRef.current === 0 || textEntrance === "none") {
       setSlots(prev => {
         const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
         next[currentSlot.current] = blocks;
@@ -90,60 +94,80 @@ export default function CanvasLayer({ blocks, transitionMs }: Props) {
       });
       return;
     }
-    // Write new content into inactive slot, then flip activeSlot
+
     const nextSlot = (1 - currentSlot.current) as 0 | 1;
     currentSlot.current = nextSlot;
-    setSlots(prev => {
-      const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
-      next[nextSlot] = blocks;
-      return next;
-    });
-    setActiveSlot(nextSlot);
+
+    if (textEntrance === "slide-up") {
+      // Paint new content at bottom (opacity:0) first, then animate up + fade in
+      flushSync(() => {
+        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(40px)"; return next; });
+      });
+      requestAnimationFrame(() => {
+        setActiveSlot(nextSlot);
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
+      });
+    } else if (textEntrance === "slide-down") {
+      flushSync(() => {
+        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(-40px)"; return next; });
+      });
+      requestAnimationFrame(() => {
+        setActiveSlot(nextSlot);
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
+      });
+    } else if (textEntrance === "zoom-in") {
+      flushSync(() => {
+        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "scale(0.82)"; return next; });
+      });
+      requestAnimationFrame(() => {
+        setActiveSlot(nextSlot);
+        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
+      });
+    } else {
+      // fade: two-slot ping-pong (no transform needed)
+      setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+      setActiveSlot(nextSlot);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocksKey]);
 
-  // ── Container scale (fills output canvas) ──────────────────────────────
+  // ── Container scale (fills output canvas) ──────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => {
-      setScale(Math.min(el.offsetWidth / OUTPUT_W, el.offsetHeight / OUTPUT_H));
-    };
+    const update = () => setScale(Math.min(el.offsetWidth / OUTPUT_W, el.offsetHeight / OUTPUT_H));
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
+  const hasTransformEntrance = textEntrance === "slide-up" || textEntrance === "slide-down" || textEntrance === "zoom-in";
+  const transitionStr = `opacity ${FADE_MS}ms ease${hasTransformEntrance ? `, transform ${FADE_MS}ms ease` : ""}`;
+
   return (
     <div
       ref={containerRef}
       style={{ position: "absolute", inset: 0, zIndex: 40, pointerEvents: "none" }}
     >
-      {/* Slot 0 */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          opacity: activeSlot === 0 ? 1 : 0,
-          transition: `opacity ${fadeMsRef.current}ms ease`,
-          pointerEvents: "none",
-        }}
-      >
-        <BlockList blocks={slots[0]} scale={scale} />
-      </div>
-      {/* Slot 1 */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          opacity: activeSlot === 1 ? 1 : 0,
-          transition: `opacity ${fadeMsRef.current}ms ease`,
-          pointerEvents: "none",
-        }}
-      >
-        <BlockList blocks={slots[1]} scale={scale} />
-      </div>
+      {([0, 1] as const).map((idx) => (
+        <div
+          key={idx}
+          style={{
+            position: "absolute",
+            inset: 0,
+            opacity: activeSlot === idx ? 1 : 0,
+            transform: slotTransforms[idx],
+            transition: transitionStr,
+            pointerEvents: "none",
+          }}
+        >
+          <BlockList blocks={slots[idx]} scale={scale} />
+        </div>
+      ))}
     </div>
   );
 }
