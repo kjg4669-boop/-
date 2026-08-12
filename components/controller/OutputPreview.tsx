@@ -26,8 +26,9 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   fadeMsRef.current = FADE_MS;
 
   const activeLines = sub.visible && sub.lines.length > 0 ? sub.lines : [];
-  const activeLinesKey = activeLines.join("\0");
-  const canvasBlocksKey = canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0");
+  // Include nonce so animation fires even when content is identical across slides
+  const activeLinesKey = `${sub.nonce ?? 0}:${activeLines.join("\0")}`;
+  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
 
   // ── 자막 두 슬롯 크로스페이드 ──────────────────────────────────────
   const [slots, setSlots] = useState<[string[], string[]]>([activeLines, []]);

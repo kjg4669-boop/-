@@ -283,6 +283,7 @@ export default function OutputPage() {
           {lookVis.canvas && (
             <CanvasLayer
               blocks={layerConfig.canvas?.textBlocks ?? []}
+              nonce={layerConfig.canvas?.nonce}
               transitionMs={layerConfig.subtitle?.textEntrance === "none" ? 0 : (layerConfig.transitionMs ?? 600)}
               textEntrance={layerConfig.subtitle?.textEntrance}
             />

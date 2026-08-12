@@ -9,6 +9,7 @@ const OUTPUT_H = 1080;
 
 interface Props {
   blocks: TextBlock[];
+  nonce?: number;
   /** 0 = instant (no fade); undefined = default 600ms */
   transitionMs?: number;
   textEntrance?: string;
@@ -63,7 +64,7 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
   );
 }
 
-export default function CanvasLayer({ blocks, transitionMs, textEntrance }: Props) {
+export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -72,7 +73,8 @@ export default function CanvasLayer({ blocks, transitionMs, textEntrance }: Prop
   fadeMsRef.current = FADE_MS;
 
   // ── Two-slot crossfade with optional transform entrance ─────────────
-  const blocksKey = blocks.map(b => `${b.id}:${b.text}`).join("\0");
+  // Include nonce so animation fires even when block content is identical across slides
+  const blocksKey = `${nonce ?? 0}:${blocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
   const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([blocks, []]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const [slotTransforms, setSlotTransforms] = useState<[string | undefined, string | undefined]>([undefined, undefined]);

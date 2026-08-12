@@ -97,6 +97,7 @@ export interface LayerConfig {
     textEntrance?: "none" | "fade" | "slide-up" | "slide-down" | "zoom-in";
     layout?: "full" | "left-half" | "right-half";
     showCopyright?: boolean;
+    nonce?: number; // increments on every slide navigation to always trigger animation
   };
   overlay: {
     visible: boolean;
@@ -109,6 +110,7 @@ export interface LayerConfig {
   };
   canvas?: {
     textBlocks: TextBlock[];
+    nonce?: number; // increments on every slide navigation to always trigger animation
   };
 }
 
@@ -128,6 +130,7 @@ export interface ServiceItemSettings {
   background?: Partial<LayerConfig["background"]>;
   subtitle?: Partial<LayerConfig["subtitle"]>;
   overlay?: Partial<LayerConfig["overlay"]>;
+  transitionMs?: number;
   scripture?: ScriptureSettings;
 }
 
@@ -162,7 +165,7 @@ export interface Service {
 }
 
 export const DEFAULT_LAYER_CONFIG: LayerConfig = {
-  transitionMs: 250,
+  transitionMs: 600,
   background: { type: "color", color: "#000000", loop: true, opacity: 1 },
   subtitle: {
     visible: false,
@@ -175,7 +178,7 @@ export const DEFAULT_LAYER_CONFIG: LayerConfig = {
     shadowEnabled: false,
     backgroundBoxVisible: false,
     backgroundBoxOpacity: 0.5,
-    position: "bottom",
+    position: "center",
     opacity: 1,
     fontWeight: "normal",
     fontStyle: "normal",
@@ -292,6 +295,8 @@ export interface Look {
   showOverlay: boolean;
   showCanvas: boolean;
   showCountdown: boolean;
+  subtitleSnapshot?: Partial<LayerConfig["subtitle"]>;
+  backgroundSnapshot?: Partial<LayerConfig["background"]>;
 }
 
 export interface LookApplyPayload {
@@ -301,6 +306,8 @@ export interface LookApplyPayload {
   showOverlay: boolean;
   showCanvas: boolean;
   showCountdown: boolean;
+  subtitleSnapshot?: Partial<LayerConfig["subtitle"]>;
+  backgroundSnapshot?: Partial<LayerConfig["background"]>;
 }
 
 export interface Announcement {
@@ -317,6 +324,8 @@ export interface AnnouncementShowPayload {
   visible: boolean;
   title: string;
   body: string;
+  bgColor?: string;
+  textColor?: string;
 }
 
 export interface StageMessagePayload {

@@ -29,7 +29,8 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
   fadeMsRef.current = FADE_MS;
 
   const activeLines = config.visible && config.lines.length > 0 ? config.lines : [];
-  const activeLinesKey = activeLines.join("\0");
+  // Include nonce so animation triggers even when lyrics repeat (same content, different slide)
+  const activeLinesKey = `${config.nonce ?? 0}:${activeLines.join("\0")}`;
   const activeLines2Key = (config.lines2 ?? []).join("\0");
 
   const [displayedLines, setDisplayedLines] = useState(activeLines);

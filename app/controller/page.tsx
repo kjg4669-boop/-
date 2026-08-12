@@ -78,7 +78,6 @@ export default function ControllerPage() {
     currentService,
     isDirty,
     updateSlideCanvas,
-    updateServiceItems,
     getFlatSlideList,
     getActiveFlatSlideIndex,
     undoStack,
@@ -117,13 +116,29 @@ export default function ControllerPage() {
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
+  const [tabPage, setTabPage] = useState(0);
+  const [openedWindows, setOpenedWindows] = useState<Set<RightTab>>(new Set());
+  const [panelFloating, setPanelFloating] = useState(false);
+  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
+  const [snapHint, setSnapHint] = useState(false);
+  const [previewDocked, setPreviewDocked] = useState(true);
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>("home");
   const [serviceNotes, setServiceNotes] = useState("");
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
   const canvasRef = useRef<SlideCanvasHandle>(null);
+  const openedWindowsRef = useRef<Set<RightTab>>(new Set());
+  openedWindowsRef.current = openedWindows;
+  const rightTabRef = useRef<RightTab>(rightTab);
+  rightTabRef.current = rightTab;
   const saveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSaveItemRef = useRef<(itemId: number, config: LayerConfig) => Promise<void>>(async () => {});
+  // Slide transition nonce: increments on every slide navigation so animation always fires
+  const slideNonceRef = useRef(0);
+  // Track previous item to detect item switches vs. same-item slide navigation
+  const prevItemIdRef = useRef<number | null>(null);
   const openOutputRef = useRef<() => void>(() => {});
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundName, setSoundName] = useState<string | null>(null);
@@ -138,6 +153,12 @@ export default function ControllerPage() {
   useEffect(() => {
     if (!localStorage.getItem("worship-onboarding-v1")) setShowOnboarding(true);
   }, []);
+  // 외부에서 setRightTab 호출 시 해당 탭이 속한 페이지로 자동 이동
+  useEffect(() => {
+    const ALL_TABS = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const;
+    const idx = (ALL_TABS as readonly string[]).indexOf(rightTab);
+    if (idx >= 0) setTabPage(Math.floor(idx / 4));
+  }, [rightTab]);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
   const handleAutoSaved = useCallback(() => {
@@ -218,7 +239,7 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
-  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId } = useSettingsStore();
+  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId, outputScaleMode, setOutputScaleMode } = useSettingsStore();
   const [looks, setLooks] = useState<Look[]>([]);
   const looksRef = useRef<Look[]>([]);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
@@ -282,9 +303,11 @@ export default function ControllerPage() {
         copyright: buildCopyrightString(item?.song),
       } : undefined;
       void ipc.sendSlideUpdate(toSend, readyMeta);
+      ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
       void ipc.sendBlackout(bo);
       void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
+      void ipc.sendScaleMode(useSettingsStore.getState().outputScaleMode);
       // Re-send current look if one is active
       const currentLookIdNow = useSettingsStore.getState().currentLookId;
       if (currentLookIdNow !== null) {
@@ -319,8 +342,15 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Re-dock preview panel when the preview window is closed
   useEffect(() => {
-    if (!isLive || isFrozen) return;
+    let unlisten: (() => void) | null = null;
+    ipc.onPreviewClosed(() => setPreviewDocked(true)).then((fn) => { unlisten = fn; }).catch(() => {});
+    return () => { unlisten?.(); };
+  }, []);
+
+  useEffect(() => {
+    const shouldSendIpc = isLive && !isFrozen;
     const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
     const item = getActiveItem();
     const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
@@ -328,29 +358,46 @@ export default function ControllerPage() {
     if (!item) {
       const config = deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults) as LayerConfig;
       setLayerConfig(config);
-      ipc.sendSlideUpdate(config);
+      if (shouldSendIpc) ipc.sendSlideUpdate(config);
       return;
     }
 
     const slide = getActiveLyricSlide();
-    const itemOverrides = item.settings_json ?? {};
-    const merged = deepMerge(
-      deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
-      itemOverrides as Partial<LayerConfig>
-    ) as LayerConfig;
-
     const canvasBlocks = slide?.canvas?.textBlocks ?? [];
+    const nonce = ++slideNonceRef.current;
+
+    // Same item (slide navigation within song): preserve current style settings (textEntrance etc.)
+    // Different item: reload style settings from settings_json
+    const isSameItem = prevItemIdRef.current === item.id;
+    prevItemIdRef.current = item.id;
+
+    const base: LayerConfig = isSameItem
+      ? useOutputStore.getState().layerConfig
+      : (() => {
+          const itemOverrides = item.settings_json ?? {};
+          return deepMerge(
+            deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
+            itemOverrides as Partial<LayerConfig>
+          ) as LayerConfig;
+        })();
+
     const newConfig: LayerConfig = {
-      ...merged,
+      ...base,
       subtitle: {
-        ...merged.subtitle,
+        ...base.subtitle,
         visible: !isClear && canvasBlocks.length === 0 && !!slide,
         lines: !isClear && canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
         lines2: !isClear ? (slide?.lines2 ?? []) : [],
+        nonce,
       },
-      canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
+      canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks, nonce } : undefined,
     };
     setLayerConfig(newConfig);
+
+    if (!shouldSendIpc) {
+      ipc.sendPreviewUpdate(newConfig);
+      return;
+    }
 
     // Build SlideMeta for Stage Display
     const { getFlatSlideList, getActiveFlatSlideIndex } = useQueueStore.getState();
@@ -373,10 +420,12 @@ export default function ControllerPage() {
     };
 
     ipc.sendSlideUpdate(newConfig, slideMeta);
+    ipc.sendPreviewUpdate(newConfig); // keep floating preview in sync when isLive
 
     // Sync state to any connected web remote clients
     const slideText = slide?.lines.join(" ") ?? "";
-    void ipc.sendRemoteState(slideText, activeLyricSlideIndex, item.song?.lyrics_json.length ?? 1).catch(() => {});
+    const songTitle = item.song?.title ?? item.label ?? "";
+    void ipc.sendRemoteState(slideText, songTitle, activeLyricSlideIndex, item.song?.lyrics_json.length ?? 1).catch(() => {});
   // notesVersion excluded intentionally: Stage Display notes refresh on slide navigation (avoids IPC per keystroke)
   }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, isFrozen, setLayerConfig]);
 
@@ -398,6 +447,17 @@ export default function ControllerPage() {
       }
     }).then((fn) => { if (mounted) unlisten = fn; else fn(); });
     return () => { mounted = false; unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nextLyricSlide, prevLyricSlide]);
+
+  // ── subtitle:next/prev from preview/output windows ───────────────────
+  useEffect(() => {
+    let mounted = true;
+    let unNext: (() => void) | null = null;
+    let unPrev: (() => void) | null = null;
+    void ipc.onSubtitleNext(() => { if (mounted) nextLyricSlide(); }).then((fn) => { if (mounted) unNext = fn; else fn(); });
+    void ipc.onSubtitlePrev(() => { if (mounted) prevLyricSlide(); }).then((fn) => { if (mounted) unPrev = fn; else fn(); });
+    return () => { mounted = false; unNext?.(); unPrev?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nextLyricSlide, prevLyricSlide]);
 
@@ -499,6 +559,8 @@ export default function ControllerPage() {
         showOverlay: look.showOverlay,
         showCanvas: look.showCanvas,
         showCountdown: look.showCountdown,
+        subtitleSnapshot: look.subtitleSnapshot,
+        backgroundSnapshot: look.backgroundSnapshot,
       };
       void ipc.sendLookApply(payload);
     }
@@ -531,6 +593,86 @@ export default function ControllerPage() {
     canvasRef.current?.addBlock();
   }, []);
   const handleOpenDesignPanel = useCallback(() => { setShowPanel(true); setRightTab("settings"); }, []);
+  const handleUndock = useCallback(() => {
+    setPanelPos({ x: window.innerWidth - 280, y: 80 });
+    setPanelFloating(true);
+  }, []);
+  const handlePanelDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const startPanelX = panelPos.x, startPanelY = panelPos.y;
+    const handleMove = (me: MouseEvent) => {
+      const newX = Math.max(0, Math.min(window.innerWidth - 256, startPanelX + me.clientX - startX));
+      const newY = Math.max(0, Math.min(window.innerHeight - 100, startPanelY + me.clientY - startY));
+      setPanelPos({ x: newX, y: newY });
+      setSnapHint(me.clientX > window.innerWidth - 80);
+    };
+    const handleUp = (me: MouseEvent) => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+      setSnapHint(false);
+      if (me.clientX > window.innerWidth - 80) setPanelFloating(false);
+    };
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }, [panelPos.x, panelPos.y]);
+  const handleUndockPreview = useCallback(() => {
+    setPreviewDocked(false);
+    void ipc.openPreviewWindow();
+    // Push current state proactively while the preview window initializes.
+    // The output:ready mechanism also handles this, but explicit pushes cover
+    // edge cases where the initial event exchange is missed.
+    for (const ms of [400, 1000, 2000]) {
+      setTimeout(() => ipc.sendPreviewUpdate(useOutputStore.getState().layerConfig), ms);
+    }
+  }, []);
+
+  const handleTabMouseDown = useCallback((e: React.MouseEvent, tab: RightTab) => {
+    if (openedWindowsRef.current.has(tab)) return; // already open
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    let detached = false;
+    const handleMove = (me: MouseEvent) => {
+      if (!detached && (Math.abs(me.clientX - startX) > 8 || Math.abs(me.clientY - startY) > 8)) {
+        detached = true;
+      }
+    };
+    const handleUp = async (me: MouseEvent) => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+      if (!detached) { setRightTab(tab); return; }
+      try {
+        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+        const LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" };
+        const panelWin = new WebviewWindow(`panel-${tab}`, {
+          url: `${window.location.origin}/floating-panel#${tab}`,
+          title: LABELS[tab],
+          width: 280,
+          height: 520,
+          x: me.screenX - 140,
+          y: me.screenY - 30,
+          decorations: true,
+        });
+        panelWin.once("tauri://destroyed", () => {
+          setOpenedWindows((prev) => { const next = new Set(prev); next.delete(tab); return next; });
+          // 닫힌 탭이 현재 선택이면 해당 탭으로 복귀
+          if (rightTabRef.current !== tab) {} else { setRightTab(tab); }
+        });
+        setOpenedWindows((prev) => new Set([...prev, tab]));
+        // 분리한 탭이 현재 선택이면 다른 탭으로 전환
+        if (rightTabRef.current === tab) {
+          const ALL_TABS: RightTab[] = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"];
+          const next = ALL_TABS.find((t) => t !== tab && !openedWindowsRef.current.has(t));
+          if (next) setRightTab(next);
+        }
+      } catch (err) {
+        console.error("Failed to open panel window:", err);
+        setRightTab(tab);
+      }
+    };
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }, []);
   const handleCloseOutput = useCallback(() => ipc.closeOutputWindow().catch(() => {}), []);
   const handleFromStart = useCallback(() => { useQueueStore.getState().setActiveFlatSlide(0); openOutputRef.current(); }, []);
   const handleServiceNotesChange = useCallback((notes: string) => {
@@ -616,6 +758,18 @@ export default function ControllerPage() {
       };
       setLayerConfig(withContent);
       if (isLive) ipc.sendSlideUpdate(withContent);
+      // Auto-save layer settings to the active item (debounced)
+      if (layerAutoSaveTimerRef.current) clearTimeout(layerAutoSaveTimerRef.current);
+      layerAutoSaveTimerRef.current = setTimeout(() => {
+        layerAutoSaveTimerRef.current = null;
+        const { currentService, activeItemIndex } = useQueueStore.getState();
+        const itemId = currentService?.items[activeItemIndex]?.id ?? null;
+        if (itemId !== null) {
+          void handleSaveItemRef.current(itemId, config);
+        } else {
+          saveGlobalDefaults(config);
+        }
+      }, 600);
     },
     [isLive, isClear, setLayerConfig]
   );
@@ -699,20 +853,18 @@ export default function ControllerPage() {
         background: { ...config.background },
         subtitle: (({ visible: _v, lines: _l, lines2: _l2, ...rest }) => rest)(config.subtitle),
         overlay: { ...config.overlay },
+        transitionMs: config.transitionMs,
       };
       try {
         await serviceDb.updateItemSettings(itemId, settings);
-        const liveItems = useQueueStore.getState().currentService?.items ?? [];
-        const updated = liveItems.map((item) =>
-          item.id === itemId ? { ...item, settings_json: settings } : item
-        );
-        updateServiceItems(updated);
+        useQueueStore.getState().updateItemSettingsJson(itemId, settings);
       } catch (err) {
         console.error("Failed to save item settings:", err);
       }
     },
-    [updateServiceItems]
+    []
   );
+  handleSaveItemRef.current = handleSaveItem;
 
   type FmtPatch = { fontFamily?: string; fontSize?: number; fontWeight?: "normal" | "bold"; fontStyle?: "normal" | "italic"; textDecoration?: "none" | "underline" | "line-through"; color?: string; textAlign?: "left" | "center" | "right" };
 
@@ -1066,6 +1218,7 @@ export default function ControllerPage() {
     setShowHelp,
     setShowOnboarding,
     setShowAbout,
+    openPreviewWindow: () => { setPreviewDocked(true); setShowPanel(true); },
   });
 
   useKeyboardShortcuts({
@@ -1142,6 +1295,16 @@ export default function ControllerPage() {
         alertActive={alertActive}
         onSendAlert={handleSendAlert}
         onClearAlert={handleClearAlert}
+        displays={displays}
+        selectedDisplayIdx={selectedDisplayIdx}
+        onSelectDisplay={(idx) => {
+          setOutputDisplayId(idx);
+          const d = displays[idx];
+          if (d) void ipc.openOutputWindow(d.x, d.y, d.width, d.height);
+        }}
+        onOpenPreviewOnly={() => { setPreviewDocked(true); setShowPanel(true); void ipc.openPreviewWindow(); }}
+        outputScaleMode={outputScaleMode}
+        onSetScaleMode={(mode) => { setOutputScaleMode(mode); void ipc.sendScaleMode(mode); }}
         outputConnected={outputConnected}
         onOpenOutput={openOutput}
         isStageOpen={isStageOpen}
@@ -1157,7 +1320,6 @@ export default function ControllerPage() {
         countdownRemainingMs={countdownRemainingMs}
         onToggleCountdown={onToggleCountdown}
         onResetCountdown={onResetCountdown}
-        clock={clock}
         showPanel={showPanel}
         onTogglePanel={handleTogglePanel}
         onShowCheatSheet={handleShowCheatSheet}
@@ -1220,6 +1382,7 @@ export default function ControllerPage() {
         onInsertSound={handleInsertSound}
         onOpenDesignPanel={handleOpenDesignPanel}
         onShowAbout={() => setShowAbout(true)}
+        onOpenPreview={() => { setPreviewDocked(true); setShowPanel(true); }}
         looks={looks}
         currentLookId={currentLookId}
         onApplyLook={handleApplyLook}
@@ -1297,60 +1460,153 @@ export default function ControllerPage() {
           </div>
         </div>
 
+        {/* Right: snap hint overlay when dragging near edge */}
+        {snapHint && (
+          <div className="fixed right-0 top-0 bottom-0 w-16 bg-blue-500/20 border-l-2 border-blue-500 z-50 pointer-events-none flex items-center justify-center">
+            <span className="text-blue-400 text-xs rotate-90 whitespace-nowrap">도킹</span>
+          </div>
+        )}
+
+        {/* Right: placeholder to keep layout when panel is floating */}
+        {showPanel && panelFloating && (
+          <div className="w-64 flex-shrink-0" />
+        )}
+
         {/* Right: Pane (PPT Format pane) */}
         {showPanel && (
-          <div data-help-id="right-panel" className="w-64 flex-shrink-0 border-l border-zinc-700 flex flex-col overflow-hidden bg-[#252526]">
-            {/* 출력 미리보기 */}
-            <div className="p-1.5 border-b border-zinc-700 flex-shrink-0 flex justify-center">
-              <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} />
-            </div>
-            <div className="flex border-b border-zinc-700 flex-shrink-0">
-              {(["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setRightTab(tab)}
-                  className={`flex-1 py-1.5 text-xs font-medium transition-colors ${
-                    rightTab === tab
-                      ? "text-white border-b-2 border-blue-500 bg-zinc-700"
-                      : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-                  }`}
+          <div
+            data-help-id="right-panel"
+            className="w-64 flex-shrink-0 flex flex-col overflow-hidden bg-[#252526] border-l border-zinc-700"
+            style={panelFloating ? {
+              position: "fixed",
+              left: panelPos.x,
+              top: panelPos.y,
+              zIndex: 40,
+              width: 256,
+              height: "calc(100vh - 80px)",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+              borderRadius: 6,
+              border: "1px solid #3f3f46",
+            } : undefined}
+          >
+            {/* ── 출력 미리보기 (도킹됨) ── */}
+            {previewDocked && (
+              <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">출력 미리보기</span>
+                  <button
+                    onClick={handleUndockPreview}
+                    title="미리보기 분리"
+                    className="text-zinc-600 hover:text-zinc-200 text-xs px-1 rounded hover:bg-zinc-700"
+                  >↗</button>
+                </div>
+                <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} isLive={isLive} />
+              </div>
+            )}
+            {(() => {
+              const ALL_TABS = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const;
+              const TAB_LABELS: Record<typeof ALL_TABS[number], string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" };
+              const PAGE_SIZE = 4;
+              const totalPages = Math.ceil(ALL_TABS.length / PAGE_SIZE);
+              const visibleTabs = ALL_TABS.slice(tabPage * PAGE_SIZE, tabPage * PAGE_SIZE + PAGE_SIZE);
+              return (
+                <div
+                  className={`flex border-b border-zinc-700 flex-shrink-0 items-stretch select-none${panelFloating ? " cursor-grab active:cursor-grabbing" : ""}`}
+                  onMouseDown={panelFloating ? handlePanelDragStart : undefined}
                 >
-                  {tab === "queue" ? "순서" : tab === "songs" ? "찬양" : tab === "settings" ? "디자인" : tab === "alert" ? "공지" : tab === "looks" ? "룩" : tab === "remote" ? "원격" : tab === "ndi" ? "NDI" : "공지루프"}
-                </button>
-              ))}
-            </div>
+                  {tabPage > 0 && (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={() => setTabPage((p) => p - 1)}
+                      className="px-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 border-r border-zinc-700 flex-shrink-0 text-xs"
+                    >‹</button>
+                  )}
+                  {visibleTabs.map((tab) => {
+                    const isTabFloating = openedWindows.has(tab);
+                    return (
+                      <button
+                        key={tab}
+                        onMouseDown={(e) => { e.stopPropagation(); handleTabMouseDown(e, tab); }}
+                        className={`flex-1 py-1.5 text-xs font-medium transition-colors cursor-grab ${
+                          isTabFloating
+                            ? "text-blue-400 border-b-2 border-blue-400 border-dashed bg-zinc-800/50"
+                            : rightTab === tab
+                            ? "text-white border-b-2 border-blue-500 bg-zinc-700"
+                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                        }`}
+                      >
+                        {TAB_LABELS[tab]}{isTabFloating ? " ↗" : ""}
+                      </button>
+                    );
+                  })}
+                  {tabPage < totalPages - 1 && (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={() => setTabPage((p) => p + 1)}
+                      className="px-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
+                    >›</button>
+                  )}
+                  {/* 전체 패널 도킹/분리 버튼 */}
+                  {panelFloating ? (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={() => setPanelFloating(false)}
+                      title="도킹"
+                      className="px-1.5 text-zinc-500 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
+                    >⊟</button>
+                  ) : (
+                    <button
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={handleUndock}
+                      title="패널 분리"
+                      className="px-1.5 text-zinc-500 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
+                    >↗</button>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex-1 overflow-hidden">
-              {rightTab === "queue" && <QueuePanel />}
-              {rightTab === "songs" && (
-                <LibraryPanel
-                  mode="songs"
-                  initialEditSong={pendingEditSong}
-                  onEditSongConsumed={() => setPendingEditSong(null)}
-                />
+              {openedWindows.has(rightTab) ? (
+                <div className="h-full flex items-center justify-center text-zinc-600 text-xs select-none">
+                  분리된 패널 — 탭을 클릭해 도킹
+                </div>
+              ) : (
+                <>
+                  {rightTab === "queue" && <QueuePanel />}
+                  {rightTab === "songs" && (
+                    <LibraryPanel
+                      mode="songs"
+                      initialEditSong={pendingEditSong}
+                      onEditSongConsumed={() => setPendingEditSong(null)}
+                    />
+                  )}
+                  {rightTab === "settings" && (
+                    <LayerSidebar
+                      layerConfig={layerConfig}
+                      activeItemId={activeItemId}
+                      onChange={handleLayerChange}
+                      onSaveGlobal={handleSaveGlobal}
+                      onSaveItem={handleSaveItem}
+                    />
+                  )}
+                  {rightTab === "alert" && <AlertPanel />}
+                  {rightTab === "looks" && (
+                    <LooksPanel
+                      currentLookId={currentLookId}
+                      onApplyLook={handleApplyLook}
+                      onLooksChanged={() => { looksDb.list().then(setLooks).catch((e) => console.error(e)); }}
+                      layerConfig={layerConfig}
+                    />
+                  )}
+                  {rightTab === "remote" && <RemotePanel />}
+                  {rightTab === "ndi" && <NdiPanel />}
+                  {rightTab === "announcement" && <AnnouncementPanel />}
+                </>
               )}
-              {rightTab === "settings" && (
-                <LayerSidebar
-                  layerConfig={layerConfig}
-                  activeItemId={activeItemId}
-                  onChange={handleLayerChange}
-                  onSaveGlobal={handleSaveGlobal}
-                  onSaveItem={handleSaveItem}
-                />
-              )}
-              {rightTab === "alert" && <AlertPanel />}
-              {rightTab === "looks" && (
-                <LooksPanel
-                  currentLookId={currentLookId}
-                  onApplyLook={handleApplyLook}
-                  onLooksChanged={() => { looksDb.list().then(setLooks).catch((e) => console.error(e)); }}
-                />
-              )}
-              {rightTab === "remote" && <RemotePanel />}
-              {rightTab === "ndi" && <NdiPanel />}
-              {rightTab === "announcement" && <AnnouncementPanel />}
             </div>
           </div>
         )}
+
       </div>
 
       {/* ── Status bar (PPT style) ─────────────────────────────────── */}
@@ -1450,6 +1706,7 @@ export default function ControllerPage() {
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showOnboarding && <OnboardingGuide onComplete={() => setShowOnboarding(false)} />}
       <ErrorToast />
+
     </ErrorBoundary>
   );
 }
