@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema/acl/capability.schema.json",
+  "identifier": "panel-capability",
+  "description": "Floating panel window capabilities",
+  "windows": ["panel-*", "ap-panel-*", "all-panels", "layer-panel"],
+  "permissions": [
+    "core:default",
+    "sql:default",
+    "sql:allow-execute",
+    "core:window:allow-close",
+    "core:webview:allow-create-webview-window"
+  ]
+}
