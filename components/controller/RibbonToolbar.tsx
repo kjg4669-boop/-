@@ -68,6 +68,7 @@ interface Props {
   onSetZoom: (z: number) => void;
   showPanel: boolean;
   onTogglePanel: () => void;
+  onOpenPreview: () => void;
 
   hasSlides: boolean;
   onNewSlide: () => void;
@@ -104,7 +105,7 @@ export default function RibbonToolbar({
   isLoop, onToggleLoop,
   isBlackout, onToggleBlackout, isClear, onToggleClear, onOpenOutput, onFromStart, onCloseOutput,
   serviceNotes, onServiceNotesChange,
-  zoom, onSetZoom, showPanel, onTogglePanel,
+  zoom, onSetZoom, showPanel, onTogglePanel, onOpenPreview,
   hasSlides, onNewSlide, onDupSlide, onAddBlock, onAddSong, onAddScripture, onInsertImage, onInsertVideo,
   soundName, soundPlaying, onToggleSound, onInsertSound,
   onOpenDesignPanel, onShowAbout,
@@ -337,13 +338,12 @@ export default function RibbonToolbar({
           <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-1">
             <span className="text-zinc-400 text-xs mr-1">전환 속도</span>
             {([
-              { label: "없음", ms: 0 },
-              { label: "빠름", ms: 150 },
-              { label: "보통", ms: 300 },
-              { label: "느림", ms: 600 },
+              { label: "빠름", ms: 300 },
+              { label: "보통", ms: 600 },
+              { label: "느림", ms: 1200 },
             ] as const).map(({ label, ms }) => (
               <button key={ms} onClick={() => onLayerChange({ ...layerConfig, transitionMs: ms })}
-                className={`px-2 h-6 rounded text-xs ${(layerConfig.transitionMs ?? 250) === ms ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
+                className={`px-2 h-6 rounded text-xs ${(layerConfig.transitionMs ?? 600) === ms ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
                 {label}
               </button>
             ))}
@@ -367,7 +367,7 @@ export default function RibbonToolbar({
               </button>
             ))}
           </div>
-          <span className="text-zinc-500 text-xs">새 슬라이드 표시 시 텍스트 효과</span>
+          <span className="text-zinc-500 text-xs ml-2">새 슬라이드 표시 시 텍스트 효과</span>
         </>)}
 
         {ribbonTab === "slideshow" && (<>
@@ -432,6 +432,11 @@ export default function RibbonToolbar({
             className={`flex flex-col items-center px-2 py-0.5 rounded ${showPanel ? "bg-zinc-600 text-white" : "hover:bg-zinc-700 text-zinc-300"}`}>
             <span className="text-base leading-none">☰</span>
             <span className="text-[10px] mt-0.5">패널</span>
+          </button>
+          <button onClick={onOpenPreview}
+            className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+            <span className="text-base leading-none">🖥</span>
+            <span className="text-[10px] mt-0.5">출력 미리보기</span>
           </button>
         </>)}
 

@@ -131,6 +131,12 @@ pub fn run() {
                         sql: include_str!("../migrations/015_bpm_chords.sql"),
                         kind: tauri_plugin_sql::MigrationKind::Up,
                     },
+                    tauri_plugin_sql::Migration {
+                        version: 16,
+                        description: "add_looks_snapshot",
+                        sql: include_str!("../migrations/016_looks_snapshot.sql"),
+                        kind: tauri_plugin_sql::MigrationKind::Up,
+                    },
                 ])
                 .build(),
         )
@@ -150,6 +156,8 @@ pub fn run() {
             ndi_output::is_ndi_available,
             ndi_output::start_ndi_output,
             ndi_output::stop_ndi_output,
+            commands::open_preview_window,
+            commands::close_preview_window,
         ])
         .setup(|app| {
             app.manage(remote::RemoteServerState::new());
@@ -164,7 +172,7 @@ pub fn run() {
             let f_sep2    = PredefinedMenuItem::separator(app)?;
             let f_out_on  = MenuItem::with_id(app, "open_output",      "출력창 열기",            true, None::<&str>)?;
             let f_out_off = MenuItem::with_id(app, "close_output",     "출력창 닫기",            true, None::<&str>)?;
-            let f_stage   = MenuItem::with_id(app, "open_stage",       "Stage Display 열기",    true, None::<&str>)?;
+            let f_stage   = MenuItem::with_id(app, "open_stage",       "발표자 모니터 열기",     true, None::<&str>)?;
             let f_sep3    = PredefinedMenuItem::separator(app)?;
             let f_quit    = PredefinedMenuItem::quit(app, None)?;
 
@@ -195,6 +203,13 @@ pub fn run() {
                 &s_start, &s_current, &s_sep1, &s_hide,
             ])?;
 
+            // ── 보기 메뉴 ──────────────────────────────────────────────────
+            let v_preview  = MenuItem::with_id(app, "open_preview_output", "출력 미리보기", true, None::<&str>)?;
+            let v_sep_dev  = PredefinedMenuItem::separator(app)?;
+            let v_devtools = MenuItem::with_id(app, "toggle_devtools", "개발자 도구", true, Some("CmdOrCtrl+Alt+I"))?;
+
+            let view_menu = Submenu::with_items(app, "보기", true, &[&v_preview, &v_sep_dev, &v_devtools])?;
+
             // ── 데이터 메뉴 ────────────────────────────────────────────────
             let d_backup  = MenuItem::with_id(app, "backup_db",  "데이터베이스 백업...", true, None::<&str>)?;
             let d_restore = MenuItem::with_id(app, "restore_db", "데이터베이스 복원...", true, None::<&str>)?;
@@ -212,7 +227,7 @@ pub fn run() {
             ])?;
 
             // ── 메뉴 등록 ──────────────────────────────────────────────────
-            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &data_menu, &help_menu])?;
+            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &view_menu, &data_menu, &help_menu])?;
             app.set_menu(menu)?;
 
             // ── 메뉴 이벤트 핸들러 ─────────────────────────────────────────
@@ -239,6 +254,12 @@ pub fn run() {
                         "show_help_guide"  => { win.emit("menu:show-help", ()).ok(); }
                         "reset_onboarding" => { win.emit("menu:reset-onboarding", ()).ok(); }
                         "show_about"       => { win.emit("menu:about", ()).ok(); }
+                        "open_preview_output" => { win.emit("menu:open-preview", ()).ok(); }
+                        "toggle_devtools" => {
+                            win.open_devtools();
+                            win.emit("menu:toggle-devmode", ()).ok();
+                            if let Some(out) = app.get_webview_window("output") { out.open_devtools(); }
+                        }
                         _ => {}
                     }
                 }

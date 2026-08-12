@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import type { LayerConfig } from "@/lib/types";
-import { ipc } from "@/lib/ipc";
 
 const positionMap = {
   top: "flex-start",
@@ -19,10 +19,11 @@ const alignItemsMap = {
 interface Props {
   config: LayerConfig["subtitle"];
   transitionMs?: number;
+  copyright?: string;
 }
 
-export default function SubtitleLayer({ config, transitionMs: transitionMsProp }: Props) {
-  const FADE_MS = transitionMsProp ?? 250;
+export default function SubtitleLayer({ config, transitionMs: transitionMsProp, copyright = "" }: Props) {
+  const FADE_MS = (transitionMsProp != null && transitionMsProp > 0) ? transitionMsProp : 600;
   // Use a ref so the effect closure always reads the latest FADE_MS without re-running on every change
   const fadeMsRef = useRef(FADE_MS);
   fadeMsRef.current = FADE_MS;
@@ -36,29 +37,19 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp }
   const [faded, setFaded] = useState(activeLines.length === 0);
   const [slideY, setSlideY] = useState(0);
   const [scale, setScale] = useState(1);
-  const [copyright, setCopyright] = useState("");
   const isFirstRender = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingLinesRef = useRef(activeLines);
   const pendingLines2Ref = useRef(config.lines2 ?? []);
-  const rafSeqRef = useRef(0);
 
-  // Listen for meta.copyright from slide:update IPC events
-  useEffect(() => {
-    let mounted = true;
-    const unlistenPromise = ipc.onSlideUpdateWithMeta((_config, meta) => {
-      if (!mounted) return;
-      setCopyright(meta?.copyright ?? "");
-    });
-    return () => {
-      mounted = false;
-      void unlistenPromise.then((fn) => fn());
-    };
-  }, []);
 
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
+      // Show current content immediately without animation
+      setDisplayedLines(activeLines);
+      setDisplayedLines2(config.lines2 ?? []);
+      setFaded(activeLines.length === 0);
       return;
     }
 
@@ -77,40 +68,29 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp }
     // Step 1: fade out current content
     setFaded(true);
 
-    // Step 2: after fade-out, swap to new content and fade in (if any)
-    const seq = ++rafSeqRef.current;
+    // Step 2: after fade-out, swap to new content and fade in
     timerRef.current = setTimeout(() => {
       const lines = pendingLinesRef.current;
-      setDisplayedLines(lines);
-      setDisplayedLines2(pendingLines2Ref.current);
+      const lines2 = pendingLines2Ref.current;
       if (lines.length > 0) {
+        // flushSync: synchronously commit new content at opacity:0 (+ initial transform).
+        // This guarantees the browser paints the "from" state before the CSS transition fires,
+        // working around React 18 automatic batching which would otherwise skip the intermediate frame.
         if (config.textEntrance === "slide-up") {
-          setSlideY(15);
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (rafSeqRef.current !== seq) return;
-            setFaded(false);
-            requestAnimationFrame(() => { if (rafSeqRef.current === seq) setSlideY(0); });
-          }));
+          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(40); });
+          requestAnimationFrame(() => { setFaded(false); setSlideY(0); });
         } else if (config.textEntrance === "slide-down") {
-          setSlideY(-15);
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (rafSeqRef.current !== seq) return;
-            setFaded(false);
-            requestAnimationFrame(() => { if (rafSeqRef.current === seq) setSlideY(0); });
-          }));
+          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(-40); });
+          requestAnimationFrame(() => { setFaded(false); setSlideY(0); });
         } else if (config.textEntrance === "zoom-in") {
-          setScale(0.9);
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (rafSeqRef.current !== seq) return;
-            setFaded(false);
-            requestAnimationFrame(() => { if (rafSeqRef.current === seq) setScale(1); });
-          }));
+          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setScale(0.82); });
+          requestAnimationFrame(() => { setFaded(false); setScale(1); });
         } else {
-          requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (rafSeqRef.current === seq) setFaded(false);
-          }));
+          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); });
+          requestAnimationFrame(() => setFaded(false));
         }
       }
+      // lines.length === 0: keep faded=true (text stays hidden)
     }, fadeMsRef.current);
 
     return () => {
@@ -144,7 +124,7 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp }
           config.textEntrance === "slide-up" || config.textEntrance === "slide-down" || config.textEntrance === "zoom-in"
             ? `, transform ${FADE_MS}ms ease` : ""
         }`,
-        willChange: "opacity, transform",
+        willChange: "opacity",
         pointerEvents: "none",
       }}
     >
@@ -204,27 +184,32 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp }
               {line2}
             </p>
           ))}
-          {(config.showCopyright !== false) && copyright && (
-            <p
-              style={{
-                margin: "8px 0 0",
-                fontSize: `${Math.max(14, Math.round(config.fontSize * 0.35))}px`,
-                fontFamily: config.fontFamily,
-                color: config.color,
-                opacity: 0.7,
-                textAlign: "center",
-                fontWeight: "normal",
-                fontStyle: "normal",
-                lineHeight: 1.4,
-                whiteSpace: "pre-wrap",
-                wordBreak: "keep-all",
-                WebkitTextStroke: "0px transparent",
-              }}
-            >
-              {copyright}
-            </p>
-          )}
         </div>
+      )}
+      {/* Copyright: absolutely positioned at bottom so it doesn't shift lyrics above true center */}
+      {displayedLines.length > 0 && (config.showCopyright !== false) && copyright && (
+        <p
+          style={{
+            position: "absolute",
+            bottom: 48,
+            left: config.layout === "left-half" || config.layout === "right-half" ? 32 : 64,
+            right: config.layout === "left-half" || config.layout === "right-half" ? 32 : 64,
+            margin: 0,
+            fontSize: `${Math.max(14, Math.round(config.fontSize * 0.35))}px`,
+            fontFamily: config.fontFamily,
+            color: config.color,
+            opacity: 0.7,
+            textAlign: "center",
+            fontWeight: "normal",
+            fontStyle: "normal",
+            lineHeight: 1.4,
+            whiteSpace: "pre-wrap",
+            wordBreak: "keep-all",
+            WebkitTextStroke: "0px transparent",
+          }}
+        >
+          {copyright}
+        </p>
       )}
     </div>
   );
