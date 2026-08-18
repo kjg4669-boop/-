@@ -1,15 +1,16 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { looksDb } from "@/lib/looksDb";
-import type { Look } from "@/lib/types";
+import type { Look, LayerConfig } from "@/lib/types";
 
 interface Props {
   currentLookId: number | null;
   onApplyLook: (look: Look | null) => void;
   onLooksChanged: () => void;
+  layerConfig?: LayerConfig;
 }
 
-export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged }: Props) {
+export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged, layerConfig }: Props) {
   const [looks, setLooks] = useState<Look[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
@@ -19,6 +20,8 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
   const [editCanvas, setEditCanvas] = useState(false);
   const [editCountdown, setEditCountdown] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [captureSubtitle, setCaptureSubtitle] = useState(false);
+  const [captureBg, setCaptureBg] = useState(false);
 
   const loadLooks = useCallback(async () => {
     const list = await looksDb.list();
@@ -31,6 +34,14 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
     onApplyLook(look);
   }
 
+  function buildSnapshots() {
+    const subtitleSnapshot = captureSubtitle && layerConfig
+      ? (({ visible: _v, lines: _l, lines2: _l2, ...rest }) => rest)(layerConfig.subtitle)
+      : undefined;
+    const backgroundSnapshot = captureBg && layerConfig ? { ...layerConfig.background } : undefined;
+    return { subtitleSnapshot, backgroundSnapshot };
+  }
+
   function startEdit(look: Look) {
     setEditingId(look.id);
     setEditName(look.name);
@@ -39,23 +50,16 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
     setEditOverlay(look.showOverlay);
     setEditCanvas(look.showCanvas);
     setEditCountdown(look.showCountdown);
+    setCaptureSubtitle(!!look.subtitleSnapshot);
+    setCaptureBg(!!look.backgroundSnapshot);
     setShowNew(false);
   }
 
   async function handleSaveEdit() {
     if (editingId === null) return;
-    await looksDb.update({
-      id: editingId,
-      name: editName,
-      showBackground: editBg,
-      showSubtitle: editSub,
-      showOverlay: editOverlay,
-      showCanvas: editCanvas,
-      showCountdown: editCountdown,
-    });
-    // If editing the currently-applied look, re-push updated look to output
-    if (editingId === currentLookId) {
-      onApplyLook({
+    try {
+      const { subtitleSnapshot, backgroundSnapshot } = buildSnapshots();
+      const updated: Look = {
         id: editingId,
         name: editName,
         showBackground: editBg,
@@ -63,11 +67,20 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
         showOverlay: editOverlay,
         showCanvas: editCanvas,
         showCountdown: editCountdown,
-      });
+        subtitleSnapshot,
+        backgroundSnapshot,
+      };
+      await looksDb.update(updated);
+      // If editing the currently-applied look, re-push updated look to output
+      if (editingId === currentLookId) {
+        onApplyLook(updated);
+      }
+      setEditingId(null);
+      void loadLooks();
+      onLooksChanged();
+    } catch (e) {
+      console.error("[LooksPanel] update failed:", e);
     }
-    setEditingId(null);
-    void loadLooks();
-    onLooksChanged();
   }
 
   function startNew() {
@@ -79,45 +92,73 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged 
     setEditOverlay(true);
     setEditCanvas(false);
     setEditCountdown(false);
+    setCaptureSubtitle(false);
+    setCaptureBg(false);
   }
 
   async function handleSaveNew() {
-    await looksDb.create({
-      name: editName,
-      showBackground: editBg,
-      showSubtitle: editSub,
-      showOverlay: editOverlay,
-      showCanvas: editCanvas,
-      showCountdown: editCountdown,
-    });
-    setShowNew(false);
-    void loadLooks();
-    onLooksChanged();
+    try {
+      const { subtitleSnapshot, backgroundSnapshot } = buildSnapshots();
+      await looksDb.create({
+        name: editName,
+        showBackground: editBg,
+        showSubtitle: editSub,
+        showOverlay: editOverlay,
+        showCanvas: editCanvas,
+        showCountdown: editCountdown,
+        subtitleSnapshot,
+        backgroundSnapshot,
+      });
+      setShowNew(false);
+      void loadLooks();
+      onLooksChanged();
+    } catch (e) {
+      console.error("[LooksPanel] create failed:", e);
+    }
   }
 
   async function handleDelete(id: number) {
-    await looksDb.delete(id);
-    if (currentLookId === id) onApplyLook(null);
-    void loadLooks();
-    onLooksChanged();
+    try {
+      await looksDb.delete(id);
+      if (currentLookId === id) onApplyLook(null);
+      void loadLooks();
+      onLooksChanged();
+    } catch (e) {
+      console.error("[LooksPanel] delete failed:", e);
+    }
   }
 
   function renderLayerCheckboxes() {
     return (
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs">
-        {([
-          ["배경", editBg, setEditBg] as const,
-          ["자막", editSub, setEditSub] as const,
-          ["오버레이", editOverlay, setEditOverlay] as const,
-          ["캔버스", editCanvas, setEditCanvas] as const,
-          ["카운트다운", editCountdown, setEditCountdown] as const,
-        ]).map(([label, val, setter]) => (
-          <label key={label} className="flex items-center gap-1 cursor-pointer text-zinc-300">
-            <input type="checkbox" checked={val} onChange={(e) => setter(e.target.checked)} className="accent-blue-500" />
-            {label}
-          </label>
-        ))}
-      </div>
+      <>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs">
+          {([
+            ["배경", editBg, setEditBg] as const,
+            ["자막", editSub, setEditSub] as const,
+            ["오버레이", editOverlay, setEditOverlay] as const,
+            ["캔버스", editCanvas, setEditCanvas] as const,
+            ["카운트다운", editCountdown, setEditCountdown] as const,
+          ]).map(([label, val, setter]) => (
+            <label key={label} className="flex items-center gap-1 cursor-pointer text-zinc-300">
+              <input type="checkbox" checked={val} onChange={(e) => setter(e.target.checked)} className="accent-blue-500" />
+              {label}
+            </label>
+          ))}
+        </div>
+        {layerConfig && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1 text-xs border-t border-zinc-700 pt-1">
+            <span className="w-full text-zinc-500">현재 스타일 저장:</span>
+            <label className="flex items-center gap-1 cursor-pointer text-zinc-400">
+              <input type="checkbox" checked={captureSubtitle} onChange={(e) => setCaptureSubtitle(e.target.checked)} className="accent-amber-500" />
+              자막 스타일
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer text-zinc-400">
+              <input type="checkbox" checked={captureBg} onChange={(e) => setCaptureBg(e.target.checked)} className="accent-amber-500" />
+              배경
+            </label>
+          </div>
+        )}
+      </>
     );
   }
 

@@ -11,6 +11,8 @@ interface LookRow {
   show_overlay: number;
   show_canvas: number;
   show_countdown: number;
+  subtitle_snapshot: string | null;
+  background_snapshot: string | null;
 }
 
 function parseLook(row: LookRow): Look {
@@ -22,6 +24,8 @@ function parseLook(row: LookRow): Look {
     showOverlay: row.show_overlay === 1,
     showCanvas: row.show_canvas === 1,
     showCountdown: row.show_countdown === 1,
+    subtitleSnapshot: row.subtitle_snapshot ? JSON.parse(row.subtitle_snapshot) as Look["subtitleSnapshot"] : undefined,
+    backgroundSnapshot: row.background_snapshot ? JSON.parse(row.background_snapshot) as Look["backgroundSnapshot"] : undefined,
   };
 }
 
@@ -33,7 +37,7 @@ export const looksDb = {
   async list(): Promise<Look[]> {
     const db = await getDb();
     const rows = await db.select<LookRow[]>(
-      "SELECT id, name, show_background, show_subtitle, show_overlay, show_canvas, show_countdown FROM looks ORDER BY id"
+      "SELECT id, name, show_background, show_subtitle, show_overlay, show_canvas, show_countdown, subtitle_snapshot, background_snapshot FROM looks ORDER BY id"
     );
     return rows.map(parseLook);
   },
@@ -41,8 +45,8 @@ export const looksDb = {
   async create(look: Omit<Look, "id">): Promise<number> {
     const db = await getDb();
     const result = await db.execute(
-      `INSERT INTO looks (name, show_background, show_subtitle, show_overlay, show_canvas, show_countdown)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO looks (name, show_background, show_subtitle, show_overlay, show_canvas, show_countdown, subtitle_snapshot, background_snapshot)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         look.name,
         look.showBackground ? 1 : 0,
@@ -50,6 +54,8 @@ export const looksDb = {
         look.showOverlay ? 1 : 0,
         look.showCanvas ? 1 : 0,
         look.showCountdown ? 1 : 0,
+        look.subtitleSnapshot ? JSON.stringify(look.subtitleSnapshot) : null,
+        look.backgroundSnapshot ? JSON.stringify(look.backgroundSnapshot) : null,
       ]
     );
     return result.lastInsertId ?? 0;
@@ -58,7 +64,7 @@ export const looksDb = {
   async update(look: Look): Promise<void> {
     const db = await getDb();
     await db.execute(
-      `UPDATE looks SET name=?, show_background=?, show_subtitle=?, show_overlay=?, show_canvas=?, show_countdown=? WHERE id=?`,
+      `UPDATE looks SET name=?, show_background=?, show_subtitle=?, show_overlay=?, show_canvas=?, show_countdown=?, subtitle_snapshot=?, background_snapshot=? WHERE id=?`,
       [
         look.name,
         look.showBackground ? 1 : 0,
@@ -66,6 +72,8 @@ export const looksDb = {
         look.showOverlay ? 1 : 0,
         look.showCanvas ? 1 : 0,
         look.showCountdown ? 1 : 0,
+        look.subtitleSnapshot ? JSON.stringify(look.subtitleSnapshot) : null,
+        look.backgroundSnapshot ? JSON.stringify(look.backgroundSnapshot) : null,
         look.id,
       ]
     );

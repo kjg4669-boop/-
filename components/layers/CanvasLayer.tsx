@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import type { TextBlock } from "@/lib/types";
 
 const OUTPUT_W = 1920;
@@ -13,6 +12,8 @@ interface Props {
   /** 0 = instant (no fade); undefined = default 600ms */
   transitionMs?: number;
   textEntrance?: string;
+  /** 0-100; slide: px distance, zoom: scale depth. Default 50. */
+  textEntranceIntensity?: number;
 }
 
 function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
@@ -64,7 +65,7 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
   );
 }
 
-export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance }: Props) {
+export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance, textEntranceIntensity }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -72,18 +73,26 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance 
   const fadeMsRef = useRef(FADE_MS);
   fadeMsRef.current = FADE_MS;
 
-  // ── Two-slot crossfade with optional transform entrance ─────────────
+  // ── Two-slot crossfade ────────────────────────────────────────────────
   // Include nonce so animation fires even when block content is identical across slides
   const blocksKey = `${nonce ?? 0}:${blocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
   const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([blocks, []]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
-  const [slotTransforms, setSlotTransforms] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
+  // slotAnimKeys: each element starts at -1 (no animation on initial render).
+  // Incrementing a slot's key forces its inner div to remount → CSS @keyframes restarts.
+  const [slotAnimKeys, setSlotAnimKeys] = useState<[number, number]>([-1, -1]);
   const currentSlot = useRef<0 | 1>(0);
   const isFirstRender = useRef(true);
 
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
+      // 첫 변경은 애니메이션 없이 현재 슬롯 내용만 업데이트
+      setSlots(prev => {
+        const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
+        next[currentSlot.current] = blocks;
+        return next;
+      });
       return;
     }
 
@@ -100,40 +109,12 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance 
     const nextSlot = (1 - currentSlot.current) as 0 | 1;
     currentSlot.current = nextSlot;
 
-    if (textEntrance === "slide-up") {
-      // flushSync paints "from" state (opacity:0, translateY:40px),
-      // then double rAF ensures browser paints that frame before triggering transition
-      flushSync(() => {
-        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(40px)"; return next; });
-      });
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setActiveSlot(nextSlot);
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      }));
-    } else if (textEntrance === "slide-down") {
-      flushSync(() => {
-        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "translateY(-40px)"; return next; });
-      });
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setActiveSlot(nextSlot);
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      }));
-    } else if (textEntrance === "zoom-in") {
-      flushSync(() => {
-        setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = "scale(0.82)"; return next; });
-      });
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setActiveSlot(nextSlot);
-        setSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      }));
-    } else {
-      // fade: two-slot ping-pong (no transform needed)
-      setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
-      setActiveSlot(nextSlot);
-    }
+    // All three setState calls are batched into one React commit:
+    //   - outer slot div: opacity CSS transition fires (0 → 1)
+    //   - inner div: remounts (slotAnimKeys[nextSlot] incremented) → @keyframes starts from "from"
+    setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+    setActiveSlot(nextSlot);
+    setSlotAnimKeys(prev => { const next: [number, number] = [prev[0], prev[1]]; next[nextSlot]++; return next; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocksKey]);
 
@@ -148,27 +129,48 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance 
     return () => ro.disconnect();
   }, []);
 
-  const hasTransformEntrance = textEntrance === "slide-up" || textEntrance === "slide-down" || textEntrance === "zoom-in";
-  const transitionStr = `opacity ${FADE_MS}ms ease${hasTransformEntrance ? `, transform ${FADE_MS}ms ease` : ""}`;
+  const hasTransformEntrance =
+    textEntrance === "slide-up" ||
+    textEntrance === "slide-down" ||
+    textEntrance === "zoom-in";
+
+  const intensity = textEntranceIntensity ?? 50;
+  const enterDist = `${Math.round(4 + intensity * 0.8)}px`;
+  const enterScale = `${(1 - (intensity / 100) * 0.6).toFixed(3)}`;
 
   return (
     <div
       ref={containerRef}
-      style={{ position: "absolute", inset: 0, zIndex: 40, pointerEvents: "none" }}
+      style={{ position: "absolute", inset: 0, zIndex: 40, transform: "translateZ(0)", pointerEvents: "none" }}
     >
       {([0, 1] as const).map((idx) => (
+        // Outer div: stable key, handles opacity crossfade via CSS transition
         <div
           key={idx}
           style={{
             position: "absolute",
             inset: 0,
             opacity: activeSlot === idx ? 1 : 0,
-            transform: slotTransforms[idx],
-            transition: transitionStr,
+            transition: `opacity ${FADE_MS}ms ease`,
             pointerEvents: "none",
           }}
         >
-          <BlockList blocks={slots[idx]} scale={scale} />
+          {/* Inner div: key changes when slot activates → remount → CSS @keyframes restarts.
+              Outer handles opacity; this handles transform animation (no opacity in keyframes). */}
+          <div
+            key={slotAnimKeys[idx]}
+            style={{
+              position: "absolute",
+              inset: 0,
+              ...({ "--enter-dist": enterDist, "--enter-scale": enterScale } as React.CSSProperties),
+              animation:
+                hasTransformEntrance && FADE_MS > 0 && slotAnimKeys[idx] >= 0
+                  ? `enter-${textEntrance} ${FADE_MS}ms ease forwards`
+                  : undefined,
+            }}
+          >
+            <BlockList blocks={slots[idx]} scale={scale} />
+          </div>
         </div>
       ))}
     </div>

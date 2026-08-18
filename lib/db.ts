@@ -168,7 +168,7 @@ function parseSong(row: SongRow): Song {
     ccli_number: row.ccli_number ?? undefined,
     copyright_text: row.copyright_text ?? undefined,
     publisher: row.publisher ?? undefined,
-    verse_order: row.verse_order ? (JSON.parse(row.verse_order) as string[]) : undefined,
+    verse_order: row.verse_order ? safeJsonParse<string[]>(row.verse_order, []) : undefined,
     bpm: row.bpm ?? undefined,
     lyrics_json,
   };
@@ -271,8 +271,8 @@ export const serviceDb = {
   async addItem(serviceId: number, item: Omit<ServiceItem, "id">): Promise<number> {
     const conn = await getDb();
     const result = await conn.execute(
-      "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [serviceId, item.item_order, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
+      "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [serviceId, item.item_order, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
     );
     const id = result.lastInsertId;
     if (id == null) throw new Error("INSERT failed: no lastInsertId (service_items)");
@@ -322,8 +322,8 @@ export const serviceDb = {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         await conn.execute(
-          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
+          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
         );
       }
       await conn.execute("COMMIT");
@@ -364,8 +364,8 @@ export const serviceDb = {
       for (let i = 0; i < original.items.length; i++) {
         const item = original.items[i];
         await conn.execute(
-          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [newId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
+          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          [newId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
         );
       }
       await conn.execute("COMMIT");

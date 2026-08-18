@@ -95,6 +95,7 @@ export interface LayerConfig {
     lineHeight?: number;   // e.g. 1.3; default 1.3
     letterSpacing?: number; // in px; default 0
     textEntrance?: "none" | "fade" | "slide-up" | "slide-down" | "zoom-in";
+    textEntranceIntensity?: number; // 0-100; slide: px distance, zoom: scale depth
     layout?: "full" | "left-half" | "right-half";
     showCopyright?: boolean;
     nonce?: number; // increments on every slide navigation to always trigger animation
@@ -190,6 +191,7 @@ export const DEFAULT_LAYER_CONFIG: LayerConfig = {
     fontWeight2: "normal",
     fontStyle2: "normal",
     textEntrance: "fade",
+    textEntranceIntensity: 50,
     layout: "full",
     showCopyright: true,
     lineHeight: 1.3,
@@ -318,6 +320,13 @@ export interface Announcement {
   order_num: number;
   active: boolean;
   created_at: string;
+}
+
+// Video background phase preset
+export interface VideoPhase {
+  id: string;
+  name: string;
+  background: LayerConfig["background"];
 }
 
 export interface AnnouncementShowPayload {

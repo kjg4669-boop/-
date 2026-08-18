@@ -17,39 +17,43 @@ const REMOTE_HTML: &str = r#"<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>예배 원격 제어</title>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#111;color:#fff;font-family:sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
-#status{padding:8px 16px;font-size:13px;color:#888;background:#1a1a1a;text-align:center;border-bottom:1px solid #222}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#111;color:#fff;font-family:system-ui,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+#status{padding:10px 16px;font-size:12px;color:#6b7280;background:#1a1a1a;text-align:center;border-bottom:1px solid #222;letter-spacing:.04em}
 #status.ok{color:#4ade80}
-#slide-info{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;text-align:center;gap:10px}
-#slide-text{font-size:22px;font-weight:600;line-height:1.5;color:#f0f0f0;max-width:400px;white-space:pre-wrap}
-#slide-pos{font-size:14px;color:#555}
-#controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:20px}
-.btn{border:none;border-radius:12px;font-size:18px;font-weight:600;padding:22px 16px;cursor:pointer;transition:opacity .1s,transform .1s}
-.btn-prev{background:#334155;color:#94a3b8}
+#info{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 20px;text-align:center;gap:8px;overflow:hidden}
+#song-title{font-size:13px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#slide-text{font-size:clamp(18px,5vw,28px);font-weight:600;line-height:1.45;color:#f1f5f9;max-width:100%;white-space:pre-wrap;overflow:hidden}
+#slide-pos{font-size:13px;color:#4b5563;margin-top:4px}
+#controls{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px}
+.btn{border:none;border-radius:14px;font-size:17px;font-weight:700;height:68px;cursor:pointer;transition:opacity .1s,transform .1s;display:flex;align-items:center;justify-content:center;gap:6px}
+.btn-prev{background:#1e293b;color:#94a3b8}
 .btn-next{background:#1d4ed8;color:#fff}
-.btn-blackout{background:#7f1d1d;color:#fca5a5;grid-column:span 2}
-.btn:active{opacity:.7;transform:scale(.97)}
+.btn-blackout{background:#1c1917;color:#9ca3af;grid-column:span 2;height:52px;font-size:15px;border:1px solid #292524;border-radius:10px}
+.btn-blackout.active{background:#7f1d1d;color:#fca5a5;border-color:#991b1b}
+.btn:active{opacity:.6;transform:scale(.96)}
 </style>
 </head>
 <body>
 <div id="status">연결 중...</div>
-<div id="slide-info">
+<div id="info">
+  <div id="song-title">–</div>
   <div id="slide-text">–</div>
   <div id="slide-pos"></div>
 </div>
 <div id="controls">
   <button class="btn btn-prev" onclick="send('prev')">◀ 이전</button>
   <button class="btn btn-next" onclick="send('next')">다음 ▶</button>
-  <button class="btn btn-blackout" onclick="send('blackout')">⬛ 블랙아웃</button>
+  <button id="btn-blackout" class="btn btn-blackout" onclick="toggleBlackout()">⬛ 블랙아웃</button>
 </div>
 <script>
-let ws;
+let ws,blackout=false;
 function connect(){
   ws=new WebSocket('ws://'+location.host+'/ws');
   ws.onopen=()=>{document.getElementById('status').textContent='연결됨 ✓';document.getElementById('status').className='ok'};
   ws.onmessage=(e)=>{
     try{const d=JSON.parse(e.data);if(d.type==='state'){
+      document.getElementById('song-title').textContent=d.songTitle||'–';
       document.getElementById('slide-text').textContent=d.slideText||'–';
       document.getElementById('slide-pos').textContent=d.totalSlides>0?`${d.slideIndex+1} / ${d.totalSlides}`:'';
     }}catch{}
@@ -57,6 +61,7 @@ function connect(){
   ws.onclose=()=>{document.getElementById('status').textContent='연결 끊김 (재시도 중...)';document.getElementById('status').className='';setTimeout(connect,2000)};
 }
 function send(type,extra){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type,...extra}))}
+function toggleBlackout(){blackout=!blackout;document.getElementById('btn-blackout').className='btn btn-blackout'+(blackout?' active':'');send('blackout')}
 connect();
 </script>
 </body>

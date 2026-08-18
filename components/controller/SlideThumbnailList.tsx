@@ -5,9 +5,11 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closest
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueueStore } from "@/stores/queueStore";
+import { useOutputStore } from "@/stores/outputStore";
 import { songDb, serviceDb } from "@/lib/db";
 import type { LyricSlide, FlatSlide, Service } from "@/lib/types";
 import { newSlideId } from "@/lib/utils";
+import { toDisplayUrl } from "@/lib/media";
 
 function SortableItem({ id, children }: { id: string; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
@@ -20,6 +22,7 @@ function SortableItem({ id, children }: { id: string; children: React.ReactNode 
         opacity: isDragging ? 0.5 : 1,
         position: "relative",
         zIndex: isDragging ? 50 : undefined,
+        outline: "none",
       }}
       {...attributes}
       {...listeners}
@@ -63,7 +66,21 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
   const setActiveFlatSlide = useQueueStore((s) => s.setActiveFlatSlide);
   const toggleHiddenSlide = useQueueStore((s) => s.toggleHiddenSlide);
   const updateServiceData = useQueueStore((s) => s.updateServiceData);
+  const bg = useOutputStore((s) => s.layerConfig.background);
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
+
+  // 썸네일 배경 스타일 (layerConfig 반영)
+  const thumbBgStyle: React.CSSProperties = (() => {
+    if (bg.type === "color") return { backgroundColor: bg.color ?? "#111" };
+    if (bg.type === "image" && bg.src) {
+      const url = toDisplayUrl(bg.src);
+      return url
+        ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" }
+        : { backgroundColor: "#111" };
+    }
+    return { backgroundColor: "#111" };
+  })();
+  const thumbVideoUrl = bg.type === "video" && bg.src ? toDisplayUrl(bg.src) : null;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -199,7 +216,17 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
                     onContextMenu={(e) => { e.stopPropagation(); openCtx(e, flatIdx); }}
                   >
                     <div style={{ aspectRatio: "16/9", position: "relative", overflow: "hidden" }} className="rounded">
-                      <div style={{ position: "absolute", inset: 0, backgroundColor: "#111" }}>
+                      <div style={{ position: "absolute", inset: 0, ...thumbBgStyle }}>
+                        {thumbVideoUrl && (
+                          <video
+                            src={thumbVideoUrl}
+                            muted
+                            playsInline
+                            preload="metadata"
+                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                            onLoadedMetadata={(e) => { (e.target as HTMLVideoElement).currentTime = 0.1; }}
+                          />
+                        )}
                         {canvasBlocks.length > 0 ? (
                           canvasBlocks.map((b) => (
                             <div
@@ -210,13 +237,11 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
                                 top: `${(b.y / 1080) * 100}%`,
                                 width: `${(b.width / 1920) * 100}%`,
                                 height: `${((b.height ?? 200) / 1080) * 100}%`,
-                                border: "1px solid rgba(255,255,255,0.3)",
-                                background: "rgba(255,255,255,0.04)",
                                 borderRadius: 1,
                                 display: "flex",
                                 flexDirection: "column",
                                 alignItems: "center",
-                                justifyContent: "center",
+                                justifyContent: "flex-start",
                                 overflow: "hidden",
                                 gap: 1,
                                 padding: "1px 2px",
@@ -328,8 +353,17 @@ function CtxMenuPanel({
     };
     const newLyrics = [...song.lyrics_json];
     newLyrics.splice(entry.slideIndex + 1, 0, newSlide);
-    try { await songDb.update(song.id, { lyrics_json: newLyrics }); await reloadService(); }
-    catch (e) { console.error(e); }
+    try {
+      await songDb.update(song.id, { lyrics_json: newLyrics });
+      const updated = await serviceDb.get(currentService.id);
+      if (updated) {
+        updateService(updated);
+        const st = useQueueStore.getState();
+        const fl = st.getFlatSlideList();
+        const ni = fl.findIndex((f) => f.slide.id === newSlide.id);
+        if (ni >= 0) st.setActiveFlatSlide(ni);
+      }
+    } catch (e) { console.error(e); }
     onClose();
   }
 

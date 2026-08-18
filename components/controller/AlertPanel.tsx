@@ -34,16 +34,24 @@ export default function AlertPanel() {
 
   async function handleSaveTemplate() {
     if (!text.trim()) return;
-    await alertDb.create({
-      text: text.trim(), duration, position,
-      background_color: bgColor, text_color: textColor, sort_order: 0,
-    });
-    await loadTemplates();
+    try {
+      await alertDb.create({
+        text: text.trim(), duration, position,
+        background_color: bgColor, text_color: textColor, sort_order: 0,
+      });
+      await loadTemplates();
+    } catch (e) {
+      console.error("[AlertPanel] template save failed:", e);
+    }
   }
 
   async function handleDeleteTemplate(id: number) {
-    await alertDb.delete(id);
-    await loadTemplates();
+    try {
+      await alertDb.delete(id);
+      await loadTemplates();
+    } catch (e) {
+      console.error("[AlertPanel] template delete failed:", e);
+    }
   }
 
   function loadTemplate(t: AlertTemplate) {

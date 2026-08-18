@@ -69,6 +69,10 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
         return;
       }
 
+
+      // Cmd/Ctrl 조합은 스위치에 들어가지 않음 — 나머지는 OS 기본 동작(복사/붙여넣기 등)에 위임
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
       // 모달 열림 중에는 Escape만 허용
       if ((o.showQuickSearchRef.current || o.showCheatSheetRef.current) && e.key !== "Escape") return;
 
@@ -85,6 +89,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
           } else { o.nextLyricSlide(); }
           break;
         case "ArrowRight":
+          e.preventDefault();
           if (isLoop) {
             const st = useQueueStore.getState();
             const fi = st.getActiveFlatSlideIndex();
@@ -93,6 +98,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
           } else { o.nextLyricSlide(); }
           break;
         case "ArrowLeft":
+          e.preventDefault();
           if (isLoop) {
             const st = useQueueStore.getState();
             const fi = st.getActiveFlatSlideIndex();
@@ -101,6 +107,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
           } else { o.prevLyricSlide(); }
           break;
         case "ArrowDown":
+          e.preventDefault();
           if (isLoop) {
             const st = useQueueStore.getState();
             const fi = st.getActiveFlatSlideIndex();
@@ -109,6 +116,7 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
           } else { o.nextLyricSlide(); }
           break;
         case "ArrowUp":
+          e.preventDefault();
           if (isLoop) {
             const st = useQueueStore.getState();
             const fi = st.getActiveFlatSlideIndex();

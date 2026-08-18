@@ -180,8 +180,13 @@ export default function QueuePanel() {
   }, []);
 
   async function loadService(id: number) {
-    const service = await serviceDb.get(id);
-    if (service) setCurrentService(service);
+    try {
+      const service = await serviceDb.get(id);
+      if (service) setCurrentService(service);
+    } catch (e) {
+      console.error("[QueuePanel] loadService failed:", e);
+      showOpNotice("예배를 불러오지 못했습니다", true);
+    }
   }
 
   async function handleCreateService() {

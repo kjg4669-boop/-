@@ -33,7 +33,7 @@ export function deepMerge<T extends object>(base: T, overrides: Partial<T>): T {
 }
 
 export const GLOBAL_SETTINGS_KEY = "worship-layer-defaults";
-const GLOBAL_SETTINGS_VERSION = 2; // bump when defaults change
+const GLOBAL_SETTINGS_VERSION = 5; // bump when defaults change
 
 let _globalDefaultsCache: import("./types").LayerConfig | null = null;
 
@@ -58,6 +58,6 @@ export function saveGlobalDefaults(config: import("./types").LayerConfig): void 
   if (typeof window === "undefined") return;
   _globalDefaultsCache = null; // invalidate cache
   // Strip runtime-only fields so stale lyrics/canvas don't bleed into next session
-  const { subtitle: { visible: _v, lines: _l, ...subtitleRest }, canvas: _canvas, ...rest } = config;
+  const { subtitle: { visible: _v, lines: _l, lines2: _l2, ...subtitleRest }, canvas: _canvas, ...rest } = config;
   localStorage.setItem(GLOBAL_SETTINGS_KEY, JSON.stringify({ ...rest, subtitle: subtitleRest, __v: GLOBAL_SETTINGS_VERSION }));
 }

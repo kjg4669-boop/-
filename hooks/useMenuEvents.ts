@@ -4,7 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { ipc } from "@/lib/ipc";
 import { useQueueStore } from "@/stores/queueStore";
 
-type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video";
 
 export interface MenuEventsOptions {
   openOutputRef: MutableRefObject<() => void>;
@@ -24,6 +24,8 @@ export interface MenuEventsOptions {
   setShowHelp: React.Dispatch<React.SetStateAction<boolean>>;
   setShowOnboarding: React.Dispatch<React.SetStateAction<boolean>>;
   setShowAbout: React.Dispatch<React.SetStateAction<boolean>>;
+  openPreviewWindow: () => void;
+  setShowSettings: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 /**
@@ -93,6 +95,8 @@ export function useMenuEvents(options: MenuEventsOptions): void {
             optionsRef.current.setShowOnboarding(true);
           }),
           listen("menu:about",            () => optionsRef.current.setShowAbout(true)),
+          listen("menu:open-preview",     () => optionsRef.current.openPreviewWindow()),
+          listen("menu:open-settings",    () => optionsRef.current.setShowSettings(true)),
           listen("menu:restore-db", async () => {
             try {
               const { ask, open } = await import("@tauri-apps/plugin-dialog");

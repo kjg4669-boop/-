@@ -37,6 +37,7 @@ import QuickSearchModal from "@/components/controller/QuickSearchModal";
 import ShortcutCheatSheet from "@/components/controller/ShortcutCheatSheet";
 import TemplateModal from "@/components/controller/TemplateModal";
 import OutputPreview from "@/components/controller/OutputPreview";
+import SidebarLayerPanel from "@/components/controller/SidebarLayerPanel";
 import AlertPanel from "@/components/controller/AlertPanel";
 import AnnouncementPanel from "@/components/controller/AnnouncementPanel";
 import LooksPanel from "@/components/controller/LooksPanel";
@@ -51,14 +52,17 @@ import ErrorToast from "@/components/ErrorToast";
 import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
 import AboutDialog from "@/components/controller/AboutDialog";
+import SettingsDialog from "@/components/controller/SettingsDialog";
 import OnboardingGuide from "@/components/controller/OnboardingGuide";
 import HelpOverlay from "@/components/controller/HelpOverlay";
 import RemotePanel from "@/components/controller/RemotePanel";
 import NdiPanel from "@/components/controller/NdiPanel";
+import VideoPanel from "@/components/controller/VideoPanel";
+import { useVideoStore } from "@/stores/videoStore";
 import type { RemoteCommand } from "@/lib/types";
 
-type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement";
-type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
 
 function buildCopyrightString(song?: { copyright_text?: string; ccli_number?: string; publisher?: string } | null): string {
   const parts: string[] = [];
@@ -116,11 +120,24 @@ export default function ControllerPage() {
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
-  const [tabPage, setTabPage] = useState(0);
+  const [tabOrder, setTabOrder] = useState<RightTab[]>(["queue", "songs", "video", "alert", "settings", "announcement"]);
+  const [removedTabs, setRemovedTabs] = useState<RightTab[]>(["looks", "remote", "ndi"]);
+  const [draggingTab, setDraggingTab] = useState<RightTab | null>(null);
+  const [dragOverTab, setDragOverTab] = useState<RightTab | null>(null);
+  const tabOrderRef = useRef<RightTab[]>(tabOrder);
+  const dragDroppedRef = useRef(false);
+  const isHtml5DraggingRef = useRef(false);
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
   const [openedWindows, setOpenedWindows] = useState<Set<RightTab>>(new Set());
   const [panelFloating, setPanelFloating] = useState(false);
-  const [panelPos, setPanelPos] = useState({ x: 0, y: 0 });
-  const [snapHint, setSnapHint] = useState(false);
+  const [layerPanelHeight, setLayerPanelHeight] = useState(200);
+  const layerResizerRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [layerPanelFloating, setLayerPanelFloating] = useState(false);
+  const [layerPanelPos, setLayerPanelPos] = useState({ x: 0, y: 0 });
+  const [layerPanelSnapHint, setLayerPanelSnapHint] = useState(false);
+  const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
+  const [leftPanelWidth, setLeftPanelWidth] = useState(224); // 224px = w-56
+  const leftResizeRef = useRef<{ startX: number; startW: number } | null>(null);
   const [previewDocked, setPreviewDocked] = useState(true);
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>("home");
   const [serviceNotes, setServiceNotes] = useState("");
@@ -148,17 +165,14 @@ export default function ControllerPage() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   useEffect(() => {
     if (!localStorage.getItem("worship-onboarding-v1")) setShowOnboarding(true);
   }, []);
-  // 외부에서 setRightTab 호출 시 해당 탭이 속한 페이지로 자동 이동
-  useEffect(() => {
-    const ALL_TABS = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const;
-    const idx = (ALL_TABS as readonly string[]).indexOf(rightTab);
-    if (idx >= 0) setTabPage(Math.floor(idx / 4));
-  }, [rightTab]);
+  // tabOrderRef 동기화
+  useEffect(() => { tabOrderRef.current = tabOrder; }, [tabOrder]);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
   const handleAutoSaved = useCallback(() => {
@@ -193,12 +207,28 @@ export default function ControllerPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  // Autosave: 30초마다 isDirty면 저장
+  // Autosave: 30초마다 isDirty면 조용히 저장 (에러 토스트 없음, 중복 방지)
+  const isSavingRef = useRef(false);
   useEffect(() => {
-    const id = setInterval(() => {
-      if (useQueueStore.getState().isDirty) void handleSaveRef.current();
+    const id = setInterval(async () => {
+      const store = useQueueStore.getState();
+      if (!store.isDirty || isSavingRef.current) return;
+      const svc = store.currentService;
+      if (!svc || svc.id <= 0) return;
+      isSavingRef.current = true;
+      try {
+        await serviceDb.saveItems(svc.id, svc.items);
+        const reloaded = await serviceDb.get(svc.id);
+        if (reloaded) useQueueStore.getState().updateServiceData(reloaded);
+        else useQueueStore.getState().setIsDirty(false);
+      } catch (e) {
+        console.warn("[auto-save 30s]", e);
+      } finally {
+        isSavingRef.current = false;
+      }
     }, 30000);
     return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 세션 복원: 마지막 예배 ID를 localStorage에 저장/복원
@@ -239,7 +269,13 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
-  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId, outputScaleMode, setOutputScaleMode } = useSettingsStore();
+  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId, outputScaleMode, setOutputScaleMode, uiFontScale } = useSettingsStore();
+
+  // Apply UI font scale to root element so all rem-based sizes scale proportionally
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${uiFontScale * 16}px`;
+    return () => { document.documentElement.style.fontSize = ""; };
+  }, [uiFontScale]);
   const [looks, setLooks] = useState<Look[]>([]);
   const looksRef = useRef<Look[]>([]);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
@@ -381,10 +417,14 @@ export default function ControllerPage() {
           ) as LayerConfig;
         })();
 
+    // Auto-apply video phase if this slide has one assigned
+    const videoPhase = slide ? useVideoStore.getState().getPhaseForSlide(slide.id) : null;
+    const effectiveBase: LayerConfig = videoPhase ? { ...base, background: videoPhase.background } : base;
+
     const newConfig: LayerConfig = {
-      ...base,
+      ...effectiveBase,
       subtitle: {
-        ...base.subtitle,
+        ...effectiveBase.subtitle,
         visible: !isClear && canvasBlocks.length === 0 && !!slide,
         lines: !isClear && canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
         lines2: !isClear ? (slide?.lines2 ?? []) : [],
@@ -572,6 +612,8 @@ export default function ControllerPage() {
   const handlePasteBlock = useCallback(() => canvasRef.current?.pasteBlock(), []);
   const handleCutBlock = useCallback(() => canvasRef.current?.cutBlock(), []);
   const handleCopyBlock = useCallback(() => canvasRef.current?.copyBlock(), []);
+
+  // Refs for keyboard shortcuts (always latest values) — C/V/X use native OS behavior
   const handleActivateFmtPainter = useCallback(() => {
     if (!selectedBlock) return;
     const { fontFamily, fontSize, fontWeight, fontStyle, textDecoration, color, textAlign } = selectedBlock;
@@ -593,29 +635,88 @@ export default function ControllerPage() {
     canvasRef.current?.addBlock();
   }, []);
   const handleOpenDesignPanel = useCallback(() => { setShowPanel(true); setRightTab("settings"); }, []);
-  const handleUndock = useCallback(() => {
-    setPanelPos({ x: window.innerWidth - 280, y: 80 });
-    setPanelFloating(true);
+  const TAB_LABELS_WIN: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상" };
+  const openTabAsWindow = useCallback(async (tab: RightTab, screenX?: number, screenY?: number) => {
+    if (openedWindowsRef.current.has(tab)) return;
+    try {
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const win = new WebviewWindow(`panel-${tab}`, {
+        url: `${window.location.origin}/floating-panel#${tab}`,
+        title: TAB_LABELS_WIN[tab],
+        width: 280,
+        height: 520,
+        ...(screenX !== undefined && screenY !== undefined ? { x: screenX - 140, y: screenY - 30 } : {}),
+        decorations: true,
+      });
+      win.once("tauri://destroyed", () => {
+        setOpenedWindows((prev) => { const next = new Set(prev); next.delete(tab); return next; });
+        if (rightTabRef.current === tab) setRightTab(tab);
+      });
+      setOpenedWindows((prev) => new Set([...prev, tab]));
+      if (rightTabRef.current === tab) {
+        const next = tabOrderRef.current.find((t) => t !== tab && !openedWindowsRef.current.has(t));
+        if (next) setRightTab(next);
+      }
+    } catch (err) {
+      console.error("Failed to open panel window:", err);
+    }
   }, []);
-  const handlePanelDragStart = useCallback((e: React.MouseEvent) => {
+  const handleUndock = useCallback(async () => {
+    if (panelFloating) return;
+    setPanelFloating(true);
+    try {
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      const hash = tabOrderRef.current.join(",");
+      const win = new WebviewWindow("all-panels", {
+        url: `${window.location.origin}/all-panels#${hash}`,
+        title: "패널",
+        width: 280,
+        height: 600,
+        decorations: true,
+      });
+      win.once("tauri://destroyed", () => setPanelFloating(false));
+    } catch {
+      setPanelFloating(false);
+    }
+  }, [panelFloating]);
+
+  const handleLayerResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    layerResizerRef.current = { startY: e.clientY, startH: layerPanelHeight };
+    const handleMove = (me: MouseEvent) => {
+      if (!layerResizerRef.current) return;
+      const delta = layerResizerRef.current.startY - me.clientY;
+      setLayerPanelHeight(Math.max(80, Math.min(500, layerResizerRef.current.startH + delta)));
+    };
+    const handleUp = () => {
+      layerResizerRef.current = null;
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+    };
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }, [layerPanelHeight]);
+
+  const handleLayerPanelDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
-    const startPanelX = panelPos.x, startPanelY = panelPos.y;
+    const startPosX = layerPanelPos.x, startPosY = layerPanelPos.y;
     const handleMove = (me: MouseEvent) => {
-      const newX = Math.max(0, Math.min(window.innerWidth - 256, startPanelX + me.clientX - startX));
-      const newY = Math.max(0, Math.min(window.innerHeight - 100, startPanelY + me.clientY - startY));
-      setPanelPos({ x: newX, y: newY });
-      setSnapHint(me.clientX > window.innerWidth - 80);
+      const newX = Math.max(0, Math.min(window.innerWidth - 260, startPosX + me.clientX - startX));
+      const newY = Math.max(0, Math.min(window.innerHeight - 100, startPosY + me.clientY - startY));
+      setLayerPanelPos({ x: newX, y: newY });
+      setLayerPanelSnapHint(me.clientX > window.innerWidth - 80);
     };
     const handleUp = (me: MouseEvent) => {
       document.removeEventListener("mousemove", handleMove);
       document.removeEventListener("mouseup", handleUp);
-      setSnapHint(false);
-      if (me.clientX > window.innerWidth - 80) setPanelFloating(false);
+      setLayerPanelSnapHint(false);
+      if (me.clientX > window.innerWidth - 80) setLayerPanelFloating(false);
     };
     document.addEventListener("mousemove", handleMove);
     document.addEventListener("mouseup", handleUp);
-  }, [panelPos.x, panelPos.y]);
+  }, [layerPanelPos.x, layerPanelPos.y]);
+
   const handleUndockPreview = useCallback(() => {
     setPreviewDocked(false);
     void ipc.openPreviewWindow();
@@ -629,7 +730,6 @@ export default function ControllerPage() {
 
   const handleTabMouseDown = useCallback((e: React.MouseEvent, tab: RightTab) => {
     if (openedWindowsRef.current.has(tab)) return; // already open
-    e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
     let detached = false;
     const handleMove = (me: MouseEvent) => {
@@ -640,35 +740,9 @@ export default function ControllerPage() {
     const handleUp = async (me: MouseEvent) => {
       document.removeEventListener("mousemove", handleMove);
       document.removeEventListener("mouseup", handleUp);
+      if (isHtml5DraggingRef.current) return; // HTML5 drag가 처리 중
       if (!detached) { setRightTab(tab); return; }
-      try {
-        const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-        const LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" };
-        const panelWin = new WebviewWindow(`panel-${tab}`, {
-          url: `${window.location.origin}/floating-panel#${tab}`,
-          title: LABELS[tab],
-          width: 280,
-          height: 520,
-          x: me.screenX - 140,
-          y: me.screenY - 30,
-          decorations: true,
-        });
-        panelWin.once("tauri://destroyed", () => {
-          setOpenedWindows((prev) => { const next = new Set(prev); next.delete(tab); return next; });
-          // 닫힌 탭이 현재 선택이면 해당 탭으로 복귀
-          if (rightTabRef.current !== tab) {} else { setRightTab(tab); }
-        });
-        setOpenedWindows((prev) => new Set([...prev, tab]));
-        // 분리한 탭이 현재 선택이면 다른 탭으로 전환
-        if (rightTabRef.current === tab) {
-          const ALL_TABS: RightTab[] = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"];
-          const next = ALL_TABS.find((t) => t !== tab && !openedWindowsRef.current.has(t));
-          if (next) setRightTab(next);
-        }
-      } catch (err) {
-        console.error("Failed to open panel window:", err);
-        setRightTab(tab);
-      }
+      await openTabAsWindow(tab, me.screenX, me.screenY);
     };
     document.addEventListener("mousemove", handleMove);
     document.addEventListener("mouseup", handleUp);
@@ -703,6 +777,39 @@ export default function ControllerPage() {
     };
     window.addEventListener("worship:edit-song", handler);
     return () => window.removeEventListener("worship:edit-song", handler);
+  }, []);
+
+  // ── 레이어 패널 OS 창 IPC ─────────────────────────────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) return;
+    const unlisteners: Array<() => void> = [];
+    import("@tauri-apps/api/event").then(({ listen, emit }) => {
+      // 레이어 패널 창 / all-panels 창이 열리면 현재 상태 즉시 전송
+      const pushCurrentState = () => {
+        const lc = useOutputStore.getState().layerConfig;
+        emit("slide:update", { layerConfig: lc }).catch(() => {});
+      };
+      listen<void>("layer-panel:ready", pushCurrentState).then((fn) => unlisteners.push(fn));
+      listen<void>("all-panels:ready", pushCurrentState).then((fn) => unlisteners.push(fn));
+
+      // all-panels 창에서 레이어 설정 변경
+      listen<LayerConfig>("layer:change", (ev) => {
+        handleLayerChange(ev.payload);
+      }).then((fn) => unlisteners.push(fn));
+
+      // 레이어 패널 창에서 가시성 토글 요청
+      listen<{ layerId: string }>("layer:toggleVisible", (ev) => {
+        const layerId = ev.payload.layerId;
+        const lc = useOutputStore.getState().layerConfig;
+        if (layerId === "subtitle") {
+          handleLayerChange({ ...lc, subtitle: { ...lc.subtitle, visible: !lc.subtitle.visible } });
+        } else if (layerId === "overlay") {
+          handleLayerChange({ ...lc, overlay: { ...lc.overlay, visible: !lc.overlay.visible } });
+        }
+      }).then((fn) => unlisteners.push(fn));
+    }).catch(() => {});
+    return () => { unlisteners.forEach((fn) => fn()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleCanvasChange = useCallback(
@@ -758,6 +865,7 @@ export default function ControllerPage() {
       };
       setLayerConfig(withContent);
       if (isLive) ipc.sendSlideUpdate(withContent);
+      ipc.sendPreviewUpdate(withContent);
       // Auto-save layer settings to the active item (debounced)
       if (layerAutoSaveTimerRef.current) clearTimeout(layerAutoSaveTimerRef.current);
       layerAutoSaveTimerRef.current = setTimeout(() => {
@@ -773,6 +881,30 @@ export default function ControllerPage() {
     },
     [isLive, isClear, setLayerConfig]
   );
+
+  const handleRemoveTab = useCallback((tab: RightTab) => {
+    setTabOrder((prev) => {
+      const newOrder = prev.filter((t) => t !== tab);
+      if (rightTabRef.current === tab && newOrder.length > 0) setRightTab(newOrder[0]);
+      return newOrder;
+    });
+    setRemovedTabs((prev) => [...prev, tab]);
+  }, []);
+
+  const handleRestoreTab = useCallback((tab: string) => {
+    const t = tab as RightTab;
+    setRemovedTabs((prev) => prev.filter((x) => x !== t));
+    setTabOrder((prev) => [...prev, t]);
+    setRightTab(t);
+  }, []);
+
+  const handleLayerToggleVisible = useCallback((layerId: string) => {
+    if (layerId === "subtitle") {
+      handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, visible: !layerConfig.subtitle.visible } });
+    } else if (layerId === "overlay") {
+      handleLayerChange({ ...layerConfig, overlay: { ...layerConfig.overlay, visible: !layerConfig.overlay.visible } });
+    }
+  }, [layerConfig, handleLayerChange]);
 
   const handleSaveGlobal = useCallback((config: LayerConfig) => {
     saveGlobalDefaults(config);
@@ -1037,6 +1169,7 @@ export default function ControllerPage() {
   useEffect(() => { openOutputRef.current = openOutput; });
 
   const handleSave = useCallback(async () => {
+    if (isSavingRef.current) return; // 중복 저장 방지
     const store = useQueueStore.getState();
     const svc = store.currentService;
     if (!svc) return;
@@ -1044,6 +1177,7 @@ export default function ControllerPage() {
       setShowSaveModal(true);
       return;
     }
+    isSavingRef.current = true;
     try {
       await serviceDb.saveItems(svc.id, svc.items);
       const reloaded = await serviceDb.get(svc.id);
@@ -1054,9 +1188,11 @@ export default function ControllerPage() {
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
     } catch (e) {
       console.error("[save]", e);
-      setCtrlNotice({ msg: "저장에 실패했습니다. 다시 시도해 주세요." , error: true });
+      setCtrlNotice({ msg: "저장에 실패했습니다. 다시 시도해 주세요.", error: true });
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 5000);
+    } finally {
+      isSavingRef.current = false;
     }
   }, []);
 
@@ -1219,6 +1355,7 @@ export default function ControllerPage() {
     setShowOnboarding,
     setShowAbout,
     openPreviewWindow: () => { setPreviewDocked(true); setShowPanel(true); },
+    setShowSettings,
   });
 
   useKeyboardShortcuts({
@@ -1386,6 +1523,9 @@ export default function ControllerPage() {
         looks={looks}
         currentLookId={currentLookId}
         onApplyLook={handleApplyLook}
+        removedPanels={removedTabs}
+        panelLabels={{ queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" }}
+        onRestorePanel={handleRestoreTab}
       />
       </div>
 
@@ -1393,8 +1533,32 @@ export default function ControllerPage() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* Left: Slides panel (PPT style) */}
-        <div data-help-id="slide-list" className="w-56 flex-shrink-0 border-r border-zinc-700 overflow-hidden bg-[#252526]">
+        <div
+          data-help-id="slide-list"
+          className="flex-shrink-0 border-r border-zinc-700 overflow-hidden bg-[#252526] relative"
+          style={{ width: leftPanelWidth }}
+        >
           <SlideThumbnailList onOpenDesignPanel={() => { setShowPanel(true); setRightTab("settings"); }} />
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-ew-resize hover:bg-blue-500/40 active:bg-blue-500/60 transition-colors z-10"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              leftResizeRef.current = { startX: e.clientX, startW: leftPanelWidth };
+              const onMove = (ev: MouseEvent) => {
+                if (!leftResizeRef.current) return;
+                const newW = Math.max(140, Math.min(400, leftResizeRef.current.startW + ev.clientX - leftResizeRef.current.startX));
+                setLeftPanelWidth(newW);
+              };
+              const onUp = () => {
+                leftResizeRef.current = null;
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
+          />
         </div>
 
         {/* Center: Canvas with PPT-style rulers */}
@@ -1460,16 +1624,11 @@ export default function ControllerPage() {
           </div>
         </div>
 
-        {/* Right: snap hint overlay when dragging near edge */}
-        {snapHint && (
+        {/* Right: snap hint overlay when dragging layer panel near edge */}
+        {layerPanelSnapHint && (
           <div className="fixed right-0 top-0 bottom-0 w-16 bg-blue-500/20 border-l-2 border-blue-500 z-50 pointer-events-none flex items-center justify-center">
-            <span className="text-blue-400 text-xs rotate-90 whitespace-nowrap">도킹</span>
+            <span className="text-blue-400 text-xs rotate-90 whitespace-nowrap">레이어 도킹</span>
           </div>
-        )}
-
-        {/* Right: placeholder to keep layout when panel is floating */}
-        {showPanel && panelFloating && (
-          <div className="w-64 flex-shrink-0" />
         )}
 
         {/* Right: Pane (PPT Format pane) */}
@@ -1477,23 +1636,12 @@ export default function ControllerPage() {
           <div
             data-help-id="right-panel"
             className="w-64 flex-shrink-0 flex flex-col overflow-hidden bg-[#252526] border-l border-zinc-700"
-            style={panelFloating ? {
-              position: "fixed",
-              left: panelPos.x,
-              top: panelPos.y,
-              zIndex: 40,
-              width: 256,
-              height: "calc(100vh - 80px)",
-              boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-              borderRadius: 6,
-              border: "1px solid #3f3f46",
-            } : undefined}
           >
-            {/* ── 출력 미리보기 (도킹됨) ── */}
+            {/* ── 출력 미리보기 (항상 도킹 — 탭 패널과 독립) ── */}
             {previewDocked && (
               <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">출력 미리보기</span>
+                  <span className="text-[0.625rem] text-zinc-500 uppercase tracking-wider font-medium">출력 미리보기</span>
                   <button
                     onClick={handleUndockPreview}
                     title="미리보기 분리"
@@ -1503,107 +1651,202 @@ export default function ControllerPage() {
                 <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} isLive={isLive} />
               </div>
             )}
-            {(() => {
-              const ALL_TABS = ["queue", "songs", "settings", "alert", "looks", "remote", "ndi", "announcement"] as const;
-              const TAB_LABELS: Record<typeof ALL_TABS[number], string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" };
-              const PAGE_SIZE = 4;
-              const totalPages = Math.ceil(ALL_TABS.length / PAGE_SIZE);
-              const visibleTabs = ALL_TABS.slice(tabPage * PAGE_SIZE, tabPage * PAGE_SIZE + PAGE_SIZE);
+            {/* ── 탭 패널 (독립 분리 가능) ── */}
+            <div
+              className="flex-1 flex flex-col overflow-hidden min-h-0"
+            >
+            {panelFloating ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-zinc-600 select-none">
+                <span className="text-xs">패널 분리됨</span>
+                <button onClick={() => setPanelFloating(false)} className="text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-700 px-2 py-0.5 rounded border border-zinc-700">⊟ 도킹</button>
+              </div>
+            ) : (() => {
+              const TAB_LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상" };
               return (
                 <div
-                  className={`flex border-b border-zinc-700 flex-shrink-0 items-stretch select-none${panelFloating ? " cursor-grab active:cursor-grabbing" : ""}`}
-                  onMouseDown={panelFloating ? handlePanelDragStart : undefined}
+                  ref={tabBarRef}
+                  className="flex border-b border-zinc-700 flex-shrink-0 items-stretch select-none overflow-x-auto"
+                  onDragOver={(e) => e.preventDefault()}
                 >
-                  {tabPage > 0 && (
-                    <button
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={() => setTabPage((p) => p - 1)}
-                      className="px-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 border-r border-zinc-700 flex-shrink-0 text-xs"
-                    >‹</button>
-                  )}
-                  {visibleTabs.map((tab) => {
+                  {tabOrder.map((tab) => {
                     const isTabFloating = openedWindows.has(tab);
+                    const isDragOver = dragOverTab === tab && draggingTab !== tab;
                     return (
-                      <button
+                      <div
                         key={tab}
-                        onMouseDown={(e) => { e.stopPropagation(); handleTabMouseDown(e, tab); }}
-                        className={`flex-1 py-1.5 text-xs font-medium transition-colors cursor-grab ${
-                          isTabFloating
-                            ? "text-blue-400 border-b-2 border-blue-400 border-dashed bg-zinc-800/50"
-                            : rightTab === tab
-                            ? "text-white border-b-2 border-blue-500 bg-zinc-700"
-                            : "text-zinc-400 hover:text-white hover:bg-zinc-800"
-                        }`}
+                        className={`relative flex-1 flex items-stretch min-w-0 group ${isDragOver ? "border-l-2 border-blue-400" : ""}`}
+                        onDragOver={(e) => { e.preventDefault(); setDragOverTab(tab); }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          if (draggingTab && draggingTab !== tab) {
+                            dragDroppedRef.current = true;
+                            setTabOrder((prev) => {
+                              const next = [...prev];
+                              const fi = next.indexOf(draggingTab);
+                              const ti = next.indexOf(tab);
+                              next.splice(fi, 1);
+                              next.splice(ti, 0, draggingTab);
+                              return next;
+                            });
+                          }
+                          setDraggingTab(null);
+                          setDragOverTab(null);
+                        }}
                       >
-                        {TAB_LABELS[tab]}{isTabFloating ? " ↗" : ""}
-                      </button>
+                        <button
+                          draggable
+                          onDragStart={(e) => { e.stopPropagation(); dragDroppedRef.current = false; isHtml5DraggingRef.current = true; setDraggingTab(tab); }}
+                          onDragEnd={(e) => {
+                            // mouseup may fire after dragend on some platforms; keep flag set briefly
+                            setTimeout(() => { isHtml5DraggingRef.current = false; }, 80);
+                            if (!dragDroppedRef.current && tabBarRef.current) {
+                              const rect = tabBarRef.current.getBoundingClientRect();
+                              if (e.clientY < rect.top - 40 || e.clientY > rect.bottom + 40 || e.clientX < rect.left - 80 || e.clientX > rect.right + 80) {
+                                void openTabAsWindow(tab, e.screenX, e.screenY);
+                              }
+                            }
+                            dragDroppedRef.current = false;
+                            setDraggingTab(null);
+                            setDragOverTab(null);
+                          }}
+                          onMouseDown={(e) => { e.stopPropagation(); handleTabMouseDown(e, tab); }}
+                          className={`flex-1 py-1 text-[0.625rem] font-medium transition-colors whitespace-nowrap overflow-hidden ${draggingTab === tab ? "opacity-40" : ""} ${
+                            isTabFloating
+                              ? "text-blue-400 border-b-2 border-blue-400 border-dashed bg-zinc-800/50"
+                              : rightTab === tab
+                              ? "text-white border-b-2 border-blue-500 bg-zinc-700"
+                              : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                          }`}
+                        >
+                          {TAB_LABELS[tab]}{isTabFloating ? "↗" : ""}
+                        </button>
+                        {/* × 제거 버튼 */}
+                        <button
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); handleRemoveTab(tab); }}
+                          title="탭 제거"
+                          className="absolute right-0.5 top-0.5 w-3.5 h-3.5 flex items-center justify-center text-[9px] text-zinc-600 hover:text-white hover:bg-zinc-600 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                        >×</button>
+                      </div>
                     );
                   })}
-                  {tabPage < totalPages - 1 && (
-                    <button
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={() => setTabPage((p) => p + 1)}
-                      className="px-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
-                    >›</button>
-                  )}
-                  {/* 전체 패널 도킹/분리 버튼 */}
-                  {panelFloating ? (
-                    <button
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={() => setPanelFloating(false)}
-                      title="도킹"
-                      className="px-1.5 text-zinc-500 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
-                    >⊟</button>
-                  ) : (
-                    <button
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={handleUndock}
-                      title="패널 분리"
-                      className="px-1.5 text-zinc-500 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
-                    >↗</button>
-                  )}
+                  {/* 현재 탭 새 창으로 분리 */}
+                  <button
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={handleUndock}
+                    title="현재 탭 새 창으로 분리"
+                    className="px-1.5 text-zinc-500 hover:text-white hover:bg-zinc-700 border-l border-zinc-700 flex-shrink-0 text-xs"
+                  >↗</button>
                 </div>
               );
             })()}
-            <div className="flex-1 overflow-hidden">
-              {openedWindows.has(rightTab) ? (
-                <div className="h-full flex items-center justify-center text-zinc-600 text-xs select-none">
-                  분리된 패널 — 탭을 클릭해 도킹
-                </div>
-              ) : (
-                <>
-                  {rightTab === "queue" && <QueuePanel />}
-                  {rightTab === "songs" && (
-                    <LibraryPanel
-                      mode="songs"
-                      initialEditSong={pendingEditSong}
-                      onEditSongConsumed={() => setPendingEditSong(null)}
-                    />
-                  )}
-                  {rightTab === "settings" && (
-                    <LayerSidebar
-                      layerConfig={layerConfig}
-                      activeItemId={activeItemId}
-                      onChange={handleLayerChange}
-                      onSaveGlobal={handleSaveGlobal}
-                      onSaveItem={handleSaveItem}
-                    />
-                  )}
-                  {rightTab === "alert" && <AlertPanel />}
-                  {rightTab === "looks" && (
-                    <LooksPanel
-                      currentLookId={currentLookId}
-                      onApplyLook={handleApplyLook}
-                      onLooksChanged={() => { looksDb.list().then(setLooks).catch((e) => console.error(e)); }}
-                      layerConfig={layerConfig}
-                    />
-                  )}
-                  {rightTab === "remote" && <RemotePanel />}
-                  {rightTab === "ndi" && <NdiPanel />}
-                  {rightTab === "announcement" && <AnnouncementPanel />}
-                </>
-              )}
-            </div>
+            {!panelFloating && (
+              <div className="flex-1 overflow-hidden">
+                {openedWindows.has(rightTab) ? (
+                  <div className="h-full flex items-center justify-center text-zinc-600 text-xs select-none">
+                    분리된 패널 — 탭을 클릭해 도킹
+                  </div>
+                ) : (
+                  <>
+                    {rightTab === "queue" && <QueuePanel />}
+                    {rightTab === "songs" && (
+                      <LibraryPanel
+                        mode="songs"
+                        initialEditSong={pendingEditSong}
+                        onEditSongConsumed={() => setPendingEditSong(null)}
+                      />
+                    )}
+                    {rightTab === "settings" && (
+                      <LayerSidebar
+                        layerConfig={layerConfig}
+                        activeItemId={activeItemId}
+                        onChange={handleLayerChange}
+                        onSaveGlobal={handleSaveGlobal}
+                        onSaveItem={handleSaveItem}
+                      />
+                    )}
+                    {rightTab === "alert" && <AlertPanel />}
+                    {rightTab === "looks" && (
+                      <LooksPanel
+                        currentLookId={currentLookId}
+                        onApplyLook={handleApplyLook}
+                        onLooksChanged={() => { looksDb.list().then(setLooks).catch((e) => console.error(e)); }}
+                        layerConfig={layerConfig}
+                      />
+                    )}
+                    {rightTab === "remote" && <RemotePanel />}
+                    {rightTab === "ndi" && <NdiPanel />}
+                    {rightTab === "announcement" && <AnnouncementPanel />}
+                    {rightTab === "video" && (
+                      <VideoPanel layerConfig={layerConfig} onChange={handleLayerChange} />
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+            </div>{/* ── 탭 패널 내부 래퍼 닫기 ── */}
+
+            {/* ── 레이어 패널 리사이저 (도킹 상태에서만) ───────────── */}
+            {!layerPanelFloating && (
+              <div
+                onMouseDown={handleLayerResizerMouseDown}
+                className="h-[5px] flex-shrink-0 cursor-row-resize bg-zinc-700 hover:bg-blue-500/60 active:bg-blue-500 transition-colors flex items-center justify-center group"
+                title="드래그로 높이 조절"
+              >
+                <div className="w-8 h-px bg-zinc-500 group-hover:bg-blue-300 rounded transition-colors" />
+              </div>
+            )}
+
+            {/* ── 레이어 패널 */}
+            {layerPanelFloating ? (
+              /* OS 창으로 분리됨 — 사이드바에 플레이스홀더 표시 */
+              <div className="border-t border-zinc-700 flex items-center justify-between px-2 py-1.5 bg-zinc-800/40 flex-shrink-0">
+                <span className="text-[10px] text-zinc-600">레이어 패널 (분리됨)</span>
+                <button
+                  onClick={() => setLayerPanelFloating(false)}
+                  className="text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-700 px-1.5 py-0.5 rounded"
+                  title="도킹"
+                >⊟ 도킹</button>
+              </div>
+            ) : (
+              <div style={{ height: layerPanelHeight, flexShrink: 0 }} className="border-t border-zinc-700 overflow-hidden">
+                <SidebarLayerPanel
+                  layerConfig={layerConfig}
+                  activeLayerId={activeLayerId}
+                  isFloating={false}
+                  onFloat={async () => {
+                    setLayerPanelFloating(true);
+                    try {
+                      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+                      const win = new WebviewWindow("layer-panel", {
+                        url: `${window.location.origin}/layer-panel`,
+                        title: "레이어",
+                        width: 260,
+                        height: 340,
+                        decorations: true,
+                        alwaysOnTop: true,
+                      });
+                      win.once("tauri://destroyed", () => setLayerPanelFloating(false));
+                    } catch {
+                      setLayerPanelFloating(false);
+                    }
+                  }}
+                  onDock={() => setLayerPanelFloating(false)}
+                  onDragHandleMouseDown={() => {}}
+                  onSelectLayer={(id) => {
+                    setActiveLayerId(id);
+                    setRightTab("settings");
+                    if (id.startsWith("canvas:")) {
+                      canvasRef.current?.selectBlock(id.slice("canvas:".length));
+                    } else if (id === "subtitle") {
+                      const slide = useQueueStore.getState().getActiveLyricSlide();
+                      if (slide) canvasRef.current?.selectBlock(`${slide.id}-lyric`);
+                    }
+                  }}
+                  onToggleVisible={handleLayerToggleVisible}
+                />
+              </div>
+            )}
           </div>
         )}
 
@@ -1697,6 +1940,7 @@ export default function ControllerPage() {
       )}
       {showCheatSheet && <ShortcutCheatSheet onClose={() => setShowCheatSheet(false)} />}
       <AboutDialog open={showAbout} onClose={() => setShowAbout(false)} />
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {showTemplateModal && (
         <TemplateModal
           onCreateService={(svc) => { handleLoadService(svc); setShowTemplateModal(false); }}

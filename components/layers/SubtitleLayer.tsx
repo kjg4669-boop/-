@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { flushSync } from "react-dom";
 import type { LayerConfig } from "@/lib/types";
 
 const positionMap = {
@@ -36,13 +35,13 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
   const [displayedLines, setDisplayedLines] = useState(activeLines);
   const [displayedLines2, setDisplayedLines2] = useState(config.lines2 ?? []);
   const [faded, setFaded] = useState(activeLines.length === 0);
-  const [slideY, setSlideY] = useState(0);
-  const [scale, setScale] = useState(1);
+  // animKey: incrementing this forces the inner content div to remount,
+  // which restarts the CSS @keyframes animation from its "from" state.
+  const [animKey, setAnimKey] = useState(0);
   const isFirstRender = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingLinesRef = useRef(activeLines);
   const pendingLines2Ref = useRef(config.lines2 ?? []);
-
 
   useEffect(() => {
     if (isFirstRender.current) {
@@ -69,28 +68,19 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
     // Step 1: fade out current content
     setFaded(true);
 
-    // Step 2: after fade-out, swap to new content and fade in
+    // Step 2: after fade-out, swap content and trigger CSS animation.
+    // All setState calls are in one batch → one React commit:
+    //   - outer div: opacity CSS transition fires (0 → config.opacity)
+    //   - inner div: remounts (animKey changed) → @keyframes animation starts from "from" state
+    // Both run simultaneously for FADE_MS duration.
     timerRef.current = setTimeout(() => {
       const lines = pendingLinesRef.current;
       const lines2 = pendingLines2Ref.current;
       if (lines.length > 0) {
-        // flushSync: synchronously commit new content at opacity:0 (+ initial transform).
-        // This guarantees the browser paints the "from" state before the CSS transition fires,
-        // working around React 18 automatic batching which would otherwise skip the intermediate frame.
-        if (config.textEntrance === "slide-up") {
-          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(40); });
-          // Double rAF: first frame paints the "from" state, second frame triggers the transition
-          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setSlideY(0); }));
-        } else if (config.textEntrance === "slide-down") {
-          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setSlideY(-40); });
-          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setSlideY(0); }));
-        } else if (config.textEntrance === "zoom-in") {
-          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); setScale(0.82); });
-          requestAnimationFrame(() => requestAnimationFrame(() => { setFaded(false); setScale(1); }));
-        } else {
-          flushSync(() => { setDisplayedLines(lines); setDisplayedLines2(lines2); });
-          requestAnimationFrame(() => setFaded(false));
-        }
+        setDisplayedLines(lines);
+        setDisplayedLines2(lines2);
+        setAnimKey(k => k + 1);
+        setFaded(false);
       }
       // lines.length === 0: keep faded=true (text stays hidden)
     }, fadeMsRef.current);
@@ -99,7 +89,17 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLinesKey, activeLines2Key]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeLinesKey, activeLines2Key]);
+
+  const hasTransformEntrance =
+    config.textEntrance === "slide-up" ||
+    config.textEntrance === "slide-down" ||
+    config.textEntrance === "zoom-in";
+
+  // Intensity → CSS custom property values
+  const intensity = config.textEntranceIntensity ?? 50;
+  const enterDist = `${Math.round(4 + intensity * 0.8)}px`; // 0→4px, 50→44px, 100→84px
+  const enterScale = `${(1 - (intensity / 100) * 0.6).toFixed(3)}`; // 0→1.0, 50→0.700, 100→0.400
 
   return (
     <div
@@ -116,24 +116,24 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
         justifyContent: positionMap[config.position],
         padding: `48px ${config.layout === "left-half" || config.layout === "right-half" ? "32px" : "64px"}`,
         opacity: faded ? 0 : config.opacity,
-        transform: (() => {
-          const parts: string[] = [];
-          if (config.textEntrance === "slide-up" || config.textEntrance === "slide-down") parts.push(`translateY(${slideY}px)`);
-          if (config.textEntrance === "zoom-in") parts.push(`scale(${scale})`);
-          return parts.length > 0 ? parts.join(" ") : undefined;
-        })(),
-        transition: `opacity ${FADE_MS}ms ease${
-          config.textEntrance === "slide-up" || config.textEntrance === "slide-down" || config.textEntrance === "zoom-in"
-            ? `, transform ${FADE_MS}ms ease` : ""
-        }`,
+        transition: `opacity ${FADE_MS}ms ease`,
         willChange: "opacity",
+        transform: "translateZ(0)",
         pointerEvents: "none",
       }}
     >
       {displayedLines.length > 0 && (
+        // key={animKey} forces remount on each slide → CSS @keyframes replays from its "from" state.
+        // The outer div handles opacity (CSS transition); this div handles transform (CSS animation).
         <div
+          key={animKey}
           style={{
             textAlign: config.textAlign ?? "center",
+            ...({ "--enter-dist": enterDist, "--enter-scale": enterScale } as React.CSSProperties),
+            animation:
+              hasTransformEntrance && FADE_MS > 0
+                ? `enter-${config.textEntrance} ${FADE_MS}ms ease forwards`
+                : undefined,
             ...(config.backgroundBoxVisible
               ? {
                   backgroundColor: `rgba(0,0,0,${config.backgroundBoxOpacity})`,

@@ -42,6 +42,17 @@ export async function emitEvent<T>(event: string, payload: T): Promise<void> {
   await tauriEvent.emit(event, payload);
 }
 
+// Emit an event to a specific target window (silently ignores if window not open)
+export async function emitToTarget<T>(target: string, event: string, payload: T): Promise<void> {
+  const tauriEvent = await getTauriEvent();
+  if (!tauriEvent) return;
+  try {
+    await tauriEvent.emitTo(target, event, payload);
+  } catch {
+    // Target window not open — ignore
+  }
+}
+
 // Listen to an event
 export async function listenEvent<T>(
   event: string,
@@ -151,6 +162,14 @@ export const ipc = {
   onSlideUpdateWithMeta: (cb: (layerConfig: LayerConfig, meta?: SlideMeta) => void) =>
     listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig, p.meta)),
 
+  // Preview-only update (always sent, even when !isLive — output window does NOT listen to this)
+  // Global emit: no other window listens to "preview:update", so this is safe.
+  sendPreviewUpdate: (layerConfig: LayerConfig): void => {
+    void emitEvent<SlideUpdatePayload>("preview:update", { layerConfig });
+  },
+  onPreviewUpdate: (cb: (layerConfig: LayerConfig) => void) =>
+    listenEvent<SlideUpdatePayload>("preview:update", (p) => cb(p.layerConfig)),
+
   // Stage closed notification (emitted from stage page on beforeunload)
   onStageClosed: (cb: () => void) => listenEvent("stage:closed", cb),
 
@@ -195,12 +214,20 @@ export const ipc = {
     invokeCommand<void>("stop_remote_server"),
   getLocalIp: () =>
     invokeCommand<string>("get_local_ip"),
-  sendRemoteState: (slideText: string, slideIndex: number, totalSlides: number) =>
+  sendRemoteState: (slideText: string, songTitle: string, slideIndex: number, totalSlides: number) =>
     invokeCommand<void>("send_remote_state", {
-      payload: JSON.stringify({ type: "state", slideText, slideIndex, totalSlides }),
+      payload: JSON.stringify({ type: "state", slideText, songTitle, slideIndex, totalSlides }),
     }),
   onRemoteCommand: (cb: (cmd: RemoteCommand) => void) =>
     listenEvent<RemoteCommand>("remote:command", cb),
+
+  // Output Preview window
+  openPreviewWindow: () =>
+    invokeCommand<void>("open_preview_window"),
+  closePreviewWindow: () =>
+    invokeCommand<void>("close_preview_window"),
+  onPreviewClosed: (cb: () => void) =>
+    listenEvent("preview:closed", cb),
 
   // NDI Output
   isNdiAvailable: () =>
@@ -217,6 +244,12 @@ export const ipc = {
     emitEvent<AnnouncementShowPayload>("announcement:show", payload),
   onAnnouncementShow: (cb: (payload: AnnouncementShowPayload) => void) =>
     listenEvent<AnnouncementShowPayload>("announcement:show", cb),
+
+  // Output scale mode
+  sendScaleMode: (mode: "fit" | "fill" | "native") =>
+    emitEvent<{ mode: "fit" | "fill" | "native" }>("output:scale-mode", { mode }),
+  onScaleMode: (cb: (mode: "fit" | "fill" | "native") => void) =>
+    listenEvent<{ mode: "fit" | "fill" | "native" }>("output:scale-mode", (p) => cb(p.mode)),
 
   // Stage private messages (visible only on stage display)
   sendStageMessage: (payload: StageMessagePayload) =>

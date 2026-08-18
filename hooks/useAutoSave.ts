@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Service } from "@/lib/types";
 import { serviceDb } from "@/lib/db";
 
-const AUTO_SAVE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const AUTO_SAVE_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes
 
 export function useAutoSave(
   currentService: Service | null,

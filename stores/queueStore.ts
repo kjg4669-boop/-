@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Service, ServiceItem, Song, LyricSlide, ScriptureSlide } from "@/lib/types";
+import type { Service, ServiceItem, ServiceItemSettings, Song, LyricSlide, ScriptureSlide } from "@/lib/types";
 import { getSlidesInOrder } from "@/lib/utils";
 
 // Module-level cache: invalidates automatically when currentService reference changes (Zustand immutable updates)
@@ -34,6 +34,7 @@ interface QueueState {
   nextLyricSlide: () => void;
   prevLyricSlide: () => void;
   updateServiceItems: (items: ServiceItem[]) => void;
+  updateItemSettingsJson: (itemId: number, settings: ServiceItemSettings) => void;
   reorderItemsAndActive: (items: ServiceItem[], newActiveIndex: number) => void;
   updateCurrentServiceNotes: (notes: string) => void;
   updateItemNotesInStore: (itemId: number, notes: string) => void;
@@ -161,6 +162,17 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     }
   },
 
+  // Update a single item's settings_json without marking the service dirty
+  // (design settings are persisted directly to DB — no file-level save needed)
+  updateItemSettingsJson: (itemId, settings) => {
+    const { currentService } = get();
+    if (!currentService) return;
+    const items: ServiceItem[] = currentService.items.map((it) =>
+      it.id === itemId ? { ...it, settings_json: settings } : it
+    );
+    set({ currentService: { ...currentService, items } });
+  },
+
   reorderItemsAndActive: (items, newActiveIndex) => {
     const { currentService } = get();
     if (currentService) {
@@ -183,7 +195,7 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   updateCurrentServiceNotes: (notes) => {
     const { currentService } = get();
     if (currentService) {
-      set({ currentService: { ...currentService, notes } });
+      set({ currentService: { ...currentService, notes }, isDirty: true });
     }
   },
 

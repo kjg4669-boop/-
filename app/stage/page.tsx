@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc, emitEvent, isTauri } from "@/lib/ipc";
-import type { LayerConfig, SlideMeta } from "@/lib/types";
+import type { LayerConfig, SlideMeta, CountdownPayload } from "@/lib/types";
 import { SECTION_LABEL } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import AlertBanner from "@/components/AlertBanner";
 
 function ClockDisplay() {
   const [time, setTime] = useState("");
@@ -34,6 +35,7 @@ export default function StagePage() {
   const [meta, setMeta] = useState<SlideMeta | null>(null);
   const [stageAlert, setStageAlert] = useState<{ text: string; position: string; bgColor: string; textColor: string; } | null>(null);
   const [stageMsg, setStageMsg] = useState<{ text: string } | null>(null);
+  const [countdown, setCountdown] = useState<CountdownPayload | null>(null);
   const unlistenRefs = useRef<Array<() => void>>([]);
   const stageAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -44,26 +46,9 @@ export default function StagePage() {
 
   // Notify controller when this window is closed via OS close button
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    async function setupCloseHandler() {
-      if (!isTauri()) {
-        // Browser fallback (best-effort, async may not complete before unload)
-        const onUnload = () => { void emitEvent("stage:closed", {}); };
-        window.addEventListener("beforeunload", onUnload);
-        unlisten = () => window.removeEventListener("beforeunload", onUnload);
-        return;
-      }
-      // Tauri: intercept close request to guarantee async emit before destroy
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      unlisten = await win.onCloseRequested(async (event) => {
-        event.preventDefault();
-        await emitEvent("stage:closed", {});
-        await win.destroy();
-      });
-    }
-    void setupCloseHandler();
-    return () => { unlisten?.(); };
+    const onUnload = () => { void emitEvent("stage:closed", {}); };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
   }, []);
 
   useEffect(() => {
@@ -102,8 +87,13 @@ export default function StagePage() {
         setStageMsg(p.visible && p.text ? { text: p.text } : null);
       });
 
+      const unlistenCountdown = await ipc.onCountdown((p) => {
+        if (!mounted) return;
+        setCountdown(p.active ? p : null);
+      });
+
       if (mounted) {
-        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg);
+        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg, unlistenCountdown);
         // Signal ready so controller re-sends current state
         await ipc.sendOutputReady();
       } else {
@@ -111,6 +101,7 @@ export default function StagePage() {
         unlisten();
         unlistenAlert();
         unlistenStageMsg();
+        unlistenCountdown();
       }
     }
     void setup();
@@ -123,6 +114,7 @@ export default function StagePage() {
   }, [handleUpdate]);
 
   const currentLines = layerConfig?.subtitle?.lines ?? [];
+  const currentLines2 = layerConfig?.subtitle?.bilingualEnabled ? (layerConfig.subtitle.lines2 ?? []) : [];
   const nextLines = meta?.nextLines ?? [];
   const nextSection = meta?.nextSection ?? "";
 
@@ -177,6 +169,15 @@ export default function StagePage() {
           </>
         )}
         {!meta && <div style={{ marginLeft: "auto" }} />}
+        {countdown && (
+          <span style={{
+            fontSize: 15, fontWeight: 700, fontFamily: "monospace",
+            color: countdown.remainingMs <= 60000 ? "#f97316" : "#a78bfa",
+            background: "rgba(0,0,0,0.3)", borderRadius: 4, padding: "2px 8px",
+          }}>
+            ⏳ {Math.floor(countdown.remainingMs / 60000)}:{String(Math.floor((countdown.remainingMs % 60000) / 1000)).padStart(2, "0")}
+          </span>
+        )}
         <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginLeft: meta ? 0 : "auto" }}>
           <ClockDisplay />
         </span>
@@ -235,6 +236,25 @@ export default function StagePage() {
                 {line}
               </p>
             ))}
+            {currentLines2.length > 0 && (
+              <div style={{ marginTop: 8, opacity: 0.7 }}>
+                {currentLines2.map((line, i) => (
+                  <p
+                    key={i}
+                    style={{
+                      fontSize: 32,
+                      fontWeight: 400,
+                      fontStyle: "italic",
+                      color: "#cccccc",
+                      lineHeight: 1.4,
+                      margin: "2px 0",
+                    }}
+                  >
+                    {line}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ textAlign: "center", color: "rgba(255,255,255,0.2)" }}>
@@ -322,32 +342,12 @@ export default function StagePage() {
       )}
       {/* Alert overlay */}
       {stageAlert && (
-        <div
-          style={{
-            position: "absolute",
-            ...(stageAlert.position === "top"
-              ? { top: 0, left: 0, right: 0 }
-              : stageAlert.position === "center"
-              ? { top: "50%", left: 0, right: 0, transform: "translateY(-50%)" }
-              : { bottom: 0, left: 0, right: 0 }),
-            zIndex: 60,
-            background: stageAlert.bgColor,
-            ...(stageAlert.position === "bottom"
-              ? { borderTop: "3px solid #f97316" }
-              : stageAlert.position === "top"
-              ? { borderBottom: "3px solid #f97316" }
-              : {}),
-            color: stageAlert.textColor,
-            padding: "18px 40px",
-            textAlign: "center",
-            fontSize: 42,
-            fontWeight: 600,
-            letterSpacing: "0.01em",
-            pointerEvents: "none",
-          }}
-        >
-          {stageAlert.text}
-        </div>
+        <AlertBanner
+          text={stageAlert.text}
+          position={stageAlert.position as "top" | "center" | "bottom"}
+          bgColor={stageAlert.bgColor}
+          textColor={stageAlert.textColor}
+        />
       )}
     </div>
     </ErrorBoundary>

@@ -38,6 +38,15 @@ export function parseLyricSlide(v: unknown): LyricSlide | null {
     ? (v.lines as unknown[]).filter((l): l is string => typeof l === "string")
     : [];
   const result: LyricSlide = { id: v.id, section, sectionIndex, lines };
+  // Preserve bilingual lyrics (lines2)
+  if (Array.isArray(v.lines2)) {
+    const l2 = (v.lines2 as unknown[]).filter((l): l is string => typeof l === "string");
+    if (l2.length > 0) result.lines2 = l2;
+  }
+  // Preserve chord line
+  if (typeof v.chords === "string" && v.chords) {
+    result.chords = v.chords;
+  }
   // Preserve canvas text blocks (free-position layout from SlideCanvas editor)
   if (isObject(v.canvas) && Array.isArray((v.canvas as Record<string, unknown>).textBlocks)) {
     result.canvas = v.canvas as LyricSlide["canvas"];

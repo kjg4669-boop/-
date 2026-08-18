@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { songDb, mediaDb, serviceDb, tagDb } from "@/lib/db";
 import type { Tag } from "@/lib/db";
 import { songUsageDb, type SongUsageStat } from "@/lib/songUsageDb";
@@ -222,9 +222,10 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
         return;
       }
       const header = "곡 제목,아티스트,CCLI 번호,사용 횟수,마지막 사용일\n";
+      const esc = (s: string) => s.replace(/"/g, '""');
       const body = rows.map(r => {
         const date = r.last_used ? new Date(r.last_used).toLocaleDateString("ko-KR") : "";
-        return `"${r.title}","${r.artist}","${r.ccli_number ?? ""}",${r.count},"${date}"`;
+        return `"${esc(r.title)}","${esc(r.artist)}","${esc(r.ccli_number ?? "")}",${r.count},"${esc(date)}"`;
       }).join("\n");
       const csv = header + body;
 
@@ -286,6 +287,15 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
     }
   }
 
+  const filteredSongs = useMemo(() => {
+    const sorted = sort === "title"
+      ? [...songs].sort((a, b) => a.title.localeCompare(b.title, "ko"))
+      : [...songs].sort((a, b) => b.id - a.id);
+    return filterTagId === null
+      ? sorted
+      : sorted.filter((s) => (songTagMap[s.id] ?? []).some((t) => t.id === filterTagId));
+  }, [songs, sort, filterTagId, songTagMap]);
+
   // Song edit mode
   if (mode === "songs" && editMode) {
     return (
@@ -327,9 +337,23 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           <input ref={pptxInputRef} type="file" accept=".pptx" onChange={handlePptxFile} className="hidden" />
           <input ref={openLPInputRef} type="file" accept=".xml" multiple onChange={handleOpenLPFiles} className="hidden" />
           <button
+            onClick={handleNewSong}
+            className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded whitespace-nowrap font-medium shrink-0"
+          >
+            + 새 찬양
+          </button>
+          <button
+            onClick={() => setSort((s) => s === "title" ? "recent" : "title")}
+            title={sort === "title" ? "제목순 정렬 중 (클릭: 최신순)" : "최신순 정렬 중 (클릭: 제목순)"}
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap text-zinc-400 shrink-0"
+          >
+            {sort === "title" ? "가나다↑" : "최신↓"}
+          </button>
+          <button
             onClick={() => pptxInputRef.current?.click()}
             disabled={pptxLoading}
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap"
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap shrink-0"
+            title="PPTX 파일 임포트"
           >
             {pptxLoading ? "..." : "PPTX"}
           </button>
@@ -337,36 +361,23 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
             onClick={() => openLPInputRef.current?.click()}
             disabled={openLPLoading}
             title="OpenLP / OpenLyrics XML 파일 임포트"
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap"
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded whitespace-nowrap shrink-0"
           >
             {openLPLoading ? "..." : "OpenLP"}
           </button>
           <button
-            onClick={() => setSort((s) => s === "title" ? "recent" : "title")}
-            title={sort === "title" ? "제목순 정렬 중 (클릭: 최신순)" : "최신순 정렬 중 (클릭: 제목순)"}
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap text-zinc-400"
+            onClick={handleExportCcliReport}
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-400 hover:text-zinc-200 shrink-0"
+            title="CCLI 사용 보고서 내보내기 (CSV)"
           >
-            {sort === "title" ? "가나다↑" : "최신↓"}
-          </button>
-          <button
-            onClick={handleNewSong}
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded whitespace-nowrap"
-          >
-            + 새 찬양
+            CCLI
           </button>
           <button
             onClick={openHelpWindow}
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-400 hover:text-white"
+            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-400 hover:text-white shrink-0"
             title="도움말"
           >
             ?
-          </button>
-          <button
-            onClick={handleExportCcliReport}
-            className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 rounded text-zinc-300 shrink-0"
-            title="CCLI 사용 보고서 내보내기 (CSV)"
-          >
-            CCLI 보고서
           </button>
         </div>
         {/* Tag filter row */}
@@ -399,12 +410,7 @@ export default function LibraryPanel({ mode = "media", initialEditSong, onEditSo
           </div>
         )}
         <div className="flex-1 overflow-y-auto">
-          {(sort === "title"
-            ? [...songs].sort((a, b) => a.title.localeCompare(b.title, "ko"))
-            : [...songs].sort((a, b) => b.id - a.id)
-          ).filter((song) =>
-            filterTagId === null || (songTagMap[song.id] ?? []).some((t) => t.id === filterTagId)
-          ).map((song) => (
+          {filteredSongs.map((song) => (
             <div
               key={song.id}
               className="flex items-center group px-3 py-2 text-xs border-b border-zinc-800 hover:bg-zinc-700 cursor-pointer select-none relative"

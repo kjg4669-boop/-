@@ -553,9 +553,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                   </span>
                   <button
                     onClick={async () => {
-                      const songId = song?.id;
-                      await backingTrackDb.delete(track.id);
-                      if (songId) setBackingTracks(await backingTrackDb.list(songId));
+                      try {
+                        const songId = song?.id;
+                        await backingTrackDb.delete(track.id);
+                        if (songId) setBackingTracks(await backingTrackDb.list(songId));
+                      } catch { /* ignore */ }
                     }}
                     className="text-zinc-600 hover:text-red-400 text-xs px-1"
                   >✕</button>
@@ -566,9 +568,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                     type="range" min={0} max={1} step={0.05}
                     value={track.volume}
                     onChange={async (e) => {
-                      const volume = Number(e.target.value);
-                      await backingTrackDb.update(track.id, { volume });
-                      setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, volume } : t));
+                      try {
+                        const volume = Number(e.target.value);
+                        await backingTrackDb.update(track.id, { volume });
+                        setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, volume } : t));
+                      } catch { /* ignore */ }
                     }}
                     className="flex-1"
                   />
@@ -578,9 +582,11 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                       type="checkbox"
                       checked={track.repeat}
                       onChange={async (e) => {
-                        const repeat = e.target.checked;
-                        await backingTrackDb.update(track.id, { repeat });
-                        setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, repeat } : t));
+                        try {
+                          const repeat = e.target.checked;
+                          await backingTrackDb.update(track.id, { repeat });
+                          setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, repeat } : t));
+                        } catch { /* ignore */ }
                       }}
                       className="rounded"
                     />

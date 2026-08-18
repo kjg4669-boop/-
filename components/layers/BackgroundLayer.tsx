@@ -7,18 +7,35 @@ import { ipc, emitEvent } from "@/lib/ipc";
 
 interface Props {
   config: LayerConfig["background"];
+  skipPlaybackEmit?: boolean;
+  /** When true, keep video paused (e.g. preview window during standby) */
+  paused?: boolean;
 }
 
-export default function BackgroundLayer({ config }: Props) {
+export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
+  // Load and play when src changes (skip play if paused prop is set)
   useEffect(() => {
     if (videoRef.current && config.type === "video" && config.src) {
       const video = videoRef.current;
       video.load();
-      video.play().then(() => { video.muted = false; }).catch(() => {});
+      if (!pausedRef.current) {
+        video.play().then(() => { video.muted = false; }).catch(() => {});
+      }
     }
   }, [config.src, config.type]);
+
+  // Pause/resume when paused prop changes
+  useEffect(() => {
+    if (config.type !== "video") return;
+    const vid = videoRef.current;
+    if (!vid) return;
+    if (paused) vid.pause();
+    else vid.play().then(() => { vid.muted = false; }).catch(() => {});
+  }, [paused, config.type]);
 
   // video:control IPC 리스너
   useEffect(() => {
@@ -39,7 +56,7 @@ export default function BackgroundLayer({ config }: Props) {
 
   // playback:status 주기적 emit (500ms) — Controller의 진행 바에 사용
   useEffect(() => {
-    if (config.type !== "video") return;
+    if (config.type !== "video" || skipPlaybackEmit) return;
     const interval = setInterval(() => {
       const vid = videoRef.current;
       if (vid && vid.duration) {
@@ -51,7 +68,7 @@ export default function BackgroundLayer({ config }: Props) {
       }
     }, 500);
     return () => clearInterval(interval);
-  }, [config.type, config.src]);
+  }, [config.type, config.src, skipPlaybackEmit]);
 
   const baseStyle: React.CSSProperties = {
     position: "absolute",
@@ -91,21 +108,25 @@ export default function BackgroundLayer({ config }: Props) {
 
   if (config.type === "video" && config.src) {
     const displayUrl = toDisplayUrl(config.src);
+    // Wrap video in a div: WebKit/WKWebView <video> elements can escape their stacking context
+    // and render above sibling layers regardless of z-index. Containing the video inside a
+    // positioned div forces it to respect the parent's stacking order.
     return (
-      <video
-        ref={videoRef}
-        autoPlay
-        loop={config.loop ?? true}
-        muted
-        playsInline
-        src={displayUrl}
-        style={{
-          ...baseStyle,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-        }}
-      />
+      <div style={{ ...baseStyle, overflow: "hidden" }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          loop={config.loop ?? true}
+          muted
+          playsInline
+          src={displayUrl}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          onCanPlay={(e) => {
+            // Honour paused prop immediately when video is ready to play
+            if (pausedRef.current) (e.target as HTMLVideoElement).pause();
+          }}
+        />
+      </div>
     );
   }
 

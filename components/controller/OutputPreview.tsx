@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { flushSync } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import type { LayerConfig } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
@@ -39,11 +38,22 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   // ── 캔버스 블록 두 슬롯 크로스페이드 ───────────────────────────────
   const [canvasSlots, setCanvasSlots] = useState<[typeof canvasBlocks, typeof canvasBlocks]>([canvasBlocks, []]);
   const [activeCanvasSlot, setActiveCanvasSlot] = useState<0 | 1>(0);
-  const [canvasSlotTransforms, setCanvasSlotTransforms] = useState<[string | undefined, string | undefined]>([undefined, undefined]);
+  // slotAnimKeys: -1 means no animation (initial render). Incrementing forces inner div remount → @keyframes restart.
+  const [canvasSlotAnimKeys, setCanvasSlotAnimKeys] = useState<[number, number]>([-1, -1]);
   const currentCanvasSlot = useRef<0 | 1>(0);
   const isCanvasFirstRender = useRef(true);
 
   // 개발자 디버그
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Pause video when output is not live (standby), play when live
+  useEffect(() => {
+    const v = previewVideoRef.current;
+    if (!v) return;
+    if (isLive) v.play().catch(() => {});
+    else v.pause();
+  }, [isLive]);
+
   const [showDebug, setShowDebug] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
 
@@ -57,6 +67,12 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
+      // 첫 변경은 애니메이션 없이 현재 슬롯 내용만 업데이트
+      setSlots(prev => {
+        const next: [string[], string[]] = [prev[0], prev[1]];
+        next[currentSlot.current] = activeLines;
+        return next;
+      });
       return;
     }
 
@@ -91,6 +107,11 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   useEffect(() => {
     if (isCanvasFirstRender.current) {
       isCanvasFirstRender.current = false;
+      setCanvasSlots(prev => {
+        const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]];
+        next[currentCanvasSlot.current] = canvasBlocks;
+        return next;
+      });
       return;
     }
     if (sub.textEntrance === "none") {
@@ -104,24 +125,11 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
     const nextSlot = (1 - currentCanvasSlot.current) as 0 | 1;
     currentCanvasSlot.current = nextSlot;
 
-    const entrance = sub.textEntrance;
-    if (entrance === "slide-up" || entrance === "slide-down" || entrance === "zoom-in") {
-      const initTransform =
-        entrance === "slide-up" ? "translateY(10px)"
-        : entrance === "slide-down" ? "translateY(-10px)"
-        : "scale(0.82)";
-      flushSync(() => {
-        setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
-        setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = initTransform; return next; });
-      });
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setActiveCanvasSlot(nextSlot);
-        setCanvasSlotTransforms(prev => { const next: [string | undefined, string | undefined] = [prev[0], prev[1]]; next[nextSlot] = undefined; return next; });
-      }));
-    } else {
-      setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
-      setActiveCanvasSlot(nextSlot);
-    }
+    // All setState calls batched → one commit:
+    //   outer slot div opacity transition fires; inner div remounts → @keyframes restarts.
+    setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
+    setActiveCanvasSlot(nextSlot);
+    setCanvasSlotAnimKeys(prev => { const next: [number, number] = [prev[0], prev[1]]; next[nextSlot]++; return next; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasBlocksKey]);
 
@@ -138,6 +146,18 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
 
   const positionJustify: Record<string, string> = { top: "flex-start", center: "center", bottom: "flex-end" };
   const scaledFontSize = Math.max(8, sub.fontSize * SCALE);
+
+  const hasTransformEntrance =
+    sub.textEntrance === "slide-up" ||
+    sub.textEntrance === "slide-down" ||
+    sub.textEntrance === "zoom-in";
+
+  const intensity = sub.textEntranceIntensity ?? 50;
+  // Canvas blocks are already in preview pixel space (scaled by SCALE externally),
+  // so the animation distance must also be scaled.
+  const enterDistPx = Math.round(4 + intensity * 0.8);
+  const enterDistScaled = `${Math.round(enterDistPx * SCALE)}px`;
+  const enterScale = `${(1 - (intensity / 100) * 0.6).toFixed(3)}`;
 
   const renderLines = (lines: string[]) => {
     if (lines.length === 0) return null;
@@ -191,62 +211,94 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
     >
       {/* 배경 */}
       {bg.type !== "video" && <div className="absolute inset-0" style={bgStyle} />}
-      {bg.type === "video" && (
-        <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center">
-          <span className="text-zinc-600 text-xs">▶ 영상</span>
-        </div>
-      )}
+      {bg.type === "video" && (() => {
+        const url = bg.src ? toDisplayUrl(bg.src) : null;
+        return url ? (
+          // Wrap in positioned div: WebKit/WKWebView <video> escapes stacking context
+          // and renders above siblings regardless of z-index
+          <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 10 }}>
+            <video
+              ref={previewVideoRef}
+              src={url}
+              muted
+              autoPlay
+              loop={bg.loop ?? true}
+              playsInline
+              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: bg.opacity ?? 1 }}
+            />
+          </div>
+        ) : (
+          <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center" style={{ zIndex: 10 }}>
+            <span className="text-zinc-600 text-xs select-none">▶ 영상</span>
+          </div>
+        );
+      })()}
 
       {/* 블랙아웃 */}
-      {isBlackout && <div className="absolute inset-0 bg-black" />}
+      {isBlackout && <div className="absolute inset-0 bg-black" style={{ zIndex: 90 }} />}
 
       {/* 자막 슬롯 0 */}
       {!isBlackout && (
-        <div className="absolute inset-0 flex flex-col px-1" style={slotStyle(0)}>
+        <div className="absolute inset-0 flex flex-col px-1" style={{ ...slotStyle(0), zIndex: 20 }}>
           {renderLines(slots[0])}
         </div>
       )}
       {/* 자막 슬롯 1 */}
       {!isBlackout && (
-        <div className="absolute inset-0 flex flex-col px-1" style={slotStyle(1)}>
+        <div className="absolute inset-0 flex flex-col px-1" style={{ ...slotStyle(1), zIndex: 20 }}>
           {renderLines(slots[1])}
         </div>
       )}
 
       {/* 캔버스 텍스트 블록 (두 슬롯 크로스페이드) */}
       {([0, 1] as const).map((idx) => (
+        // Outer div: stable key, handles opacity crossfade via CSS transition
         <div
           key={idx}
           className="absolute inset-0"
           style={{
             opacity: activeCanvasSlot === idx ? 1 : 0,
-            transform: canvasSlotTransforms[idx],
-            transition: `opacity ${fadeMsRef.current}ms ease, transform ${fadeMsRef.current}ms ease`,
+            transition: `opacity ${fadeMsRef.current}ms ease`,
             pointerEvents: "none",
+            zIndex: 30,
+            transform: "translateZ(0)",
           }}
         >
-          {!isBlackout && canvasSlots[idx as 0 | 1].map((block) => (
-            <div
-              key={block.id}
-              style={{
-                position: "absolute",
-                left: block.x * SCALE,
-                top: (block.y ?? 0) * SCALE,
-                width: block.width * SCALE,
-                fontSize: Math.max(6, block.fontSize * SCALE),
-                fontFamily: block.fontFamily,
-                fontWeight: block.fontWeight ?? "normal",
-                fontStyle: block.fontStyle ?? "normal",
-                color: block.color,
-                textAlign: block.textAlign ?? "left",
-                lineHeight: 1.25,
-                overflow: "hidden",
-                pointerEvents: "none",
-              }}
-            >
-              {block.text}
-            </div>
-          ))}
+          {/* Inner div: key changes when slot activates → remount → @keyframes restarts */}
+          <div
+            key={canvasSlotAnimKeys[idx]}
+            className="absolute inset-0"
+            style={{
+              ...({ "--enter-dist": enterDistScaled, "--enter-scale": enterScale } as React.CSSProperties),
+              animation:
+                hasTransformEntrance && FADE_MS > 0 && canvasSlotAnimKeys[idx] >= 0
+                  ? `enter-${sub.textEntrance} ${FADE_MS}ms ease forwards`
+                  : undefined,
+            }}
+          >
+            {!isBlackout && canvasSlots[idx as 0 | 1].map((block) => (
+              <div
+                key={block.id}
+                style={{
+                  position: "absolute",
+                  left: block.x * SCALE,
+                  top: (block.y ?? 0) * SCALE,
+                  width: block.width * SCALE,
+                  fontSize: Math.max(6, block.fontSize * SCALE),
+                  fontFamily: block.fontFamily,
+                  fontWeight: block.fontWeight ?? "normal",
+                  fontStyle: block.fontStyle ?? "normal",
+                  color: block.color,
+                  textAlign: block.textAlign ?? "left",
+                  lineHeight: 1.25,
+                  overflow: "hidden",
+                  pointerEvents: "none",
+                }}
+              >
+                {block.text}
+              </div>
+            ))}
+          </div>
         </div>
       ))}
 

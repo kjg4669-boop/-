@@ -216,6 +216,11 @@ pub fn run() {
 
             let data_menu = Submenu::with_items(app, "데이터", true, &[&d_backup, &d_restore])?;
 
+            // ── 설정 메뉴 ──────────────────────────────────────────────────
+            let cfg_open  = MenuItem::with_id(app, "open_settings", "설정...", true, Some("CmdOrCtrl+,"))?;
+
+            let settings_menu = Submenu::with_items(app, "설정", true, &[&cfg_open])?;
+
             // ── 도움 메뉴 ──────────────────────────────────────────────────
             let h_guide   = MenuItem::with_id(app, "show_help_guide",   "UI 가이드 보기",         true, None::<&str>)?;
             let h_onboard = MenuItem::with_id(app, "reset_onboarding",  "시작 가이드 다시 보기",  true, None::<&str>)?;
@@ -227,7 +232,7 @@ pub fn run() {
             ])?;
 
             // ── 메뉴 등록 ──────────────────────────────────────────────────
-            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &view_menu, &data_menu, &help_menu])?;
+            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &view_menu, &data_menu, &settings_menu, &help_menu])?;
             app.set_menu(menu)?;
 
             // ── 메뉴 이벤트 핸들러 ─────────────────────────────────────────
@@ -255,6 +260,7 @@ pub fn run() {
                         "reset_onboarding" => { win.emit("menu:reset-onboarding", ()).ok(); }
                         "show_about"       => { win.emit("menu:about", ()).ok(); }
                         "open_preview_output" => { win.emit("menu:open-preview", ()).ok(); }
+                        "open_settings"    => { win.emit("menu:open-settings", ()).ok(); }
                         "toggle_devtools" => {
                             win.open_devtools();
                             win.emit("menu:toggle-devmode", ()).ok();

@@ -3,7 +3,7 @@
 import type { LayerConfig, Look } from "@/lib/types";
 import { FONT_OPTIONS } from "@/lib/constants";
 
-type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "slideshow" | "review" | "view";
+type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
 
 type FmtPatch = {
   fontFamily?: string;
@@ -87,11 +87,15 @@ interface Props {
   looks: Look[];
   currentLookId: number | null;
   onApplyLook: (look: Look | null) => void;
+
+  removedPanels?: string[];
+  panelLabels?: Record<string, string>;
+  onRestorePanel?: (tab: string) => void;
 }
 
 const TAB_LABELS: Record<RibbonTab, string> = {
   home: "홈", insert: "삽입", design: "디자인", transition: "전환",
-  animation: "애니메이션", slideshow: "슬라이드 쇼", review: "검토", view: "보기",
+  animation: "애니메이션", review: "검토", view: "보기",
 };
 
 export default function RibbonToolbar({
@@ -110,6 +114,7 @@ export default function RibbonToolbar({
   soundName, soundPlaying, onToggleSound, onInsertSound,
   onOpenDesignPanel, onShowAbout,
   looks, currentLookId, onApplyLook,
+  removedPanels, panelLabels, onRestorePanel,
 }: Props) {
   function setSubtitle(patch: Partial<LayerConfig["subtitle"]>) {
     onLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
@@ -367,42 +372,27 @@ export default function RibbonToolbar({
               </button>
             ))}
           </div>
+          {/* Intensity slider — only for transform entrances */}
+          {(layerConfig.subtitle.textEntrance === "slide-up" ||
+            layerConfig.subtitle.textEntrance === "slide-down" ||
+            layerConfig.subtitle.textEntrance === "zoom-in") && (
+            <div className="flex items-center gap-1.5 border-r border-zinc-600 pr-3 mr-1">
+              <span className="text-zinc-400 text-xs">강도</span>
+              <input
+                type="range"
+                min={0} max={100} step={1}
+                value={layerConfig.subtitle.textEntranceIntensity ?? 50}
+                onChange={(e) => setSubtitle({ textEntranceIntensity: Number(e.target.value) })}
+                className="w-20"
+              />
+              <span className="text-zinc-500 text-xs w-7 text-right">
+                {layerConfig.subtitle.textEntranceIntensity ?? 50}%
+              </span>
+            </div>
+          )}
           <span className="text-zinc-500 text-xs ml-2">새 슬라이드 표시 시 텍스트 효과</span>
         </>)}
 
-        {ribbonTab === "slideshow" && (<>
-          <div className="flex items-center gap-1 border-r border-zinc-600 pr-3 mr-2">
-            <button onClick={onFromStart}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">⏮</span>
-              <span className="text-[10px] mt-0.5">처음부터</span>
-            </button>
-            <button onClick={onOpenOutput}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">▶</span>
-              <span className="text-[10px] mt-0.5">현재부터</span>
-            </button>
-            <button onClick={onCloseOutput}
-              className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
-              <span className="text-base leading-none">⏹</span>
-              <span className="text-[10px] mt-0.5">종료</span>
-            </button>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={onToggleLoop}
-              className={`px-2 h-6 rounded text-xs ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              ↺ 루프
-            </button>
-            <button onClick={onToggleBlackout}
-              className={`px-2 h-6 rounded text-xs ${isBlackout ? "bg-red-700 text-red-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              ● 블랙
-            </button>
-            <button onClick={onToggleClear}
-              className={`px-2 h-6 rounded text-xs ${isClear ? "bg-orange-700 text-orange-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-              자막 숨김
-            </button>
-          </div>
-        </>)}
 
         {ribbonTab === "review" && (<>
           <div className="flex items-center gap-2">
@@ -438,6 +428,20 @@ export default function RibbonToolbar({
             <span className="text-base leading-none">🖥</span>
             <span className="text-[10px] mt-0.5">출력 미리보기</span>
           </button>
+          {removedPanels && removedPanels.length > 0 && (
+            <div className="flex items-center gap-0.5 border-l border-zinc-600 pl-2 ml-1">
+              {removedPanels.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => onRestorePanel?.(tab)}
+                  title={`${panelLabels?.[tab] ?? tab} 패널 복원`}
+                  className="px-1.5 py-1 text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-700 rounded transition-colors"
+                >
+                  {panelLabels?.[tab] ?? tab}
+                </button>
+              ))}
+            </div>
+          )}
         </>)}
 
         {ribbonTab === "insert" && (<>

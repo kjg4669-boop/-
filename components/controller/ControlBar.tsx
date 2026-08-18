@@ -1,5 +1,9 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
+import type { DisplayInfo } from "@/lib/types";
+import type { OutputScaleMode } from "@/stores/settingsStore";
+
 interface Props {
   serviceName: string | null;
   isDirty: boolean;
@@ -36,6 +40,12 @@ interface Props {
   onSendAlert: () => void;
   onClearAlert: () => void;
 
+  displays: DisplayInfo[];
+  selectedDisplayIdx: number;
+  onSelectDisplay: (idx: number) => void;
+  onOpenPreviewOnly: () => void;
+  outputScaleMode: OutputScaleMode;
+  onSetScaleMode: (mode: OutputScaleMode) => void;
   outputConnected: boolean;
   onOpenOutput: () => void;
   isStageOpen: boolean;
@@ -53,7 +63,6 @@ interface Props {
   onToggleCountdown: () => void;
   onResetCountdown: () => void;
 
-  clock: string;
   showPanel: boolean;
   onTogglePanel: () => void;
   onShowCheatSheet: () => void;
@@ -68,12 +77,32 @@ export default function ControlBar({
   autoAdvance, onToggleAutoAdvance, autoAdvanceMs, onChangeAutoAdvanceMs, autoProgress,
   isVideoBackground, videoSrc, videoPlaying, onToggleVideoPlay,
   alertInput, onSetAlertInput, alertActive, onSendAlert, onClearAlert,
+  displays, selectedDisplayIdx, onSelectDisplay, onOpenPreviewOnly,
+  outputScaleMode, onSetScaleMode,
   outputConnected, onOpenOutput,
   isStageOpen, onToggleStage,
   stageMsgText, onSetStageMsgText, stageMsgActive, onSendStageMsg, onClearStageMsg,
   countdownMin, onSetCountdownMin, countdownActive, countdownRemainingMs, onToggleCountdown, onResetCountdown,
-  clock, showPanel, onTogglePanel, onShowCheatSheet,
+  showPanel, onTogglePanel, onShowCheatSheet,
 }: Props) {
+  const [showOutputMenu, setShowOutputMenu] = useState(false);
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
+  const outputBtnRef = useRef<HTMLButtonElement>(null);
+  const outputMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showOutputMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        outputMenuRef.current && !outputMenuRef.current.contains(e.target as Node) &&
+        outputBtnRef.current && !outputBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowOutputMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showOutputMenu]);
+
   const countdownLabel = countdownActive
     ? countdownRemainingMs > 0
       ? `⏳ ${Math.floor(countdownRemainingMs / 60000)}:${String(Math.floor((countdownRemainingMs % 60000) / 1000)).padStart(2, "0")}`
@@ -108,10 +137,10 @@ export default function ControlBar({
       )}
       <div className="flex-1" />
 
-      <button onClick={onToggleLive} title="라이브 (F5) — 켜면 슬라이드 선택이 즉시 출력 화면에 반영됩니다. 끄면 화면이 고정됩니다."
-        className={`flex items-center gap-1 px-2 py-1 rounded font-semibold ${isLive ? "bg-green-700 hover:bg-green-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${isLive ? "bg-green-300" : "bg-zinc-500"}`} />
-        {isLive ? "라이브" : "대기"}
+      <button onClick={onToggleLive} title="송출 (F5) — 켜면 슬라이드 선택이 즉시 출력 화면에 반영됩니다. 끄면 화면이 고정됩니다."
+        className={`flex items-center gap-1 px-2 py-1 rounded font-semibold ${isLive ? "bg-red-700 hover:bg-red-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${isLive ? "bg-red-300 animate-pulse" : "bg-zinc-500"}`} />
+        {isLive ? "송출 중" : "송출 대기"}
       </button>
 
       <button onClick={onToggleBlackout} title="블랙아웃 (B) — 출력 화면 전체를 검은 화면으로 전환"
@@ -176,19 +205,65 @@ export default function ControlBar({
 
       <div className="w-px h-5 bg-zinc-600" />
 
-      <button
-        onClick={onOpenOutput}
-        className={`px-2 py-1 rounded text-white font-medium ${isLive && !outputConnected ? "bg-orange-600 hover:bg-orange-500 animate-pulse" : "bg-blue-700 hover:bg-blue-600"}`}
-        title={isLive && !outputConnected ? "라이브 중이지만 출력창이 연결되지 않았습니다!" : "출력창 열기"}
-      >
-        📺 {isLive && !outputConnected ? "⚠ 연결 안됨!" : "출력창"}{" "}
-        <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: outputConnected ? "#4ade80" : "#6b7280", marginLeft: 2, verticalAlign: "middle" }}
-          title={outputConnected ? "연결됨" : "연결 안됨"} />
-      </button>
+      <div className="relative">
+        <button
+          ref={outputBtnRef}
+          onClick={() => {
+            const rect = outputBtnRef.current?.getBoundingClientRect();
+            if (rect) setMenuPos({ top: rect.bottom + 4, left: rect.left });
+            setShowOutputMenu((v) => !v);
+          }}
+          className={`px-2 py-1 rounded text-white font-medium flex items-center gap-1 ${isLive && !outputConnected ? "bg-orange-600 hover:bg-orange-500 animate-pulse" : "bg-blue-700 hover:bg-blue-600"}`}
+          title={isLive && !outputConnected ? "송출 중이지만 출력창이 연결되지 않았습니다!" : "출력창 설정"}
+        >
+          📺 출력창 설정 ▾
+          <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: outputConnected ? "#4ade80" : "#6b7280", marginLeft: 2, verticalAlign: "middle" }} />
+        </button>
+        {showOutputMenu && (
+          <div ref={outputMenuRef} style={{ position: "fixed", top: menuPos.top, left: menuPos.left, zIndex: 9999 }} className="bg-zinc-800 border border-zinc-600 rounded shadow-xl min-w-[200px]">
+            {displays.length === 0 && (
+              <div className="px-3 py-2 text-xs text-zinc-400">모니터 정보 로딩 중...</div>
+            )}
+            {displays.map((d, i) => (
+              <button key={i}
+                onClick={() => { onSelectDisplay(i); setShowOutputMenu(false); }}
+                className={`w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 flex items-center gap-2 ${selectedDisplayIdx === i ? "text-blue-400 font-semibold" : "text-zinc-200"}`}
+              >
+                {selectedDisplayIdx === i ? "✓ " : "  "}
+                {d.is_primary ? "기본 모니터" : `모니터 ${i + 1}`}
+                <span className="text-zinc-500 ml-auto">{d.width}×{d.height}</span>
+              </button>
+            ))}
+            <div className="border-t border-zinc-600 px-3 py-2">
+              <div className="text-zinc-500 text-xs mb-1.5">출력 스케일</div>
+              <div className="flex gap-1">
+                {(["fit", "fill", "native"] as const).map((m) => (
+                  <button key={m}
+                    onClick={() => { onSetScaleMode(m); setShowOutputMenu(false); }}
+                    className={`flex-1 py-1 rounded text-xs font-medium ${outputScaleMode === m ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+                  >
+                    {m === "fit" ? "맞춤" : m === "fill" ? "채우기" : "1:1"}
+                  </button>
+                ))}
+              </div>
+              <div className="text-zinc-600 text-[10px] mt-1">
+                {outputScaleMode === "fit" ? "레터박스 · 전체 표시" : outputScaleMode === "fill" ? "화면 가득 · 일부 잘림" : "실제 픽셀 · 1920×1080"}
+              </div>
+            </div>
+            <div className="border-t border-zinc-600" />
+            <button
+              onClick={() => { onOpenPreviewOnly(); setShowOutputMenu(false); }}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 text-zinc-200 flex items-center gap-2"
+            >
+              🖥 미리보기 창(기본값)
+            </button>
+          </div>
+        )}
+      </div>
 
-      <button onClick={onToggleStage} title="Stage Display 발표자 모니터"
+      <button onClick={onToggleStage} title="발표자 모니터"
         className={`px-2 py-1 rounded font-medium ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}>
-        🎤 Stage
+        🎤 발표자 모니터
       </button>
 
       {/* Stage message quick send */}
@@ -198,7 +273,7 @@ export default function ControlBar({
           value={stageMsgText}
           onChange={(e) => onSetStageMsgText(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") onSendStageMsg(); }}
-          placeholder="스테이지 메시지..."
+          placeholder="발표자에게 메시지..."
           className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-yellow-500 min-w-0 w-28"
         />
         <button
@@ -230,8 +305,6 @@ export default function ControlBar({
             title="리셋">↺</button>
         )}
       </div>
-
-      {clock && <span className="text-xs text-zinc-400 tabular-nums shrink-0 font-mono">{clock}</span>}
 
       <button onClick={onShowCheatSheet} className="px-1.5 py-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700" title="단축키 도움말 (?)">?</button>
 

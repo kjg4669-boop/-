@@ -7,6 +7,7 @@ import {
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
+import { toDisplayUrl } from "@/lib/media";
 import type { TextBlock } from "@/lib/types";
 
 const OUTPUT_W = 1920;
@@ -23,6 +24,7 @@ export interface SlideCanvasHandle {
   hasSelection: () => boolean;
   activateFormatPainter: (format: Partial<TextBlock>) => void;
   isFmtPainterActive: () => boolean;
+  selectBlock: (id: string) => void;
 }
 
 type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -76,6 +78,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const fmtPainterRef = useRef<Partial<TextBlock> | null>(null);
     const [fmtPainterActive, setFmtPainterActive] = useState(false);
     const didDragRef = useRef(false);
+    const editingTextRef = useRef<string>("");
     const drawRef = useRef<{ startX: number; startY: number; rect: { x: number; y: number; w: number; h: number } | null } | null>(null);
     const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
@@ -128,6 +131,12 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       },
       hasClipboard: () => blockClipboard !== null,
       hasSelection: () => selectedIdsRef.current.length > 0,
+      selectBlock(id) {
+        if (blocksRef.current.some((b) => b.id === id)) {
+          setSelectedIds([id]);
+          setEditingId(null);
+        }
+      },
       activateFormatPainter(format) {
         fmtPainterRef.current = format;
         setFmtPainterActive(true);
@@ -413,7 +422,29 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
               transform: `scale(${scale})`, transformOrigin: "top left",
             }}
           >
-            <BackgroundLayer config={layerConfig.background} />
+            {layerConfig.background.type === "video" ? (() => {
+              const url = layerConfig.background.src ? toDisplayUrl(layerConfig.background.src) : null;
+              return url ? (
+                <video
+                  src={url}
+                  muted
+                  playsInline
+                  preload="metadata"
+                  style={{
+                    position: "absolute", inset: 0, width: "100%", height: "100%",
+                    objectFit: "cover", opacity: layerConfig.background.opacity, zIndex: 10,
+                  }}
+                  onLoadedMetadata={(e) => { (e.target as HTMLVideoElement).currentTime = 0.1; }}
+                />
+              ) : (
+                <div style={{ position: "absolute", inset: 0, zIndex: 10, backgroundColor: "#111",
+                  display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ color: "#555", fontSize: 48 }}>▶</span>
+                </div>
+              );
+            })() : (
+              <BackgroundLayer config={layerConfig.background} skipPlaybackEmit />
+            )}
 
             {blocks.map((block) => (
               <div
@@ -438,30 +469,62 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                 }}
               >
                 {editingId === block.id ? (
-                  <textarea
-                    ref={(el) => el?.focus({ preventScroll: true })}
-                    value={block.text}
-                    onChange={(e) => handleTextChange(block.id, e.target.value)}
-                    onBlur={() => setEditingId(null)}
-                    onPointerDown={(e) => e.stopPropagation()}
+                  <div
                     style={{
-                      display: "block", width: "100%", height: "100%",
+                      display: "flex",
+                      width: "100%", height: "100%",
+                      alignItems: "flex-start",
+                      justifyContent: block.textAlign === "left" ? "flex-start" : block.textAlign === "right" ? "flex-end" : "center",
                       background: "rgba(0,0,0,0.6)",
-                      color: block.color, fontSize: block.fontSize,
-                      fontFamily: block.fontFamily,
-                      fontWeight: block.fontWeight ?? "normal",
-                      fontStyle: block.fontStyle ?? "normal",
-                      textDecoration: block.textDecoration ?? "none",
-                      textAlign: block.textAlign ?? "center",
-                      border: "none", outline: "none", resize: "none",
-                      lineHeight: 1.3, padding: "8px", boxSizing: "border-box",
+                      outline: "1px dashed rgba(180,180,180,0.6)",
+                      outlineOffset: "-1px",
+                      padding: "8px",
+                      boxSizing: "border-box",
                     }}
-                  />
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
+                    <div
+                      ref={(el) => {
+                        if (el && document.activeElement !== el) {
+                          editingTextRef.current = block.text;
+                          el.focus({ preventScroll: true });
+                          const sel = window.getSelection();
+                          if (sel) {
+                            const range = document.createRange();
+                            range.selectNodeContents(el);
+                            range.collapse(false);
+                            sel.removeAllRanges();
+                            sel.addRange(range);
+                          }
+                        }
+                      }}
+                      contentEditable
+                      suppressContentEditableWarning
+                      dangerouslySetInnerHTML={{ __html: block.text.replace(/\n/g, "<br>") }}
+                      onInput={(e) => { editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText; }}
+                      onBlur={() => { handleTextChange(block.id, editingTextRef.current.replace(/\n$/, "")); setEditingId(null); }}
+                      style={{
+                        width: "100%",
+                        color: block.color,
+                        fontSize: block.fontSize,
+                        fontFamily: block.fontFamily,
+                        fontWeight: block.fontWeight ?? "normal",
+                        fontStyle: block.fontStyle ?? "normal",
+                        textDecoration: block.textDecoration ?? "none",
+                        textAlign: block.textAlign ?? "center",
+                        lineHeight: 1.3,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "keep-all",
+                        outline: "none",
+                        cursor: "text",
+                      }}
+                    />
+                  </div>
                 ) : (
                   <div
                     style={{
                       width: "100%", height: "100%",
-                      display: "flex", alignItems: "center",
+                      display: "flex", alignItems: "flex-start",
                       justifyContent:
                         block.textAlign === "left" ? "flex-start"
                         : block.textAlign === "right" ? "flex-end" : "center",

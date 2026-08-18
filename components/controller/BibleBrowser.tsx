@@ -157,17 +157,28 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
   // No versions yet — show import prompt
   if (versions.length === 0) {
     return (
-      <div className="p-3 space-y-2 text-center">
-        <p className="text-zinc-300 text-xs font-medium">성경 데이터가 없습니다</p>
-        <p className="text-xs text-zinc-500 leading-relaxed text-left">
-          성경 JSON 파일을 먼저 가져와야 합니다.<br />
-          파일 형식: <span className="text-zinc-300">{"{ version, books: [...] }"}</span><br />
-          개역개정·NIV 등 원하는 버전을 JSON으로 준비 후 아래 버튼을 누르세요.
-        </p>
+      <div className="p-4 flex flex-col items-center gap-3 text-center">
+        <div className="text-3xl select-none">📖</div>
+        <div>
+          <p className="text-zinc-200 text-xs font-semibold mb-1">성경 데이터가 없습니다</p>
+          <p className="text-zinc-500 text-xs leading-relaxed">
+            성경 JSON 파일을 가져오면 탐색·검색이 가능합니다
+          </p>
+        </div>
+        <div className="w-full bg-zinc-800 rounded-lg p-2.5 text-left space-y-1">
+          <p className="text-zinc-400 text-xs font-medium">JSON 형식</p>
+          <pre className="text-zinc-500 text-[10px] leading-relaxed whitespace-pre-wrap">{`{
+  "version": { "code": "kor-kkv", "name": "개역개정" },
+  "books": [
+    { "order":1, "abbr":"창", "name":"창세기",
+      "chapters": [["태초에...", "..."], ...] }
+  ]
+}`}</pre>
+        </div>
         <button
-          onClick={handleImport}
+          onClick={() => void handleImport()}
           disabled={isImporting}
-          className="w-full text-xs py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 rounded"
+          className="w-full text-xs py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded font-medium text-white"
         >
           {isImporting ? "가져오는 중..." : "📂 성경 JSON 가져오기"}
         </button>
@@ -224,8 +235,21 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
                 <div className="text-white">{r.text}</div>
               </div>
             ))}
+            {!searchQuery.trim() && (
+              <div className="flex flex-col items-center justify-center h-24 gap-1.5 text-center px-4">
+                <span className="text-xl select-none">🔍</span>
+                <p className="text-zinc-500 text-xs">검색어를 입력하면 구절을 찾습니다</p>
+                <p className="text-zinc-600 text-[10px]">예: 하나님이 세상을, 요한 3:16</p>
+              </div>
+            )}
             {searchQuery.trim() && searchResults.length === 0 && (
-              <p className="text-xs text-zinc-600 p-2">검색 결과 없음</p>
+              <div className="flex flex-col items-center justify-center h-24 gap-1.5 text-center px-4">
+                <span className="text-xl select-none">🔎</span>
+                <p className="text-zinc-500 text-xs">
+                  &ldquo;{searchQuery}&rdquo; 검색 결과 없음
+                </p>
+                <p className="text-zinc-600 text-[10px]">다른 단어나 짧은 구절로 다시 시도해 보세요</p>
+              </div>
             )}
           </div>
         </div>

@@ -13,20 +13,23 @@ pub fn get_displays(app: AppHandle) -> Vec<crate::display::DisplayInfo> {
         .into_iter()
         .enumerate()
         .map(|(i, monitor)| {
-            let pos = monitor.position();
-            let size = monitor.size();
+            let scale = monitor.scale_factor();
+            let phys_pos = monitor.position();
+            let phys_size = monitor.size();
+            let log_pos = phys_pos.to_logical::<f64>(scale);
+            let log_size = phys_size.to_logical::<f64>(scale);
             let name = monitor.name().cloned().unwrap_or_else(|| "Display".to_string());
             let is_primary = primary
                 .as_ref()
-                .map(|p| p.position() == pos && p.size() == size)
+                .map(|p| p.position() == phys_pos && p.size() == phys_size)
                 .unwrap_or(i == 0);
             crate::display::DisplayInfo {
                 id: i as u32,
                 name,
-                x: pos.x,
-                y: pos.y,
-                width: size.width,
-                height: size.height,
+                x: log_pos.x as i32,
+                y: log_pos.y as i32,
+                width: log_size.width as u32,
+                height: log_size.height as u32,
                 is_primary,
             }
         })
@@ -35,14 +38,26 @@ pub fn get_displays(app: AppHandle) -> Vec<crate::display::DisplayInfo> {
 
 #[tauri::command]
 pub async fn open_output_window(app: AppHandle, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
-    if app.get_webview_window("output").is_some() {
+    let mid_x = x as f64 + (width as f64 / 2.0);
+    let mid_y = y as f64 + (height as f64 / 2.0);
+
+    if let Some(window) = app.get_webview_window("output") {
+        // Window was hidden by close_output_window — reposition to the requested
+        // monitor and re-show without recreating the webview.
+        let _ = window.set_position(tauri::LogicalPosition::new(mid_x, mid_y));
+        window.show().map_err(|e| e.to_string())?;
+        let _ = window.set_fullscreen(true);
+        let _ = window.set_focus();
         return Ok(());
     }
 
+    // Position the window on the target monitor (any point inside that monitor),
+    // then let .fullscreen(true) take over the entire monitor.
+    // inner_size conflicts with fullscreen on macOS and causes the webview viewport
+    // to be constrained to the specified size instead of filling the screen.
     WebviewWindowBuilder::new(&app, "output", WebviewUrl::App("/output".into()))
         .title("Worship Projector - Output")
-        .position(x as f64, y as f64)
-        .inner_size(width as f64, height as f64)
+        .position(mid_x, mid_y)
         .decorations(false)
         .always_on_top(true)
         .resizable(false)
@@ -56,7 +71,14 @@ pub async fn open_output_window(app: AppHandle, x: i32, y: i32, width: u32, heig
 #[tauri::command]
 pub async fn close_output_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("output") {
-        window.close().map_err(|e| e.to_string())?;
+        // Exit fullscreen first, then hide (not close/destroy).
+        // - close() on a macOS fullscreen window can terminate the entire app.
+        // - destroy() causes SIGSEGV: CVDisplayLink thread accesses the freed
+        //   WebView object (EXC_BAD_ACCESS KERN_INVALID_ADDRESS).
+        // Hiding keeps the webview alive so CVDisplayLink remains valid, and
+        // avoids triggering the OS window-close cycle that quits the app.
+        let _ = window.set_fullscreen(false);
+        window.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -102,6 +124,33 @@ pub async fn open_stage_display(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn close_stage_display(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("stage") {
+        window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_preview_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("preview") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "preview", WebviewUrl::App("/preview".into()))
+        .title("출력 미리보기")
+        .inner_size(480.0, 270.0)
+        .resizable(true)
+        .always_on_top(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn close_preview_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("preview") {
         window.close().map_err(|e| e.to_string())?;
     }
     Ok(())

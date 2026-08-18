@@ -11,6 +11,12 @@ export default function AnnouncementPanel() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ title: "", body: "", duration_sec: 5, active: true });
+  const [loopBgColor, setLoopBgColor] = useState("#000000");
+  const [loopTextColor, setLoopTextColor] = useState("#ffffff");
+  const loopBgColorRef = useRef("#000000");
+  const loopTextColorRef = useRef("#ffffff");
+  loopBgColorRef.current = loopBgColor;
+  loopTextColorRef.current = loopTextColor;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopingRef = useRef(false);
   const activeItemsRef = useRef<Announcement[]>([]);
@@ -39,7 +45,7 @@ export default function AnnouncementPanel() {
     const realIdx = idx % active.length;
     const item = active[realIdx];
     setCurrentIdx(realIdx);
-    void ipc.sendAnnouncementShow({ visible: true, title: item.title, body: item.body });
+    void ipc.sendAnnouncementShow({ visible: true, title: item.title, body: item.body, bgColor: loopBgColorRef.current, textColor: loopTextColorRef.current });
     timerRef.current = setTimeout(() => advanceLoop(realIdx + 1), Math.max(1, item.duration_sec) * 1000);
   }, [stopLoop]);
 
@@ -69,19 +75,27 @@ export default function AnnouncementPanel() {
 
   async function handleSave() {
     if (!form.title.trim()) return;
-    if (editingId === -1) {
-      await announcementDb.create({ ...form, order_num: items.length });
-    } else if (editingId !== null) {
-      const existing = items.find((a) => a.id === editingId)!;
-      await announcementDb.update({ ...existing, ...form });
+    try {
+      if (editingId === -1) {
+        await announcementDb.create({ ...form, order_num: items.length });
+      } else if (editingId !== null) {
+        const existing = items.find((a) => a.id === editingId)!;
+        await announcementDb.update({ ...existing, ...form });
+      }
+      await reload();
+      setEditingId(null);
+    } catch (e) {
+      console.error("[AnnouncementPanel] save failed:", e);
     }
-    await reload();
-    setEditingId(null);
   }
 
   async function handleDelete(id: number) {
-    await announcementDb.delete(id);
-    await reload();
+    try {
+      await announcementDb.delete(id);
+      await reload();
+    } catch (e) {
+      console.error("[AnnouncementPanel] delete failed:", e);
+    }
   }
 
   return (
@@ -91,6 +105,14 @@ export default function AnnouncementPanel() {
         <span className={`text-xs px-2 py-0.5 rounded-full ${looping ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
           {looping ? `재생 중 (${currentIdx + 1}/${activeItems.length})` : "중지"}
         </span>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-zinc-400">배경</label>
+        <input type="color" value={loopBgColor} onChange={(e) => setLoopBgColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent" title="배경 색상" />
+        <label className="text-zinc-400">글자</label>
+        <input type="color" value={loopTextColor} onChange={(e) => setLoopTextColor(e.target.value)} className="w-7 h-7 rounded cursor-pointer border-0 bg-transparent" title="글자 색상" />
+        <div className="ml-auto px-2 py-0.5 rounded text-xs" style={{ backgroundColor: loopBgColor, color: loopTextColor }}>미리보기</div>
       </div>
 
       <div className="flex gap-2">
