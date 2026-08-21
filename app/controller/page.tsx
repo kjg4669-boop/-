@@ -719,10 +719,11 @@ export default function ControllerPage() {
 
   const handleUndockPreview = useCallback(() => {
     setPreviewDocked(false);
+    // Sync current config to localStorage BEFORE opening window so the preview
+    // page can read it immediately on mount (avoids IPC round-trip delay).
+    ipc.sendPreviewUpdate(useOutputStore.getState().layerConfig);
     void ipc.openPreviewWindow();
-    // Push current state proactively while the preview window initializes.
-    // The output:ready mechanism also handles this, but explicit pushes cover
-    // edge cases where the initial event exchange is missed.
+    // Also push via IPC after the window has loaded, as a safety net.
     for (const ms of [400, 1000, 2000]) {
       setTimeout(() => ipc.sendPreviewUpdate(useOutputStore.getState().layerConfig), ms);
     }
@@ -1439,7 +1440,7 @@ export default function ControllerPage() {
           const d = displays[idx];
           if (d) void ipc.openOutputWindow(d.x, d.y, d.width, d.height);
         }}
-        onOpenPreviewOnly={() => { setPreviewDocked(true); setShowPanel(true); void ipc.openPreviewWindow(); }}
+        onOpenPreviewOnly={() => { setPreviewDocked(true); setShowPanel(true); ipc.sendPreviewUpdate(useOutputStore.getState().layerConfig); void ipc.openPreviewWindow(); }}
         outputScaleMode={outputScaleMode}
         onSetScaleMode={(mode) => { setOutputScaleMode(mode); void ipc.sendScaleMode(mode); }}
         outputConnected={outputConnected}
@@ -1638,7 +1639,7 @@ export default function ControllerPage() {
             className="w-64 flex-shrink-0 flex flex-col overflow-hidden bg-[#252526] border-l border-zinc-700"
           >
             {/* ── 출력 미리보기 (항상 도킹 — 탭 패널과 독립) ── */}
-            {previewDocked && (
+            {previewDocked ? (
               <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[0.625rem] text-zinc-500 uppercase tracking-wider font-medium">출력 미리보기</span>
@@ -1649,6 +1650,18 @@ export default function ControllerPage() {
                   >↗</button>
                 </div>
                 <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} isLive={isLive} />
+              </div>
+            ) : (
+              <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[0.625rem] text-zinc-500 uppercase tracking-wider font-medium">출력 미리보기</span>
+                </div>
+                <div
+                  style={{ width: 232, height: 130 }}
+                  className="rounded bg-black border border-zinc-700 flex flex-col items-center justify-center gap-1 text-zinc-600 select-none"
+                >
+                  <span className="text-xs">↗ 창모드로 출력 중</span>
+                </div>
               </div>
             )}
             {/* ── 탭 패널 (독립 분리 가능) ── */}

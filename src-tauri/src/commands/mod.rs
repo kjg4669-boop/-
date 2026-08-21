@@ -1,4 +1,29 @@
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+
+/// Shared app state: holds the latest LayerConfig JSON so the preview window
+/// can retrieve it immediately via `get_preview_config` invoke (no IPC round-trip).
+pub struct PreviewConfigState(pub Mutex<Option<String>>);
+
+impl PreviewConfigState {
+    pub fn new() -> Self {
+        PreviewConfigState(Mutex::new(None))
+    }
+}
+
+/// Called by the controller whenever layerConfig changes (via sendPreviewUpdate).
+#[tauri::command]
+pub fn set_preview_config(state: State<'_, PreviewConfigState>, config: String) {
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = Some(config);
+    }
+}
+
+/// Called by the preview window on mount — returns the latest LayerConfig JSON instantly.
+#[tauri::command]
+pub fn get_preview_config(state: State<'_, PreviewConfigState>) -> Option<String> {
+    state.0.lock().ok().and_then(|g| g.clone())
+}
 
 #[tauri::command]
 pub fn get_displays(app: AppHandle) -> Vec<crate::display::DisplayInfo> {
@@ -137,13 +162,22 @@ pub async fn open_preview_window(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(&app, "preview", WebviewUrl::App("/preview".into()))
+    let win = WebviewWindowBuilder::new(&app, "preview", WebviewUrl::App("/preview".into()))
         .title("출력 미리보기")
         .inner_size(480.0, 270.0)
         .resizable(true)
         .always_on_top(true)
         .build()
         .map_err(|e| e.to_string())?;
+
+    // Emit preview:closed to all windows when this window is destroyed,
+    // regardless of how it was closed (OS button, programmatic, etc.)
+    let app_handle = app.clone();
+    win.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            app_handle.emit("preview:closed", ()).ok();
+        }
+    });
 
     Ok(())
 }
