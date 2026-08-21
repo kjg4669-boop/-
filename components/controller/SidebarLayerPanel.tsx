@@ -356,7 +356,7 @@ export default function SidebarLayerPanel({
       {/* 하단 액션 툴바 */}
       <div className="border-t border-zinc-700 bg-[#2a2a2a] flex-shrink-0">
         {/* 액션 버튼 (일러스트레이터 하단 툴바) */}
-        <div className="flex items-center justify-end gap-0.5 px-1.5 py-0.5">
+        <div className="flex items-center justify-end gap-0.5 px-1.5 py-px">
           {/* 새 텍스트 블록 */}
           <button
             onClick={onAddBlock}
