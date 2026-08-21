@@ -356,13 +356,13 @@ export default function SidebarLayerPanel({
       {/* 하단 액션 툴바 */}
       <div className="border-t border-zinc-700 bg-[#2a2a2a] flex-shrink-0">
         {/* 액션 버튼 (일러스트레이터 하단 툴바) */}
-        <div className="flex items-center justify-end gap-0.5 px-1.5 py-px">
+        <div className="flex items-center justify-end gap-0.5 px-1.5" style={{ height: 20 }}>
           {/* 새 텍스트 블록 */}
           <button
             onClick={onAddBlock}
             disabled={!onAddBlock}
             title="새 텍스트 블록 추가"
-            className="w-6 h-6 flex items-center justify-center rounded hover:bg-zinc-600 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-600 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors"
           >
             <Plus size={13} />
           </button>
@@ -372,7 +372,7 @@ export default function SidebarLayerPanel({
             onClick={() => activeLayerId && onDuplicateBlock?.(activeLayerId)}
             disabled={!canDuplicate || !onDuplicateBlock}
             title="선택 레이어 복제"
-            className="w-6 h-6 flex items-center justify-center rounded hover:bg-zinc-600 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-600 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-default transition-colors"
           >
             <Copy size={12} />
           </button>
@@ -385,7 +385,7 @@ export default function SidebarLayerPanel({
             onClick={() => activeLayerId && onDeleteBlock?.(activeLayerId)}
             disabled={!canDelete || !onDeleteBlock}
             title="선택 레이어 삭제"
-            className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-800/60 text-zinc-500 hover:text-red-300 disabled:opacity-30 disabled:cursor-default transition-colors"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-800/60 text-zinc-500 hover:text-red-300 disabled:opacity-30 disabled:cursor-default transition-colors"
           >
             <Trash2 size={12} />
           </button>
