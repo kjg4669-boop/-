@@ -28,7 +28,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const scaleRatio = width / DEFAULT_W; // 고정 px 값 비례 스케일용
   const bg = layerConfig.background;
   const sub = layerConfig.subtitle;
-  const canvasBlocks = layerConfig.canvas?.textBlocks ?? [];
+  const canvasBlocks = (layerConfig.canvas?.textBlocks ?? []).filter(b => b.visible !== false);
   const FADE_MS = (layerConfig.transitionMs != null && layerConfig.transitionMs > 0) ? layerConfig.transitionMs : 600;
   const fadeMsRef = useRef(FADE_MS);
   fadeMsRef.current = FADE_MS;

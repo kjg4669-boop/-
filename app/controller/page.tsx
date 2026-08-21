@@ -808,6 +808,15 @@ export default function ControllerPage() {
           handleLayerChange({ ...lc, overlay: { ...lc.overlay, visible: !lc.overlay.visible } });
         }
       }).then((fn) => unlisteners.push(fn));
+
+      // 레이어 패널 창에서 순서 변경 요청
+      listen<{ layerId: string }>("layer:moveUp", (ev) => {
+        handleLayerMoveUp(ev.payload.layerId);
+      }).then((fn) => unlisteners.push(fn));
+
+      listen<{ layerId: string }>("layer:moveDown", (ev) => {
+        handleLayerMoveDown(ev.payload.layerId);
+      }).then((fn) => unlisteners.push(fn));
     }).catch(() => {});
     return () => { unlisteners.forEach((fn) => fn()); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -899,13 +908,64 @@ export default function ControllerPage() {
     setRightTab(t);
   }, []);
 
+  // Helper: update canvas textBlocks array and push to output/preview
+  const applyCanvasBlocksUpdate = useCallback((newBlocks: TextBlock[]) => {
+    const state = useQueueStore.getState();
+    const item = state.getActiveItem();
+    const slide = state.getActiveLyricSlide();
+    if (!item?.song?.id || !slide) return;
+    updateSlideCanvas(item.song.id, slide.id, { textBlocks: newBlocks });
+    const lc = useOutputStore.getState().layerConfig;
+    const visibleCount = newBlocks.filter(b => b.visible !== false).length;
+    const config: LayerConfig = {
+      ...lc,
+      subtitle: {
+        ...lc.subtitle,
+        visible: !isClear && visibleCount === 0 && newBlocks.length === 0,
+        lines: !isClear && newBlocks.length === 0 ? (slide.lines ?? []) : [],
+        lines2: !isClear ? (slide.lines2 ?? []) : [],
+      },
+      canvas: !isClear && newBlocks.length > 0 ? { textBlocks: newBlocks } : undefined,
+    };
+    setLayerConfig(config);
+    if (isLive) ipc.sendSlideUpdate(config);
+    ipc.sendPreviewUpdate(config);
+  }, [isLive, isClear, setLayerConfig, updateSlideCanvas]);
+
   const handleLayerToggleVisible = useCallback((layerId: string) => {
     if (layerId === "subtitle") {
       handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, visible: !layerConfig.subtitle.visible } });
     } else if (layerId === "overlay") {
       handleLayerChange({ ...layerConfig, overlay: { ...layerConfig.overlay, visible: !layerConfig.overlay.visible } });
+    } else if (layerId.startsWith("canvas:")) {
+      const blockId = layerId.slice("canvas:".length);
+      const blocks = layerConfig.canvas?.textBlocks ?? [];
+      const newBlocks = blocks.map(b => b.id === blockId ? { ...b, visible: b.visible === false } : b);
+      applyCanvasBlocksUpdate(newBlocks);
     }
-  }, [layerConfig, handleLayerChange]);
+  }, [layerConfig, handleLayerChange, applyCanvasBlocksUpdate]);
+
+  const handleLayerMoveUp = useCallback((layerId: string) => {
+    if (!layerId.startsWith("canvas:")) return;
+    const blockId = layerId.slice("canvas:".length);
+    const blocks = layerConfig.canvas?.textBlocks ?? [];
+    const idx = blocks.findIndex(b => b.id === blockId);
+    if (idx < 0 || idx >= blocks.length - 1) return;
+    const newBlocks = [...blocks];
+    [newBlocks[idx], newBlocks[idx + 1]] = [newBlocks[idx + 1], newBlocks[idx]];
+    applyCanvasBlocksUpdate(newBlocks);
+  }, [layerConfig, applyCanvasBlocksUpdate]);
+
+  const handleLayerMoveDown = useCallback((layerId: string) => {
+    if (!layerId.startsWith("canvas:")) return;
+    const blockId = layerId.slice("canvas:".length);
+    const blocks = layerConfig.canvas?.textBlocks ?? [];
+    const idx = blocks.findIndex(b => b.id === blockId);
+    if (idx <= 0) return;
+    const newBlocks = [...blocks];
+    [newBlocks[idx], newBlocks[idx - 1]] = [newBlocks[idx - 1], newBlocks[idx]];
+    applyCanvasBlocksUpdate(newBlocks);
+  }, [layerConfig, applyCanvasBlocksUpdate]);
 
   const handleSaveGlobal = useCallback((config: LayerConfig) => {
     saveGlobalDefaults(config);
@@ -1857,6 +1917,8 @@ export default function ControllerPage() {
                     }
                   }}
                   onToggleVisible={handleLayerToggleVisible}
+                  onMoveUp={handleLayerMoveUp}
+                  onMoveDown={handleLayerMoveDown}
                 />
               </div>
             )}

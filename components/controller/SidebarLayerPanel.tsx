@@ -3,6 +3,7 @@
 import { memo, useCallback } from "react";
 import {
   Eye, EyeOff, Lock, Layers, Video, Type, Image as ImageIcon,
+  ChevronUp, ChevronDown,
 } from "lucide-react";
 import type { LayerConfig } from "@/lib/types";
 
@@ -15,7 +16,10 @@ export interface LayerItem {
   type: LayerType;
   isVisible: boolean;
   isLocked: boolean;
-  zIndex: number;
+  /** 캔버스 블록의 배열 인덱스 (배경/-1, 캔버스블록=실제 인덱스) */
+  arrayIndex: number;
+  /** 캔버스 블록 총 개수 */
+  arrayTotal: number;
 }
 
 const TYPE_ICONS: Record<LayerType, React.ComponentType<{ size?: number; className?: string }>> = {
@@ -26,55 +30,35 @@ const TYPE_ICONS: Record<LayerType, React.ComponentType<{ size?: number; classNa
 };
 
 // ── layerConfig → LayerItem[] 변환 ────────────────────────────────────
+// 반환 순서: 높은 arrayIndex(앞쪽 레이어)가 먼저 오도록 내림차순
 export function deriveLayersFromConfig(config: LayerConfig): LayerItem[] {
   const layers: LayerItem[] = [];
-  const sub = config.subtitle;
-  const bg  = config.background;
-  const ov  = config.overlay;
+  const bg = config.background;
   const canvasBlocks = config.canvas?.textBlocks ?? [];
 
-  // 배경
+  // 캔버스 텍스트 블록 — 배열 인덱스 높은 것이 위쪽(앞)에 표시
+  for (let i = canvasBlocks.length - 1; i >= 0; i--) {
+    const block = canvasBlocks[i];
+    layers.push({
+      id: `canvas:${block.id}`,
+      name: block.text.trim() || `텍스트 블록 ${i + 1}`,
+      type: "text",
+      isVisible: block.visible !== false,
+      isLocked: false,
+      arrayIndex: i,
+      arrayTotal: canvasBlocks.length,
+    });
+  }
+
+  // 배경 — 항상 맨 아래 고정
   layers.push({
     id: "background",
     name: bg.type === "video" ? "배경 영상" : bg.type === "image" ? "배경 이미지" : "배경",
     type: bg.type === "video" ? "video" : bg.type === "image" ? "image" : "background",
     isVisible: true,
     isLocked: true,
-    zIndex: 10,
-  });
-
-  // 자막 — 현재 슬라이드 첫 줄을 제목으로
-  layers.push({
-    id: "subtitle",
-    name: sub.lines.length > 0 ? sub.lines[0] : "자막",
-    type: "text",
-    isVisible: sub.visible,
-    isLocked: false,
-    zIndex: 20,
-  });
-
-  // 오버레이 (src 있을 때만)
-  if (ov.src) {
-    layers.push({
-      id: "overlay",
-      name: "오버레이",
-      type: "image",
-      isVisible: ov.visible,
-      isLocked: false,
-      zIndex: 30,
-    });
-  }
-
-  // 캔버스 텍스트 블록 — text 내용이 이름이 됨
-  canvasBlocks.forEach((block, i) => {
-    layers.push({
-      id: `canvas:${block.id}`,
-      name: block.text.trim() || `텍스트 블록 ${i + 1}`,
-      type: "text",
-      isVisible: true,
-      isLocked: false,
-      zIndex: 40 + i,
-    });
+    arrayIndex: -1,
+    arrayTotal: 0,
   });
 
   return layers;
@@ -86,16 +70,21 @@ interface LayerItemRowProps {
   isActive: boolean;
   onSelect: (id: string) => void;
   onToggleVisible: (id: string) => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
 }
 
 const LayerItemRow = memo(function LayerItemRow({
-  layer, isActive, onSelect, onToggleVisible,
+  layer, isActive, onSelect, onToggleVisible, onMoveUp, onMoveDown,
 }: LayerItemRowProps) {
   const Icon = TYPE_ICONS[layer.type];
+  const canMoveUp = layer.arrayIndex >= 0 && layer.arrayIndex < layer.arrayTotal - 1;
+  const canMoveDown = layer.arrayIndex > 0;
+
   return (
     <div
       onClick={() => onSelect(layer.id)}
-      className={`flex items-center gap-1.5 px-2 py-1.5 rounded-sm select-none cursor-pointer transition-colors group ${
+      className={`flex items-center gap-1 px-1.5 py-1 rounded-sm select-none cursor-pointer transition-colors group ${
         isActive
           ? "bg-blue-600/25 border border-blue-500/50"
           : "hover:bg-zinc-700/60 border border-transparent"
@@ -103,12 +92,33 @@ const LayerItemRow = memo(function LayerItemRow({
     >
       <Icon size={13} className={isActive ? "text-blue-400 flex-shrink-0" : "text-zinc-500 flex-shrink-0"} />
 
-      <span className={`flex-1 text-xs truncate ${isActive ? "text-white" : "text-zinc-300"}`}>
+      <span className={`flex-1 text-xs truncate ${isActive ? "text-white" : "text-zinc-300"} ${!layer.isVisible ? "opacity-40" : ""}`}>
         {layer.name}
       </span>
 
-      <span className="text-[0.5625rem] text-zinc-600 w-5 text-right flex-shrink-0">{layer.zIndex}</span>
+      {/* 위/아래 이동 버튼 (캔버스 블록만) */}
+      {!layer.isLocked && (
+        <div className="flex flex-col gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onMoveUp(layer.id); }}
+            disabled={!canMoveUp}
+            title="위로 (앞으로)"
+            className="p-0.5 rounded hover:bg-zinc-600 disabled:opacity-20 disabled:cursor-not-allowed"
+          >
+            <ChevronUp size={10} className="text-zinc-400" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onMoveDown(layer.id); }}
+            disabled={!canMoveDown}
+            title="아래로 (뒤로)"
+            className="p-0.5 rounded hover:bg-zinc-600 disabled:opacity-20 disabled:cursor-not-allowed"
+          >
+            <ChevronDown size={10} className="text-zinc-400" />
+          </button>
+        </div>
+      )}
 
+      {/* 가시성 토글 */}
       {layer.isLocked ? (
         <Lock size={11} className="text-zinc-700 flex-shrink-0" />
       ) : (
@@ -136,6 +146,8 @@ export interface SidebarLayerPanelProps {
   onDragHandleMouseDown: (e: React.MouseEvent) => void;
   onSelectLayer: (id: string) => void;
   onToggleVisible: (id: string) => void;
+  onMoveUp: (id: string) => void;
+  onMoveDown: (id: string) => void;
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────
@@ -148,9 +160,10 @@ export default function SidebarLayerPanel({
   onDragHandleMouseDown,
   onSelectLayer,
   onToggleVisible,
+  onMoveUp,
+  onMoveDown,
 }: SidebarLayerPanelProps) {
-  // zIndex 내림차순으로 표시 (높은 레이어가 위에)
-  const layers = [...deriveLayersFromConfig(layerConfig)].sort((a, b) => b.zIndex - a.zIndex);
+  const layers = deriveLayersFromConfig(layerConfig);
 
   return (
     <div className="flex flex-col h-full select-none bg-[#1e1e1e]">
@@ -166,7 +179,6 @@ export default function SidebarLayerPanel({
           <span className="text-[0.625rem] text-zinc-400 uppercase tracking-wider font-medium">레이어</span>
           <span className="text-[0.5625rem] text-zinc-600 bg-zinc-700 px-1 rounded">{layers.length}</span>
         </div>
-        {/* 도킹/분리 버튼 */}
         {isFloating ? (
           <button
             onMouseDown={(e) => e.stopPropagation()}
@@ -198,6 +210,8 @@ export default function SidebarLayerPanel({
               isActive={activeLayerId === layer.id}
               onSelect={onSelectLayer}
               onToggleVisible={onToggleVisible}
+              onMoveUp={onMoveUp}
+              onMoveDown={onMoveDown}
             />
           ))
         )}
@@ -212,7 +226,6 @@ export default function SidebarLayerPanel({
           <div className="flex items-center gap-1.5 px-2 py-1 border-t border-zinc-700 bg-zinc-800/30 flex-shrink-0">
             <Icon size={10} className="text-zinc-500 flex-shrink-0" />
             <span className="text-[0.625rem] text-zinc-400 flex-1 truncate">{active.name}</span>
-            <span className="text-[0.5625rem] text-zinc-600">z: {active.zIndex}</span>
           </div>
         );
       })()}

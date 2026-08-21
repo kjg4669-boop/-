@@ -74,9 +74,10 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance,
   fadeMsRef.current = FADE_MS;
 
   // ── Two-slot crossfade ────────────────────────────────────────────────
-  // Include nonce so animation fires even when block content is identical across slides
-  const blocksKey = `${nonce ?? 0}:${blocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
-  const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([blocks, []]);
+  const visibleBlocks = blocks.filter(b => b.visible !== false);
+  // Include nonce + visible state so animation fires on visibility toggle too
+  const blocksKey = `${nonce ?? 0}:${visibleBlocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
+  const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([visibleBlocks, []]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   // slotAnimKeys: each element starts at -1 (no animation on initial render).
   // Incrementing a slot's key forces its inner div to remount → CSS @keyframes restarts.
@@ -90,7 +91,7 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance,
       // 첫 변경은 애니메이션 없이 현재 슬롯 내용만 업데이트
       setSlots(prev => {
         const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = blocks;
+        next[currentSlot.current] = visibleBlocks;
         return next;
       });
       return;
@@ -100,7 +101,7 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance,
     if (fadeMsRef.current === 0 || textEntrance === "none") {
       setSlots(prev => {
         const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = blocks;
+        next[currentSlot.current] = visibleBlocks;
         return next;
       });
       return;
@@ -112,7 +113,7 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance,
     // All three setState calls are batched into one React commit:
     //   - outer slot div: opacity CSS transition fires (0 → 1)
     //   - inner div: remounts (slotAnimKeys[nextSlot] incremented) → @keyframes starts from "from"
-    setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = blocks; return next; });
+    setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = visibleBlocks; return next; });
     setActiveSlot(nextSlot);
     setSlotAnimKeys(prev => { const next: [number, number] = [prev[0], prev[1]]; next[nextSlot]++; return next; });
   // eslint-disable-next-line react-hooks/exhaustive-deps

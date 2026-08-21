@@ -164,11 +164,18 @@ export const ipc = {
 
   // Preview-only update (always sent, even when !isLive — output window does NOT listen to this)
   // Global emit: no other window listens to "preview:update", so this is safe.
+  // Also persists to Rust app-state via set_preview_config so the preview window can invoke
+  // get_preview_config on mount and get the current config WITHOUT an IPC round-trip.
   sendPreviewUpdate: (layerConfig: LayerConfig): void => {
+    const json = JSON.stringify(layerConfig);
+    void invokeCommand<void>("set_preview_config", { config: json });
     void emitEvent<SlideUpdatePayload>("preview:update", { layerConfig });
   },
   onPreviewUpdate: (cb: (layerConfig: LayerConfig) => void) =>
     listenEvent<SlideUpdatePayload>("preview:update", (p) => cb(p.layerConfig)),
+
+  // Called by preview window on mount to immediately get the latest config (no round-trip).
+  getPreviewConfig: () => invokeCommand<string | null>("get_preview_config"),
 
   // Stage closed notification (emitted from stage page on beforeunload)
   onStageClosed: (cb: () => void) => listenEvent("stage:closed", cb),

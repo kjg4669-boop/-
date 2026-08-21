@@ -28,6 +28,7 @@ export interface TextBlock {
   fontStyle?: "normal" | "italic";
   textDecoration?: "none" | "underline" | "line-through";
   textAlign?: "left" | "center" | "right";
+  visible?: boolean; // undefined/true = visible, false = hidden
 }
 
 export interface LyricSlide {

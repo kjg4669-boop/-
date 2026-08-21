@@ -158,8 +158,11 @@ pub fn run() {
             ndi_output::stop_ndi_output,
             commands::open_preview_window,
             commands::close_preview_window,
+            commands::set_preview_config,
+            commands::get_preview_config,
         ])
         .setup(|app| {
+            app.manage(commands::PreviewConfigState::new());
             app.manage(remote::RemoteServerState::new());
             app.manage(ndi_output::NdiOutputState::new());
 

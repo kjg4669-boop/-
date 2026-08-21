@@ -22,6 +22,10 @@ body {
    transform만 담당; opacity는 부모 슬롯의 CSS transition이 처리합니다.
    key 변경으로 내부 div를 리마운트시키면 @keyframes가 항상 처음부터 재생됩니다.
    ──────────────────────────────────────────────────────────────────── */
+@keyframes preview-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 @keyframes enter-slide-up {
   from { transform: translateY(var(--enter-dist, 44px)); }
   to   { transform: translateY(0); }

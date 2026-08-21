@@ -21,12 +21,13 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
     assignSlidePhase, unassignSlidePhase,
   } = useVideoStore();
 
-  const { activeLyricSlideIndex, activeItemIndex, getActiveLyricSlide, currentService } = useQueueStore();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const { activeLyricSlideIndex, activeItemIndex, getActiveLyricSlide, currentService, setActiveFlatSlide } = useQueueStore();
   const currentSlide = getActiveLyricSlide();
 
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
   const [importing, setImporting] = useState(false);
+  const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -109,8 +110,7 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
     return `${m}:${sec.toString().padStart(2, "0")}`;
   }
 
-  // Re-compute currentSlide when navigation changes (suppress lint warning for derived value)
-  void activeLyricSlideIndex; void activeItemIndex;
+  // activeLyricSlideIndex / activeItemIndex subscriptions ensure re-render on slide navigation
 
   return (
     <div className="h-full flex flex-col overflow-y-auto text-xs">
@@ -125,13 +125,41 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
             return (
               <div
                 key={phase.id}
-                onClick={() => selectPhase(phase.id)}
+                onClick={() => { if (editingPhaseId !== phase.id) selectPhase(phase.id); }}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer ${
                   isSelected ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"
                 }`}
               >
-                <span className="flex-1 truncate">{phase.name}</span>
-                <span className={`text-[10px] uppercase opacity-60`}>
+                {editingPhaseId === phase.id ? (
+                  <input
+                    autoFocus
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onBlur={() => {
+                      if (editingName.trim()) updatePhase(phase.id, { name: editingName.trim() });
+                      setEditingPhaseId(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.currentTarget.blur(); }
+                      if (e.key === "Escape") { setEditingPhaseId(null); }
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex-1 min-w-0 bg-transparent border-b border-white/60 outline-none text-xs px-0"
+                  />
+                ) : (
+                  <span
+                    className="flex-1 truncate"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      selectPhase(phase.id);
+                      setEditingPhaseId(phase.id);
+                      setEditingName(phase.name);
+                    }}
+                    title="더블클릭하여 이름 편집"
+                  >{phase.name}</span>
+                )}
+                <span className="text-xs uppercase opacity-60">
                   {phase.background.type === "color" ? "단색" : phase.background.type === "image" ? "이미지" : "영상"}
                 </span>
                 {assignedCount > 0 && (
@@ -161,17 +189,6 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
       {/* ── 선택된 페이즈 설정 ──────────────────────────── */}
       {selectedPhase && (
         <section className="border-b border-zinc-700 p-3 space-y-2">
-          {/* Name */}
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-400 flex-shrink-0">이름</span>
-            <input
-              type="text"
-              value={selectedPhase.name}
-              onChange={(e) => updatePhase(selectedPhase.id, { name: e.target.value })}
-              className="flex-1 bg-zinc-800 text-white rounded px-2 py-0.5 border border-zinc-600 text-xs"
-            />
-          </div>
-
           {/* Type tabs */}
           <div className="flex gap-1">
             {(["color", "image", "video"] as const).map((t) => (
@@ -344,30 +361,31 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
       {currentService && currentService.items.some((it) => it.song) && (
         <section className="p-3 space-y-3 border-t border-zinc-700">
           <p className="text-zinc-400 font-medium uppercase tracking-wider text-xs">전체 슬라이드 배정</p>
-          {!selectedPhase && (
-            <p className="text-zinc-600 text-xs">위에서 페이즈를 선택하세요</p>
-          )}
-          {currentService.items.map((item, itemIdx) => {
-            if (!item.song) return null;
-            const slides = getSlidesInOrder(item.song);
-            if (slides.length === 0) return null;
-            return (
+          <p className="text-zinc-600 text-xs">클릭하면 해당 슬라이드로 이동합니다</p>
+          {(() => {
+            // Pre-compute flat index offset per item for navigation
+            let flatOffset = 0;
+            return currentService.items.map((item, itemIdx) => {
+              if (!item.song) return null;
+              const slides = getSlidesInOrder(item.song);
+              if (slides.length === 0) return null;
+              const itemFlatOffset = flatOffset;
+              flatOffset += slides.length;
+              return (
               <div key={itemIdx}>
                 <p className="text-zinc-500 text-xs mb-1 truncate font-medium">{item.song.title}</p>
                 <div className="grid grid-cols-2 gap-1">
-                  {slides.map((slide) => {
+                  {slides.map((slide, slideIdx) => {
                     const phaseId = slidePhaseMap[slide.id];
                     const assignedPhase = phases.find((p) => p.id === phaseId);
                     const isCurrentSlide = currentSlide?.id === slide.id;
+                    const flatIdx = itemFlatOffset + slideIdx;
                     return (
                       <button
                         key={slide.id}
                         onClick={() => {
-                          if (!selectedPhase) return;
-                          assignSlidePhase(slide.id, selectedPhase.id);
-                          if (isCurrentSlide) {
-                            onChange({ ...layerConfig, background: selectedPhase.background, subtitle: { ...layerConfig.subtitle, visible: true } });
-                          }
+                          // Navigate to this slide only — phase is applied via "이 슬라이드에 배정" button
+                          setActiveFlatSlide(flatIdx);
                         }}
                         className={`text-left rounded text-xs border transition-colors overflow-hidden ${
                           isCurrentSlide
@@ -376,7 +394,7 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
                               ? "border-zinc-600 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700"
                               : "border-zinc-700 bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
                         }`}
-                        title={`${slide.section} ${slide.sectionIndex + 1}${assignedPhase ? ` → ${assignedPhase.name}` : ""}${selectedPhase ? ` (클릭: ${selectedPhase.name} 배정)` : ""}`}
+                        title={`${slide.section} ${slide.sectionIndex + 1}${assignedPhase ? ` → ${assignedPhase.name}` : " (미배정)"} | 클릭: 이동`}
                       >
                         {/* 배경 썸네일 */}
                         <div className="w-full h-10 relative overflow-hidden">
@@ -415,8 +433,9 @@ export default function VideoPanel({ layerConfig, onChange }: Props) {
                   })}
                 </div>
               </div>
-            );
-          })}
+              );
+            });
+          })()}
         </section>
       )}
     </div>

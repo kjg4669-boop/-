@@ -43,6 +43,12 @@ export default function LayerPanelPage() {
         onToggleVisible={(layerId) => {
           emit("layer:toggleVisible", { layerId }).catch(() => {});
         }}
+        onMoveUp={(layerId) => {
+          emit("layer:moveUp", { layerId }).catch(() => {});
+        }}
+        onMoveDown={(layerId) => {
+          emit("layer:moveDown", { layerId }).catch(() => {});
+        }}
       />
     </div>
   );

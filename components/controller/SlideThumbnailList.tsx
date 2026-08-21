@@ -6,6 +6,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
+import { useVideoStore } from "@/stores/videoStore";
 import { songDb, serviceDb } from "@/lib/db";
 import type { LyricSlide, FlatSlide, Service } from "@/lib/types";
 import { newSlideId } from "@/lib/utils";
@@ -67,20 +68,8 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
   const toggleHiddenSlide = useQueueStore((s) => s.toggleHiddenSlide);
   const updateServiceData = useQueueStore((s) => s.updateServiceData);
   const bg = useOutputStore((s) => s.layerConfig.background);
+  const { phases, slidePhaseMap } = useVideoStore();
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
-
-  // 썸네일 배경 스타일 (layerConfig 반영)
-  const thumbBgStyle: React.CSSProperties = (() => {
-    if (bg.type === "color") return { backgroundColor: bg.color ?? "#111" };
-    if (bg.type === "image" && bg.src) {
-      const url = toDisplayUrl(bg.src);
-      return url
-        ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" }
-        : { backgroundColor: "#111" };
-    }
-    return { backgroundColor: "#111" };
-  })();
-  const thumbVideoUrl = bg.type === "video" && bg.src ? toDisplayUrl(bg.src) : null;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -192,6 +181,24 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
             const previewLines = canvasBlocks.length > 0
               ? canvasBlocks.map((b) => b.text)
               : entry.slide.lines;
+
+            // Per-slide background: use assigned phase's background, fallback to current output bg
+            const phaseBg = (() => {
+              const phaseId = slidePhaseMap[entry.slide.id];
+              return phaseId ? phases.find((p) => p.id === phaseId)?.background : undefined;
+            })();
+            const slideBg = phaseBg ?? bg;
+            const thumbBgStyle: React.CSSProperties = (() => {
+              if (slideBg.type === "color") return { backgroundColor: slideBg.color ?? "#111" };
+              if (slideBg.type === "image" && slideBg.src) {
+                const url = toDisplayUrl(slideBg.src);
+                return url
+                  ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center" }
+                  : { backgroundColor: "#111" };
+              }
+              return { backgroundColor: "#111" };
+            })();
+            const thumbVideoUrl = slideBg.type === "video" && slideBg.src ? toDisplayUrl(slideBg.src) : null;
 
             return (
               <SortableItem key={id} id={id}>

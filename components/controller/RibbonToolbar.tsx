@@ -345,7 +345,7 @@ export default function RibbonToolbar({
             {([
               { label: "빠름", ms: 300 },
               { label: "보통", ms: 600 },
-              { label: "느림", ms: 1200 },
+              { label: "느림", ms: 2000 },
             ] as const).map(({ label, ms }) => (
               <button key={ms} onClick={() => onLayerChange({ ...layerConfig, transitionMs: ms })}
                 className={`px-2 h-6 rounded text-xs ${(layerConfig.transitionMs ?? 600) === ms ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
