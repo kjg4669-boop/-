@@ -800,22 +800,16 @@ export default function ControllerPage() {
 
       // 레이어 패널 창에서 가시성 토글 요청
       listen<{ layerId: string }>("layer:toggleVisible", (ev) => {
-        const layerId = ev.payload.layerId;
-        const lc = useOutputStore.getState().layerConfig;
-        if (layerId === "subtitle") {
-          handleLayerChange({ ...lc, subtitle: { ...lc.subtitle, visible: !lc.subtitle.visible } });
-        } else if (layerId === "overlay") {
-          handleLayerChange({ ...lc, overlay: { ...lc.overlay, visible: !lc.overlay.visible } });
-        }
+        handleLayerToggleVisibleRef.current(ev.payload.layerId);
       }).then((fn) => unlisteners.push(fn));
 
       // 레이어 패널 창에서 순서 변경 요청
       listen<{ layerId: string }>("layer:moveUp", (ev) => {
-        handleLayerMoveUp(ev.payload.layerId);
+        handleLayerMoveUpRef.current(ev.payload.layerId);
       }).then((fn) => unlisteners.push(fn));
 
       listen<{ layerId: string }>("layer:moveDown", (ev) => {
-        handleLayerMoveDown(ev.payload.layerId);
+        handleLayerMoveDownRef.current(ev.payload.layerId);
       }).then((fn) => unlisteners.push(fn));
     }).catch(() => {});
     return () => { unlisteners.forEach((fn) => fn()); };
@@ -1392,6 +1386,12 @@ export default function ControllerPage() {
   useEffect(() => { handleDupSlideRef.current = handleDupSlide; });
   const handleInsertImageRef = useRef(handleInsertImage);
   useEffect(() => { handleInsertImageRef.current = handleInsertImage; });
+  const handleLayerToggleVisibleRef = useRef(handleLayerToggleVisible);
+  useEffect(() => { handleLayerToggleVisibleRef.current = handleLayerToggleVisible; });
+  const handleLayerMoveUpRef = useRef(handleLayerMoveUp);
+  useEffect(() => { handleLayerMoveUpRef.current = handleLayerMoveUp; });
+  const handleLayerMoveDownRef = useRef(handleLayerMoveDown);
+  useEffect(() => { handleLayerMoveDownRef.current = handleLayerMoveDown; });
 
   useMenuEvents({
     openOutputRef,
