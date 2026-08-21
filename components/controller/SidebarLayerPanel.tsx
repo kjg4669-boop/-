@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
   PointerSensor, useSensor, useSensors, closestCenter,
@@ -206,8 +206,8 @@ export interface SidebarLayerPanelProps {
   onDragHandleMouseDown: (e: React.MouseEvent) => void;
   onSelectLayer: (id: string) => void;
   onToggleVisible: (id: string) => void;
-  onMoveUp: (id: string) => void;
-  onMoveDown: (id: string) => void;
+  onMoveUp?: (id: string) => void;
+  onMoveDown?: (id: string) => void;
   onReorder?: (layerId: string, toArrayIndex: number) => void;
   onAddBlock?: () => void;
   onDuplicateBlock?: (layerId: string) => void;
@@ -229,9 +229,9 @@ export default function SidebarLayerPanel({
   onDuplicateBlock,
   onDeleteBlock,
 }: SidebarLayerPanelProps) {
-  const layers = deriveLayersFromConfig(layerConfig);
-  const canvasLayers = layers.filter((l) => !l.isLocked);
-  const fixedLayers  = layers.filter((l) => l.isLocked);
+  const layers = useMemo(() => deriveLayersFromConfig(layerConfig), [layerConfig]);
+  const canvasLayers = useMemo(() => layers.filter((l) => !l.isLocked), [layers]);
+  const fixedLayers  = useMemo(() => layers.filter((l) => l.isLocked), [layers]);
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const draggingLayer = draggingId ? layers.find((l) => l.id === draggingId) ?? null : null;
@@ -291,14 +291,6 @@ export default function SidebarLayerPanel({
             className="px-1.5 py-0.5 text-[0.625rem] text-zinc-500 hover:text-white hover:bg-zinc-700 rounded"
           >↗</button>
         )}
-      </div>
-
-      {/* 컬럼 헤더 */}
-      <div className="flex items-center border-b border-zinc-700/60 bg-[#2a2a2a] flex-shrink-0" style={{ height: 20 }}>
-        <div style={{ width: 3 }} />
-        <div className="w-7 flex justify-center border-r border-zinc-700/40 text-[9px] text-zinc-600">👁</div>
-        <div className="w-6 flex justify-center border-r border-zinc-700/40 text-[9px] text-zinc-600">🔒</div>
-        <div className="flex-1 px-2 text-[9px] text-zinc-600 uppercase tracking-wider">레이어</div>
       </div>
 
       {/* 레이어 목록 */}
@@ -361,21 +353,8 @@ export default function SidebarLayerPanel({
         )}
       </div>
 
-      {/* 하단 정보 + 액션 툴바 */}
+      {/* 하단 액션 툴바 */}
       <div className="border-t border-zinc-700 bg-[#2a2a2a] flex-shrink-0">
-        {/* 레이어 수 */}
-        <div className="flex items-center justify-between px-2 py-0.5 border-b border-zinc-700/50">
-          {activeLayer ? (
-            <div className="flex items-center gap-1 min-w-0">
-              {(() => { const Icon = TYPE_ICONS[activeLayer.type]; return <Icon size={9} className="text-zinc-500 flex-shrink-0" />; })()}
-              <span className="text-[0.5625rem] text-zinc-400 truncate">{activeLayer.name}</span>
-            </div>
-          ) : (
-            <span className="text-[0.5625rem] text-zinc-600">선택 없음</span>
-          )}
-          <span className="text-[0.5rem] text-zinc-600 flex-shrink-0 ml-2">{layers.length} 레이어</span>
-        </div>
-
         {/* 액션 버튼 (일러스트레이터 하단 툴바) */}
         <div className="flex items-center justify-end gap-0.5 px-1.5 py-1">
           {/* 새 텍스트 블록 */}

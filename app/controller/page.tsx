@@ -990,8 +990,9 @@ export default function ControllerPage() {
   }, [layerConfig, applyCanvasBlocksUpdate]);
 
   const handleLayerAddBlock = useCallback(() => {
-    canvasRef.current?.addBlock();
-  }, []);
+    // Delegate to handleAddBlock which handles the pending-slide case
+    handleAddBlock();
+  }, [handleAddBlock]);
 
   const handleLayerDuplicateBlock = useCallback((layerId: string) => {
     if (!layerId.startsWith("canvas:")) return;
@@ -1001,7 +1002,7 @@ export default function ControllerPage() {
     if (!original) return;
     const newBlock: TextBlock = {
       ...original,
-      id: `dup-${Date.now()}`,
+      id: crypto.randomUUID(),
       x: Math.min(original.x + 30, 1920 - original.width),
       y: Math.min(original.y + 30, 1080 - (original.height ?? 200)),
     };
