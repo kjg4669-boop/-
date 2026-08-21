@@ -269,7 +269,7 @@ export default function SidebarLayerPanel({
     <div className="flex flex-col h-full select-none bg-[#252526]">
       {/* 헤더 */}
       <div
-        className={`flex items-center justify-between px-2 py-1.5 border-b border-zinc-700 flex-shrink-0 bg-[#2d2d2d] ${
+        className={`flex items-center justify-between px-2 py-0.5 border-b border-zinc-700 flex-shrink-0 bg-[#2d2d2d] ${
           isFloating ? "cursor-grab active:cursor-grabbing" : ""
         }`}
         onMouseDown={isFloating ? onDragHandleMouseDown : undefined}
@@ -356,7 +356,7 @@ export default function SidebarLayerPanel({
       {/* 하단 액션 툴바 */}
       <div className="border-t border-zinc-700 bg-[#2a2a2a] flex-shrink-0">
         {/* 액션 버튼 (일러스트레이터 하단 툴바) */}
-        <div className="flex items-center justify-end gap-0.5 px-1.5 py-1">
+        <div className="flex items-center justify-end gap-0.5 px-1.5 py-0.5">
           {/* 새 텍스트 블록 */}
           <button
             onClick={onAddBlock}
