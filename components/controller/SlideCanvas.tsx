@@ -29,6 +29,9 @@ export interface SlideCanvasHandle {
 
 type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
+// Top 3 handles become move handles (drag to reposition block)
+const MOVE_HANDLES = new Set<HandlePos>(["nw", "n", "ne"]);
+
 interface Props {
   onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[] }) => void;
   onSelectionChange?: (block: TextBlock | null) => void;
@@ -492,7 +495,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                           if (sel) {
                             const range = document.createRange();
                             range.selectNodeContents(el);
-                            range.collapse(false);
+                            // Keep text selected (don't collapse) — lets user type to replace or Delete all at once
                             sel.removeAllRanges();
                             sel.addRange(range);
                           }
@@ -517,6 +520,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                         wordBreak: "keep-all",
                         outline: "none",
                         cursor: "text",
+                        userSelect: "text",
                       }}
                     />
                   </div>
@@ -646,28 +650,41 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                 }}
               />
 
-              {/* 8 Resize handles */}
+              {/* 8 handles: top-3 (nw/n/ne) = move, rest = resize */}
               {RESIZE_HANDLES.map(({ pos, left, top }) => (
                 <div
                   key={pos}
                   data-handle={pos}
+                  title={MOVE_HANDLES.has(pos) ? "드래그하여 이동" : undefined}
                   style={{
                     position: "absolute", left, top,
                     width: 8, height: 8,
-                    borderRadius: "50%", background: "white",
+                    borderRadius: MOVE_HANDLES.has(pos) ? "2px" : "50%",
+                    background: MOVE_HANDLES.has(pos) ? "#60a5fa" : "white",
                     border: "1.5px solid #3b82f6",
-                    cursor: handleCursor(pos),
+                    cursor: MOVE_HANDLES.has(pos) ? "move" : handleCursor(pos),
                     pointerEvents: "all", zIndex: 30, boxSizing: "border-box",
                   }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-                    resizeRef.current = {
-                      blockId: b.id, handle: pos,
-                      startCX: e.clientX, startCY: e.clientY,
-                      origX: b.x, origY: b.y,
-                      origW: b.width, origH: b.height ?? DEFAULT_H,
-                    };
+                    if (MOVE_HANDLES.has(pos)) {
+                      didDragRef.current = false;
+                      const origPositions: Record<string, { x: number; y: number }> = {};
+                      for (const blk of blocksRef.current) {
+                        if (selectedIdsRef.current.includes(blk.id)) {
+                          origPositions[blk.id] = { x: blk.x, y: blk.y };
+                        }
+                      }
+                      moveRef.current = { blockId: b.id, startCX: e.clientX, startCY: e.clientY, origPositions };
+                    } else {
+                      resizeRef.current = {
+                        blockId: b.id, handle: pos,
+                        startCX: e.clientX, startCY: e.clientY,
+                        origX: b.x, origY: b.y,
+                        origW: b.width, origH: b.height ?? DEFAULT_H,
+                      };
+                    }
                   }}
                 />
               ))}
