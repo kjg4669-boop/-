@@ -811,6 +811,10 @@ export default function ControllerPage() {
       listen<{ layerId: string }>("layer:moveDown", (ev) => {
         handleLayerMoveDownRef.current(ev.payload.layerId);
       }).then((fn) => unlisteners.push(fn));
+
+      listen<{ layerId: string; toArrayIndex: number }>("layer:reorder", (ev) => {
+        handleLayerReorderRef.current(ev.payload.layerId, ev.payload.toArrayIndex);
+      }).then((fn) => unlisteners.push(fn));
     }).catch(() => {});
     return () => { unlisteners.forEach((fn) => fn()); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -958,6 +962,18 @@ export default function ControllerPage() {
     if (idx <= 0) return;
     const newBlocks = [...blocks];
     [newBlocks[idx], newBlocks[idx - 1]] = [newBlocks[idx - 1], newBlocks[idx]];
+    applyCanvasBlocksUpdate(newBlocks);
+  }, [layerConfig, applyCanvasBlocksUpdate]);
+
+  const handleLayerReorder = useCallback((layerId: string, toArrayIndex: number) => {
+    if (!layerId.startsWith("canvas:")) return;
+    const blockId = layerId.slice("canvas:".length);
+    const blocks = layerConfig.canvas?.textBlocks ?? [];
+    const fromIdx = blocks.findIndex((b) => b.id === blockId);
+    if (fromIdx < 0 || toArrayIndex < 0 || toArrayIndex >= blocks.length) return;
+    const newBlocks = [...blocks];
+    const [moved] = newBlocks.splice(fromIdx, 1);
+    newBlocks.splice(toArrayIndex, 0, moved);
     applyCanvasBlocksUpdate(newBlocks);
   }, [layerConfig, applyCanvasBlocksUpdate]);
 
@@ -1392,6 +1408,8 @@ export default function ControllerPage() {
   useEffect(() => { handleLayerMoveUpRef.current = handleLayerMoveUp; });
   const handleLayerMoveDownRef = useRef(handleLayerMoveDown);
   useEffect(() => { handleLayerMoveDownRef.current = handleLayerMoveDown; });
+  const handleLayerReorderRef = useRef(handleLayerReorder);
+  useEffect(() => { handleLayerReorderRef.current = handleLayerReorder; });
 
   useMenuEvents({
     openOutputRef,
@@ -1919,6 +1937,7 @@ export default function ControllerPage() {
                   onToggleVisible={handleLayerToggleVisible}
                   onMoveUp={handleLayerMoveUp}
                   onMoveDown={handleLayerMoveDown}
+                  onReorder={handleLayerReorder}
                 />
               </div>
             )}

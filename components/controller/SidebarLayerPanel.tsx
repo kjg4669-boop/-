@@ -2,8 +2,16 @@
 
 import { memo, useCallback } from "react";
 import {
-  Eye, EyeOff, Lock, Layers, Video, Type, Image as ImageIcon,
-  ChevronUp, ChevronDown,
+  DndContext, DragEndEvent, PointerSensor, useSensor, useSensors,
+  closestCenter,
+} from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Eye, EyeOff, Lock, Layers, Video, Type, Image as ImageIcon, GripVertical,
 } from "lucide-react";
 import type { LayerConfig } from "@/lib/types";
 
@@ -16,9 +24,7 @@ export interface LayerItem {
   type: LayerType;
   isVisible: boolean;
   isLocked: boolean;
-  /** 캔버스 블록의 배열 인덱스 (배경/-1, 캔버스블록=실제 인덱스) */
   arrayIndex: number;
-  /** 캔버스 블록 총 개수 */
   arrayTotal: number;
 }
 
@@ -29,14 +35,20 @@ const TYPE_ICONS: Record<LayerType, React.ComponentType<{ size?: number; classNa
   text: Type,
 };
 
-// ── layerConfig → LayerItem[] 변환 ────────────────────────────────────
+// Left stripe color per layer type (Illustrator-style)
+const TYPE_COLORS: Record<LayerType, string> = {
+  text:       "#f59e0b",
+  image:      "#10b981",
+  video:      "#3b82f6",
+  background: "#6b7280",
+};
+
+// ── layerConfig → LayerItem[] ─────────────────────────────────────────
 // 반환 순서: 높은 arrayIndex(앞쪽 레이어)가 먼저 오도록 내림차순
 export function deriveLayersFromConfig(config: LayerConfig): LayerItem[] {
   const layers: LayerItem[] = [];
-  const bg = config.background;
   const canvasBlocks = config.canvas?.textBlocks ?? [];
 
-  // 캔버스 텍스트 블록 — 배열 인덱스 높은 것이 위쪽(앞)에 표시
   for (let i = canvasBlocks.length - 1; i >= 0; i--) {
     const block = canvasBlocks[i];
     layers.push({
@@ -50,7 +62,7 @@ export function deriveLayersFromConfig(config: LayerConfig): LayerItem[] {
     });
   }
 
-  // 배경 — 항상 맨 아래 고정
+  const bg = config.background;
   layers.push({
     id: "background",
     name: bg.type === "video" ? "배경 영상" : bg.type === "image" ? "배경 이미지" : "배경",
@@ -64,74 +76,98 @@ export function deriveLayersFromConfig(config: LayerConfig): LayerItem[] {
   return layers;
 }
 
-// ── 개별 레이어 행 ─────────────────────────────────────────────────────
-interface LayerItemRowProps {
+// ── 개별 레이어 행 (sortable) ─────────────────────────────────────────
+interface LayerRowProps {
   layer: LayerItem;
   isActive: boolean;
   onSelect: (id: string) => void;
   onToggleVisible: (id: string) => void;
-  onMoveUp: (id: string) => void;
-  onMoveDown: (id: string) => void;
 }
 
-const LayerItemRow = memo(function LayerItemRow({
-  layer, isActive, onSelect, onToggleVisible, onMoveUp, onMoveDown,
-}: LayerItemRowProps) {
+const SortableLayerRow = memo(function SortableLayerRow({
+  layer, isActive, onSelect, onToggleVisible,
+}: LayerRowProps) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: layer.id, disabled: layer.isLocked });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
   const Icon = TYPE_ICONS[layer.type];
-  const canMoveUp = layer.arrayIndex >= 0 && layer.arrayIndex < layer.arrayTotal - 1;
-  const canMoveDown = layer.arrayIndex > 0;
+  const stripe = TYPE_COLORS[layer.type];
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       onClick={() => onSelect(layer.id)}
-      className={`flex items-center gap-1 px-1.5 py-1 rounded-sm select-none cursor-pointer transition-colors group ${
-        isActive
-          ? "bg-blue-600/25 border border-blue-500/50"
-          : "hover:bg-zinc-700/60 border border-transparent"
+      className={`relative flex items-stretch select-none cursor-pointer group border-b border-zinc-800 last:border-b-0 ${
+        isActive ? "bg-[#1e3a5f]" : "hover:bg-zinc-700/40"
       }`}
     >
-      <Icon size={13} className={isActive ? "text-blue-400 flex-shrink-0" : "text-zinc-500 flex-shrink-0"} />
+      {/* Left color stripe */}
+      <div style={{ width: 3, background: stripe, flexShrink: 0 }} />
 
-      <span className={`flex-1 text-xs truncate ${isActive ? "text-white" : "text-zinc-300"} ${!layer.isVisible ? "opacity-40" : ""}`}>
-        {layer.name}
-      </span>
+      {/* Eye / visibility */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onToggleVisible(layer.id); }}
+        disabled={layer.isLocked}
+        title={layer.isVisible ? "숨기기" : "표시"}
+        className="w-7 flex items-center justify-center flex-shrink-0 border-r border-zinc-700/60 hover:bg-zinc-600/40 disabled:cursor-default transition-colors"
+      >
+        {layer.isVisible
+          ? <Eye size={12} className="text-zinc-300" />
+          : <EyeOff size={12} className="text-zinc-600" />}
+      </button>
 
-      {/* 위/아래 이동 버튼 (캔버스 블록만) */}
-      {!layer.isLocked && (
-        <div className="flex flex-col gap-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          <button
-            onClick={(e) => { e.stopPropagation(); onMoveUp(layer.id); }}
-            disabled={!canMoveUp}
-            title="위로 (앞으로)"
-            className="p-0.5 rounded hover:bg-zinc-600 disabled:opacity-20 disabled:cursor-not-allowed"
+      {/* Lock */}
+      <div className="w-7 flex items-center justify-center flex-shrink-0 border-r border-zinc-700/60">
+        {layer.isLocked
+          ? <Lock size={11} className="text-zinc-500" />
+          : null}
+      </div>
+
+      {/* Drag handle + icon + name */}
+      <div className="flex-1 flex items-center gap-1.5 px-1.5 min-w-0">
+        {!layer.isLocked ? (
+          <div
+            {...attributes}
+            {...listeners}
+            className="flex-shrink-0 cursor-grab active:cursor-grabbing text-zinc-600 hover:text-zinc-400 touch-none"
+            onClick={(e) => e.stopPropagation()}
           >
-            <ChevronUp size={10} className="text-zinc-400" />
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); onMoveDown(layer.id); }}
-            disabled={!canMoveDown}
-            title="아래로 (뒤로)"
-            className="p-0.5 rounded hover:bg-zinc-600 disabled:opacity-20 disabled:cursor-not-allowed"
-          >
-            <ChevronDown size={10} className="text-zinc-400" />
-          </button>
-        </div>
-      )}
+            <GripVertical size={12} />
+          </div>
+        ) : (
+          <div className="w-3 flex-shrink-0" />
+        )}
 
-      {/* 가시성 토글 */}
-      {layer.isLocked ? (
-        <Lock size={11} className="text-zinc-700 flex-shrink-0" />
-      ) : (
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggleVisible(layer.id); }}
-          title={layer.isVisible ? "숨기기" : "표시"}
-          className={`p-0.5 rounded hover:bg-zinc-600 transition-colors flex-shrink-0 ${
-            layer.isVisible ? "text-zinc-300" : "text-zinc-600"
-          }`}
+        <Icon
+          size={12}
+          className={`flex-shrink-0 ${isActive ? "text-blue-400" : "text-zinc-500"}`}
+        />
+
+        <span
+          className={`text-xs truncate leading-none ${
+            isActive ? "text-white" : "text-zinc-300"
+          } ${!layer.isVisible ? "opacity-40 line-through" : ""}`}
         >
-          {layer.isVisible ? <Eye size={12} /> : <EyeOff size={12} />}
-        </button>
-      )}
+          {layer.name}
+        </span>
+      </div>
+
+      {/* Color dot */}
+      <div className="w-6 flex items-center justify-center flex-shrink-0">
+        <div
+          style={{ width: 8, height: 8, background: stripe, borderRadius: 1 }}
+          className="opacity-70"
+        />
+      </div>
     </div>
   );
 });
@@ -146,8 +182,9 @@ export interface SidebarLayerPanelProps {
   onDragHandleMouseDown: (e: React.MouseEvent) => void;
   onSelectLayer: (id: string) => void;
   onToggleVisible: (id: string) => void;
-  onMoveUp: (id: string) => void;
-  onMoveDown: (id: string) => void;
+  onMoveUp: (id: string) => void;   // kept for compatibility
+  onMoveDown: (id: string) => void; // kept for compatibility
+  onReorder?: (layerId: string, toArrayIndex: number) => void;
 }
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────
@@ -160,16 +197,38 @@ export default function SidebarLayerPanel({
   onDragHandleMouseDown,
   onSelectLayer,
   onToggleVisible,
-  onMoveUp,
-  onMoveDown,
+  onReorder,
 }: SidebarLayerPanelProps) {
   const layers = deriveLayersFromConfig(layerConfig);
 
+  // Canvas blocks only (draggable); background is fixed
+  const canvasLayers = layers.filter((l) => !l.isLocked);
+  const fixedLayers  = layers.filter((l) => l.isLocked);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !onReorder) return;
+
+    const ids = canvasLayers.map((l) => l.id);
+    const oldPanelIdx = ids.indexOf(active.id as string);
+    const newPanelIdx = ids.indexOf(over.id as string);
+    if (oldPanelIdx < 0 || newPanelIdx < 0) return;
+
+    // Panel order is DESCENDING arrayIndex, so convert:
+    const total = canvasLayers.length;
+    const toArrayIndex = (total - 1) - newPanelIdx;
+    onReorder(active.id as string, toArrayIndex);
+  }, [canvasLayers, onReorder]);
+
   return (
-    <div className="flex flex-col h-full select-none bg-[#1e1e1e]">
-      {/* 헤더 / 드래그 핸들 */}
+    <div className="flex flex-col h-full select-none bg-[#252526]">
+      {/* 헤더 */}
       <div
-        className={`flex items-center justify-between px-2 py-1.5 border-b border-zinc-700 flex-shrink-0 bg-zinc-800/60 ${
+        className={`flex items-center justify-between px-2 py-1.5 border-b border-zinc-700 flex-shrink-0 bg-[#2d2d2d] ${
           isFloating ? "cursor-grab active:cursor-grabbing" : ""
         }`}
         onMouseDown={isFloating ? onDragHandleMouseDown : undefined}
@@ -195,40 +254,73 @@ export default function SidebarLayerPanel({
         )}
       </div>
 
+      {/* 컬럼 헤더 */}
+      <div className="flex items-center text-[0.5rem] text-zinc-600 uppercase tracking-wider border-b border-zinc-700/60 bg-[#2a2a2a] flex-shrink-0">
+        <div style={{ width: 3 }} />
+        <div className="w-7 flex justify-center border-r border-zinc-700/40 py-1">👁</div>
+        <div className="w-7 flex justify-center border-r border-zinc-700/40 py-1">🔒</div>
+        <div className="flex-1 px-3 py-1">레이어</div>
+      </div>
+
       {/* 레이어 목록 */}
-      <div className="flex-1 overflow-y-auto p-1 space-y-0.5 min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {layers.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-700">
             <Layers size={20} />
             <span className="text-[0.625rem]">레이어 없음</span>
           </div>
         ) : (
-          layers.map((layer) => (
-            <LayerItemRow
-              key={layer.id}
-              layer={layer}
-              isActive={activeLayerId === layer.id}
-              onSelect={onSelectLayer}
-              onToggleVisible={onToggleVisible}
-              onMoveUp={onMoveUp}
-              onMoveDown={onMoveDown}
-            />
-          ))
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={canvasLayers.map((l) => l.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {canvasLayers.map((layer) => (
+                <SortableLayerRow
+                  key={layer.id}
+                  layer={layer}
+                  isActive={activeLayerId === layer.id}
+                  onSelect={onSelectLayer}
+                  onToggleVisible={onToggleVisible}
+                />
+              ))}
+            </SortableContext>
+
+            {/* 배경은 항상 하단 고정 */}
+            {fixedLayers.map((layer) => (
+              <SortableLayerRow
+                key={layer.id}
+                layer={layer}
+                isActive={activeLayerId === layer.id}
+                onSelect={onSelectLayer}
+                onToggleVisible={onToggleVisible}
+              />
+            ))}
+          </DndContext>
         )}
       </div>
 
-      {/* 선택된 레이어 푸터 */}
-      {activeLayerId && (() => {
-        const active = layers.find((l) => l.id === activeLayerId);
-        if (!active) return null;
-        const Icon = TYPE_ICONS[active.type];
-        return (
-          <div className="flex items-center gap-1.5 px-2 py-1 border-t border-zinc-700 bg-zinc-800/30 flex-shrink-0">
-            <Icon size={10} className="text-zinc-500 flex-shrink-0" />
-            <span className="text-[0.625rem] text-zinc-400 flex-1 truncate">{active.name}</span>
-          </div>
-        );
-      })()}
+      {/* 하단 — 선택된 레이어 정보 + 레이어 수 */}
+      <div className="flex items-center justify-between px-2 py-1 border-t border-zinc-700 bg-[#2a2a2a] flex-shrink-0">
+        {activeLayerId ? (() => {
+          const active = layers.find((l) => l.id === activeLayerId);
+          if (!active) return <span className="text-[0.625rem] text-zinc-600">—</span>;
+          const Icon = TYPE_ICONS[active.type];
+          return (
+            <div className="flex items-center gap-1 min-w-0">
+              <Icon size={10} className="text-zinc-500 flex-shrink-0" />
+              <span className="text-[0.625rem] text-zinc-400 truncate">{active.name}</span>
+            </div>
+          );
+        })() : (
+          <span className="text-[0.625rem] text-zinc-600">선택 없음</span>
+        )}
+        <span className="text-[0.5625rem] text-zinc-600 flex-shrink-0 ml-2">{layers.length} 레이어</span>
+      </div>
     </div>
   );
 }

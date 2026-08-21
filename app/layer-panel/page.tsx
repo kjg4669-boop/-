@@ -49,6 +49,9 @@ export default function LayerPanelPage() {
         onMoveDown={(layerId) => {
           emit("layer:moveDown", { layerId }).catch(() => {});
         }}
+        onReorder={(layerId, toArrayIndex) => {
+          emit("layer:reorder", { layerId, toArrayIndex }).catch(() => {});
+        }}
       />
     </div>
   );
