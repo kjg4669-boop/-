@@ -5,18 +5,27 @@ import { listen } from "@tauri-apps/api/event";
 import type { LayerConfig } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
 
+type BgConfig = LayerConfig["background"];
+interface SubContent { lines: string[]; lines2: string[] }
+
 interface Props {
   layerConfig: LayerConfig;
   isBlackout: boolean;
   isLive: boolean;
+  /** 렌더링 너비 px (기본 232 — 도킹 사이드바). 창모드에서는 실제 창 너비를 전달 */
+  width?: number;
+  /** true이면 테두리/둥근 모서리 없음 (창모드 전체화면용) */
+  fullscreen?: boolean;
 }
 
-// Preview is rendered at 232×130 (≈16:9, fits w-64 sidebar)
-const PREVIEW_W = 232;
+const DEFAULT_W = 232;
 const NATIVE_W = 1920;
-const SCALE = PREVIEW_W / NATIVE_W;
+const NATIVE_H = 1080;
 
-export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props) {
+export default function OutputPreview({ layerConfig, isBlackout, isLive, width = DEFAULT_W, fullscreen = false }: Props) {
+  const SCALE = width / NATIVE_W;
+  const height = Math.round(width * NATIVE_H / NATIVE_W);
+  const scaleRatio = width / DEFAULT_W; // 고정 px 값 비례 스케일용
   const bg = layerConfig.background;
   const sub = layerConfig.subtitle;
   const canvasBlocks = layerConfig.canvas?.textBlocks ?? [];
@@ -29,8 +38,17 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   const activeLinesKey = `${sub.nonce ?? 0}:${activeLines.join("\0")}`;
   const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
 
+  // ── 배경 두 슬롯 크로스페이드 ──────────────────────────────────────
+  const bgIdentity = `${bg.type}:${bg.src ?? ""}:${bg.color ?? ""}`;
+  const [bgSlots, setBgSlots] = useState<[BgConfig, BgConfig]>([bg, bg]);
+  const [activeBgSlot, setActiveBgSlot] = useState<0 | 1>(0);
+  const currentBgSlot = useRef<0 | 1>(0);
+  const bgFirstRender = useRef(true);
+
   // ── 자막 두 슬롯 크로스페이드 ──────────────────────────────────────
-  const [slots, setSlots] = useState<[string[], string[]]>([activeLines, []]);
+  const [slots, setSlots] = useState<[SubContent, SubContent]>([
+    { lines: activeLines, lines2: sub.lines2 ?? [] }, { lines: [], lines2: [] },
+  ]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const currentSlot = useRef<0 | 1>(0);
   const isFirstRender = useRef(true);
@@ -43,15 +61,15 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   const currentCanvasSlot = useRef<0 | 1>(0);
   const isCanvasFirstRender = useRef(true);
 
-  // 개발자 디버그
-  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  // Video refs for bg slots
+  const videoRefs = useRef<[HTMLVideoElement | null, HTMLVideoElement | null]>([null, null]);
 
   // Pause video when output is not live (standby), play when live
   useEffect(() => {
-    const v = previewVideoRef.current;
-    if (!v) return;
-    if (isLive) v.play().catch(() => {});
-    else v.pause();
+    videoRefs.current.forEach(v => {
+      if (!v) return;
+      if (isLive) v.play().catch(() => {}); else v.pause();
+    });
   }, [isLive]);
 
   const [showDebug, setShowDebug] = useState(false);
@@ -64,13 +82,22 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
     return () => { unlisten?.(); };
   }, []);
 
+  // ── 배경 crossfade effect ──────────────────────────────────────────
+  useEffect(() => {
+    if (bgFirstRender.current) { bgFirstRender.current = false; setBgSlots([bg, bg]); return; }
+    const next = (1 - currentBgSlot.current) as 0 | 1;
+    currentBgSlot.current = next;
+    setBgSlots(prev => { const s: [BgConfig, BgConfig] = [prev[0], prev[1]]; s[next] = bg; return s; });
+    setActiveBgSlot(next);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bgIdentity]);
+
   useEffect(() => {
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      // 첫 변경은 애니메이션 없이 현재 슬롯 내용만 업데이트
       setSlots(prev => {
-        const next: [string[], string[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = activeLines;
+        const next: [SubContent, SubContent] = [prev[0], prev[1]];
+        next[currentSlot.current] = { lines: activeLines, lines2: sub.lines2 ?? [] };
         return next;
       });
       return;
@@ -78,22 +105,19 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
 
     if (sub.textEntrance === "none") {
       setSlots(prev => {
-        const next: [string[], string[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = activeLines;
+        const next: [SubContent, SubContent] = [prev[0], prev[1]];
+        next[currentSlot.current] = { lines: activeLines, lines2: sub.lines2 ?? [] };
         return next;
       });
       return;
     }
 
-    // 비활성 슬롯에 새 내용 기입 후 activeSlot 전환 (한 배치로 커밋).
-    // 비활성 슬롯은 항상 opacity:0 상태이므로 브라우저가 "from" 값을 알고 있어
-    // CSS transition이 0→1 으로 정상 동작함.
     const nextSlot = (1 - currentSlot.current) as 0 | 1;
     currentSlot.current = nextSlot;
 
     setSlots(prev => {
-      const next: [string[], string[]] = [prev[0], prev[1]];
-      next[nextSlot] = activeLines;
+      const next: [SubContent, SubContent] = [prev[0], prev[1]];
+      next[nextSlot] = { lines: activeLines, lines2: sub.lines2 ?? [] };
       return next;
     });
     setActiveSlot(nextSlot);
@@ -133,16 +157,51 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasBlocksKey]);
 
-  // ── 배경 스타일 ────────────────────────────────────────────────────
-  let bgStyle: React.CSSProperties = {};
-  if (bg.type === "color") {
-    bgStyle = { backgroundColor: bg.color ?? "#000000", opacity: bg.opacity };
-  } else if (bg.type === "image" && bg.src) {
-    const url = toDisplayUrl(bg.src);
-    bgStyle = url
-      ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center", opacity: bg.opacity }
-      : { backgroundColor: "#000" };
-  }
+  // ── 배경 슬롯 렌더링 ───────────────────────────────────────────────
+  const bgStyleFor = (bgCfg: BgConfig): React.CSSProperties => {
+    if (bgCfg.type === "color") return { backgroundColor: bgCfg.color ?? "#000", opacity: bgCfg.opacity };
+    if (bgCfg.type === "image" && bgCfg.src) {
+      const url = toDisplayUrl(bgCfg.src);
+      return url
+        ? { backgroundImage: `url(${url})`, backgroundSize: "cover", backgroundPosition: "center", opacity: bgCfg.opacity }
+        : { backgroundColor: "#000" };
+    }
+    return {};
+  };
+
+  const renderBgSlot = (idx: 0 | 1) => {
+    const bgCfg = bgSlots[idx];
+    const videoUrl = bgCfg.type === "video" && bgCfg.src ? toDisplayUrl(bgCfg.src) : null;
+    return (
+      <div
+        key={idx}
+        style={{
+          position: "absolute", inset: 0,
+          opacity: activeBgSlot === idx ? 1 : 0,
+          transition: `opacity ${fadeMsRef.current}ms ease-in-out`,
+        }}
+      >
+        {bgCfg.type !== "video" && <div style={{ position: "absolute", inset: 0, ...bgStyleFor(bgCfg) }} />}
+        {bgCfg.type === "video" && (
+          videoUrl
+            ? <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 10 }}>
+                <video
+                  ref={el => { videoRefs.current[idx] = el; }}
+                  src={videoUrl}
+                  muted
+                  autoPlay
+                  loop={bgCfg.loop ?? true}
+                  playsInline
+                  style={{ width: "100%", height: "100%", objectFit: "cover", opacity: bgCfg.opacity ?? 1 }}
+                />
+              </div>
+            : <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center" style={{ zIndex: 10 }}>
+                <span className="text-zinc-600 text-xs select-none">▶ 영상</span>
+              </div>
+        )}
+      </div>
+    );
+  };
 
   const positionJustify: Record<string, string> = { top: "flex-start", center: "center", bottom: "flex-end" };
   const scaledFontSize = Math.max(8, sub.fontSize * SCALE);
@@ -159,15 +218,16 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
   const enterDistScaled = `${Math.round(enterDistPx * SCALE)}px`;
   const enterScale = `${(1 - (intensity / 100) * 0.6).toFixed(3)}`;
 
-  const renderLines = (lines: string[]) => {
+  const renderLines = ({ lines, lines2 }: SubContent) => {
     if (lines.length === 0) return null;
+    const boxPad = Math.max(1, Math.round(2 * scaleRatio));
     return (
       <div
         style={{
           width: "100%",
           textAlign: sub.textAlign ?? "center",
           ...(sub.backgroundBoxVisible
-            ? { backgroundColor: `rgba(0,0,0,${sub.backgroundBoxOpacity})`, padding: "1px 3px", borderRadius: 2 }
+            ? { backgroundColor: `rgba(0,0,0,${sub.backgroundBoxOpacity})`, padding: `${boxPad}px ${boxPad * 3}px`, borderRadius: boxPad }
             : {}),
         }}
       >
@@ -181,71 +241,65 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
               fontStyle: sub.fontStyle ?? "normal",
               color: sub.color,
               WebkitTextStroke: sub.strokeWidth > 0 ? `${sub.strokeWidth * SCALE}px ${sub.strokeColor}` : undefined,
-              textShadow: sub.shadowEnabled ? "0 1px 2px #000" : undefined,
-              lineHeight: 1.25,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              textShadow: sub.shadowEnabled ? `0 ${Math.max(1, Math.round(2 * SCALE))}px ${Math.max(2, Math.round(8 * SCALE))}px #000` : undefined,
+              lineHeight: sub.lineHeight ?? 1.25,
+              letterSpacing: sub.letterSpacing != null ? `${sub.letterSpacing * SCALE}px` : undefined,
             }}
           >
             {line}
           </div>
         ))}
+        {sub.bilingualEnabled && lines2.map((l2, i) => (
+          l2 ? (
+            <div key={`l2-${i}`} style={{
+              fontFamily: sub.fontFamily,
+              fontSize: Math.max(6, (sub.fontSize2 ?? Math.round(sub.fontSize * 0.7)) * SCALE),
+              fontWeight: sub.fontWeight2 ?? "normal",
+              fontStyle: sub.fontStyle2 ?? "normal",
+              color: sub.color2 ?? "#cccccc",
+              lineHeight: sub.lineHeight ?? 1.25,
+            }}>{l2}</div>
+          ) : null
+        ))}
       </div>
     );
   };
 
+  const subPadV = Math.max(2, Math.round(18 * scaleRatio));
+  const subPadH = Math.max(1, Math.round(4 * scaleRatio));
+
   const slotStyle = (idx: 0 | 1): React.CSSProperties => ({
-    paddingTop: 18,
-    paddingBottom: 18,
+    paddingTop: subPadV,
+    paddingBottom: subPadV,
+    paddingLeft: subPadH,
+    paddingRight: subPadH,
     justifyContent: positionJustify[sub.position] ?? "center",
     opacity: activeSlot === idx ? (sub.opacity ?? 1) : 0,
-    transition: `opacity ${fadeMsRef.current}ms ease`,
+    transition: `opacity ${fadeMsRef.current}ms ease-in-out`,
     pointerEvents: "none",
   });
 
   return (
     <div
-      style={{ width: PREVIEW_W, height: 130 }}
-      className="relative overflow-hidden rounded bg-black border border-zinc-600 flex-shrink-0"
+      style={{ width, height }}
+      className={`relative overflow-hidden bg-black flex-shrink-0${fullscreen ? "" : " rounded border border-zinc-600"}`}
     >
-      {/* 배경 */}
-      {bg.type !== "video" && <div className="absolute inset-0" style={bgStyle} />}
-      {bg.type === "video" && (() => {
-        const url = bg.src ? toDisplayUrl(bg.src) : null;
-        return url ? (
-          // Wrap in positioned div: WebKit/WKWebView <video> escapes stacking context
-          // and renders above siblings regardless of z-index
-          <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 10 }}>
-            <video
-              ref={previewVideoRef}
-              src={url}
-              muted
-              autoPlay
-              loop={bg.loop ?? true}
-              playsInline
-              style={{ width: "100%", height: "100%", objectFit: "cover", opacity: bg.opacity ?? 1 }}
-            />
-          </div>
-        ) : (
-          <div className="absolute inset-0 bg-zinc-900 flex items-center justify-center" style={{ zIndex: 10 }}>
-            <span className="text-zinc-600 text-xs select-none">▶ 영상</span>
-          </div>
-        );
-      })()}
+      {/* 배경 두 슬롯 크로스페이드 */}
+      {renderBgSlot(0)}
+      {renderBgSlot(1)}
 
       {/* 블랙아웃 */}
       {isBlackout && <div className="absolute inset-0 bg-black" style={{ zIndex: 90 }} />}
 
       {/* 자막 슬롯 0 */}
       {!isBlackout && (
-        <div className="absolute inset-0 flex flex-col px-1" style={{ ...slotStyle(0), zIndex: 20 }}>
+        <div className="absolute inset-0 flex flex-col" style={{ ...slotStyle(0), zIndex: 20 }}>
           {renderLines(slots[0])}
         </div>
       )}
       {/* 자막 슬롯 1 */}
       {!isBlackout && (
-        <div className="absolute inset-0 flex flex-col px-1" style={{ ...slotStyle(1), zIndex: 20 }}>
+        <div className="absolute inset-0 flex flex-col" style={{ ...slotStyle(1), zIndex: 20 }}>
           {renderLines(slots[1])}
         </div>
       )}
@@ -258,7 +312,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
           className="absolute inset-0"
           style={{
             opacity: activeCanvasSlot === idx ? 1 : 0,
-            transition: `opacity ${fadeMsRef.current}ms ease`,
+            transition: `opacity ${fadeMsRef.current}ms ease-in-out`,
             pointerEvents: "none",
             zIndex: 30,
             transform: "translateZ(0)",
@@ -320,17 +374,14 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive }: Props
           }}
         >
           <div>entrance: <b>{sub.textEntrance ?? "fade"}</b> | ms: {FADE_MS}</div>
+          <div>bg: slot{activeBgSlot} | type: {bg.type}</div>
           <div>sub: slot{activeSlot} | visible: {sub.visible ? "yes" : "NO"} | lines: {sub.lines.length}</div>
           <div>canvas: slot{activeCanvasSlot} | blocks: {canvasBlocks.length}</div>
-          <div>s0: {slots[0].length}줄 | s1: {slots[1].length}줄 | cs0: {canvasSlots[0].length} | cs1: {canvasSlots[1].length}</div>
+          <div>s0: {slots[0].lines.length}줄 | s1: {slots[1].lines.length}줄 | cs0: {canvasSlots[0].length} | cs1: {canvasSlots[1].length}</div>
           {debugLog.map((e, i) => <div key={i} style={{ color: "#aaffcc" }}>{e}</div>)}
         </div>
       )}
 
-      {/* 우하단 상태 레이블 */}
-      <div className="absolute bottom-0.5 right-1 text-xs text-zinc-600 pointer-events-none">
-        {isLive ? "미리보기" : "송출 대기"}
-      </div>
     </div>
   );
 }
