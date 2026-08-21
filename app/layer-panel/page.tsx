@@ -52,6 +52,15 @@ export default function LayerPanelPage() {
         onReorder={(layerId, toArrayIndex) => {
           emit("layer:reorder", { layerId, toArrayIndex }).catch(() => {});
         }}
+        onAddBlock={() => {
+          emit("layer:addBlock", {}).catch(() => {});
+        }}
+        onDuplicateBlock={(layerId) => {
+          emit("layer:duplicateBlock", { layerId }).catch(() => {});
+        }}
+        onDeleteBlock={(layerId) => {
+          emit("layer:deleteBlock", { layerId }).catch(() => {});
+        }}
       />
     </div>
   );

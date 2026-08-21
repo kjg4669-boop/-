@@ -815,6 +815,18 @@ export default function ControllerPage() {
       listen<{ layerId: string; toArrayIndex: number }>("layer:reorder", (ev) => {
         handleLayerReorderRef.current(ev.payload.layerId, ev.payload.toArrayIndex);
       }).then((fn) => unlisteners.push(fn));
+
+      listen("layer:addBlock", () => {
+        handleLayerAddBlockRef.current();
+      }).then((fn) => unlisteners.push(fn));
+
+      listen<{ layerId: string }>("layer:duplicateBlock", (ev) => {
+        handleLayerDuplicateBlockRef.current(ev.payload.layerId);
+      }).then((fn) => unlisteners.push(fn));
+
+      listen<{ layerId: string }>("layer:deleteBlock", (ev) => {
+        handleLayerDeleteBlockRef.current(ev.payload.layerId);
+      }).then((fn) => unlisteners.push(fn));
     }).catch(() => {});
     return () => { unlisteners.forEach((fn) => fn()); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -975,6 +987,32 @@ export default function ControllerPage() {
     const [moved] = newBlocks.splice(fromIdx, 1);
     newBlocks.splice(toArrayIndex, 0, moved);
     applyCanvasBlocksUpdate(newBlocks);
+  }, [layerConfig, applyCanvasBlocksUpdate]);
+
+  const handleLayerAddBlock = useCallback(() => {
+    canvasRef.current?.addBlock();
+  }, []);
+
+  const handleLayerDuplicateBlock = useCallback((layerId: string) => {
+    if (!layerId.startsWith("canvas:")) return;
+    const blockId = layerId.slice("canvas:".length);
+    const blocks = layerConfig.canvas?.textBlocks ?? [];
+    const original = blocks.find((b) => b.id === blockId);
+    if (!original) return;
+    const newBlock: TextBlock = {
+      ...original,
+      id: `dup-${Date.now()}`,
+      x: Math.min(original.x + 30, 1920 - original.width),
+      y: Math.min(original.y + 30, 1080 - (original.height ?? 200)),
+    };
+    applyCanvasBlocksUpdate([...blocks, newBlock]);
+  }, [layerConfig, applyCanvasBlocksUpdate]);
+
+  const handleLayerDeleteBlock = useCallback((layerId: string) => {
+    if (!layerId.startsWith("canvas:")) return;
+    const blockId = layerId.slice("canvas:".length);
+    const blocks = layerConfig.canvas?.textBlocks ?? [];
+    applyCanvasBlocksUpdate(blocks.filter((b) => b.id !== blockId));
   }, [layerConfig, applyCanvasBlocksUpdate]);
 
   const handleSaveGlobal = useCallback((config: LayerConfig) => {
@@ -1410,6 +1448,12 @@ export default function ControllerPage() {
   useEffect(() => { handleLayerMoveDownRef.current = handleLayerMoveDown; });
   const handleLayerReorderRef = useRef(handleLayerReorder);
   useEffect(() => { handleLayerReorderRef.current = handleLayerReorder; });
+  const handleLayerAddBlockRef = useRef(handleLayerAddBlock);
+  useEffect(() => { handleLayerAddBlockRef.current = handleLayerAddBlock; });
+  const handleLayerDuplicateBlockRef = useRef(handleLayerDuplicateBlock);
+  useEffect(() => { handleLayerDuplicateBlockRef.current = handleLayerDuplicateBlock; });
+  const handleLayerDeleteBlockRef = useRef(handleLayerDeleteBlock);
+  useEffect(() => { handleLayerDeleteBlockRef.current = handleLayerDeleteBlock; });
 
   useMenuEvents({
     openOutputRef,
@@ -1938,6 +1982,9 @@ export default function ControllerPage() {
                   onMoveUp={handleLayerMoveUp}
                   onMoveDown={handleLayerMoveDown}
                   onReorder={handleLayerReorder}
+                  onAddBlock={handleLayerAddBlock}
+                  onDuplicateBlock={handleLayerDuplicateBlock}
+                  onDeleteBlock={handleLayerDeleteBlock}
                 />
               </div>
             )}
