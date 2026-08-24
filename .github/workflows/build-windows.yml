@@ -24,11 +24,24 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+          components: llvm-tools-preview
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      - name: Install NSIS
+        run: |
+          choco install nsis --no-progress -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
+      - name: Install WebView2
+        run: |
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile 'MicrosoftEdgeWebview2Setup.exe'
+          Start-Process -FilePath 'MicrosoftEdgeWebview2Setup.exe' -ArgumentList '/install' -NoNewWindow -Wait
+        shell: pwsh
+        continue-on-error: true
 
       - name: Install frontend dependencies
         run: npm ci
@@ -36,8 +49,7 @@ jobs:
       - name: Build app
         run: npm run tauri build
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ""
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          TAURI_SKIP_DEVSERVER_CHECK: true
 
       - name: Upload installer (MSI)
         uses: actions/upload-artifact@v4
