@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { Tv, Monitor, Mic, ChevronDown } from "lucide-react";
 import type { DisplayInfo } from "@/lib/types";
 import type { OutputScaleMode } from "@/stores/settingsStore";
 
@@ -171,23 +172,6 @@ export default function ControlBar({
           className="px-1 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white border-l border-zinc-600 text-xs" title="1초 증가">+</button>
       </div>
 
-      {isVideoBackground && (
-        <>
-          <div className="w-px h-5 bg-zinc-600" />
-          <div className="flex items-center gap-1 px-1 bg-zinc-700 rounded">
-            <button
-              onClick={onToggleVideoPlay}
-              className="text-xs px-1.5 py-1 text-zinc-200 hover:text-white"
-              title={videoPlaying ? "영상 일시정지" : "영상 재생"}
-            >
-              {videoPlaying ? "⏸" : "▶"}
-            </button>
-            <span className="text-xs text-zinc-400 max-w-[80px] truncate" title={videoSrc}>
-              {videoSrc.replace(/\\/g, "/").split("/").pop() ?? "영상"}
-            </span>
-          </div>
-        </>
-      )}
 
       <div className="w-px h-5 bg-zinc-600" />
 
@@ -216,7 +200,7 @@ export default function ControlBar({
           className={`px-2 py-1 rounded text-white font-medium flex items-center gap-1 ${isLive && !outputConnected ? "bg-orange-600 hover:bg-orange-500 animate-pulse" : "bg-blue-700 hover:bg-blue-600"}`}
           title={isLive && !outputConnected ? "송출 중이지만 출력창이 연결되지 않았습니다!" : "출력창 설정"}
         >
-          📺 출력창 설정 ▾
+          <Tv size={14} /><span>출력창 설정</span><ChevronDown size={12} />
           <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: outputConnected ? "#4ade80" : "#6b7280", marginLeft: 2, verticalAlign: "middle" }} />
         </button>
         {showOutputMenu && (
@@ -255,15 +239,15 @@ export default function ControlBar({
               onClick={() => { onOpenPreviewOnly(); setShowOutputMenu(false); }}
               className="w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 text-zinc-200 flex items-center gap-2"
             >
-              🖥 미리보기 창(기본값)
+              <Monitor size={13} />미리보기 창(기본값)
             </button>
           </div>
         )}
       </div>
 
       <button onClick={onToggleStage} title="발표자 모니터"
-        className={`px-2 py-1 rounded font-medium ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}>
-        🎤 발표자 모니터
+        className={`px-2 py-1 rounded font-medium flex items-center gap-1 ${isStageOpen ? "bg-indigo-700 hover:bg-indigo-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}>
+        <Mic size={14} /><span>발표자 모니터</span>
       </button>
 
       {/* Stage message quick send */}

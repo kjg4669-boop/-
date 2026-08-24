@@ -40,6 +40,14 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["wpjson"],
+        "name": "Worship Projector Service",
+        "description": "Worship Projector 예배 파일",
+        "mimeType": "application/json"
+      }
     ]
   }
 }

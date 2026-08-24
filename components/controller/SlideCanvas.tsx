@@ -33,7 +33,7 @@ type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const MOVE_HANDLES = new Set<HandlePos>(["nw", "n", "ne"]);
 
 interface Props {
-  onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[] }) => void;
+  onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: import("@/lib/types").ShapeBlock[] }) => void;
   onSelectionChange?: (block: TextBlock | null) => void;
 }
 

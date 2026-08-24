@@ -1,7 +1,13 @@
 "use client";
 
-import type { LayerConfig, Look } from "@/lib/types";
+import type { LayerConfig, Look, ShapeBlock, ShapeType } from "@/lib/types";
 import { FONT_OPTIONS } from "@/lib/constants";
+import {
+  FilePlus, FolderOpen, Save, FileDown, Undo2, Redo2, BookMarked, LayoutTemplate,
+  Upload, ClipboardPaste, Scissors, Copy, Paintbrush, Palette, Monitor,
+  PanelLeft, Music, BookOpen, Image as ImageIcon, Video, Volume2,
+  Files, FileText, Info, Repeat, Database, HardDriveDownload, ChevronDown,
+} from "lucide-react";
 
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
 
@@ -46,6 +52,7 @@ interface Props {
   onNewService: () => void;
   onOpenService: () => void;
   onSave: () => void;
+  onSaveAsFile: () => void;
   onBackupDb: () => void;
   onRestoreDb: () => void;
 
@@ -91,6 +98,10 @@ interface Props {
   removedPanels?: string[];
   panelLabels?: Record<string, string>;
   onRestorePanel?: (tab: string) => void;
+
+  selectedShape: ShapeBlock | null;
+  onAddShape: (type: ShapeType) => void;
+  onUpdateShape: (patch: Partial<ShapeBlock>) => void;
 }
 
 const TAB_LABELS: Record<RibbonTab, string> = {
@@ -105,7 +116,7 @@ export default function RibbonToolbar({
   onPasteBlock, onCutBlock, onCopyBlock, onActivateFmtPainter, fmtPainterOn, hasSelectedBlock,
   fmt, onFormat,
   layerConfig, onLayerChange,
-  onNewService, onOpenService, onSave, onBackupDb, onRestoreDb,
+  onNewService, onOpenService, onSave, onSaveAsFile, onBackupDb, onRestoreDb,
   isLoop, onToggleLoop,
   isBlackout, onToggleBlackout, isClear, onToggleClear, onOpenOutput, onFromStart, onCloseOutput,
   serviceNotes, onServiceNotesChange,
@@ -115,6 +126,7 @@ export default function RibbonToolbar({
   onOpenDesignPanel, onShowAbout,
   looks, currentLookId, onApplyLook,
   removedPanels, panelLabels, onRestorePanel,
+  selectedShape, onAddShape, onUpdateShape,
 }: Props) {
   function setSubtitle(patch: Partial<LayerConfig["subtitle"]>) {
     onLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
@@ -138,9 +150,9 @@ export default function RibbonToolbar({
         <button
           onClick={onShowAbout}
           title="Worship Projector 정보"
-          className="px-2 h-full text-zinc-500 hover:text-zinc-300 transition-colors text-sm"
+          className="px-2 h-full text-zinc-500 hover:text-zinc-300 transition-colors flex items-center"
         >
-          ℹ
+          <Info size={14} />
         </button>
       </div>
 
@@ -152,18 +164,23 @@ export default function RibbonToolbar({
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
             <button onClick={onNewService} title="새 예배 (⌘N)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">📄</span>
-              <span className="text-[10px] mt-0.5">새 예배</span>
+              <FilePlus size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">새 예배</span>
             </button>
             <button onClick={onOpenService} title="예배 열기 (⌘O)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">📂</span>
-              <span className="text-[10px] mt-0.5">열기</span>
+              <FolderOpen size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">열기</span>
             </button>
             <button onClick={onSave} disabled={!hasService} title="저장 (⌘S)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
-              <span className="text-base leading-none">💾</span>
-              <span className="text-[10px] mt-0.5">저장</span>
+              <Save size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">저장</span>
+            </button>
+            <button onClick={onSaveAsFile} disabled={!hasService} title="다른 이름으로 저장 (.wpjson / .json / .txt)"
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
+              <FileDown size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">다른이름</span>
             </button>
           </div>
 
@@ -171,13 +188,13 @@ export default function RibbonToolbar({
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
             <button onClick={onUndo} disabled={!canUndo} title="실행 취소 (⌘Z)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
-              <span className="text-base leading-none">↩</span>
-              <span className="text-[10px] mt-0.5">취소</span>
+              <Undo2 size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">취소</span>
             </button>
             <button onClick={onRedo} disabled={!canRedo} title="다시 실행 (⌘⇧Z)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
-              <span className="text-base leading-none">↪</span>
-              <span className="text-[10px] mt-0.5">복원</span>
+              <Redo2 size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">복원</span>
             </button>
           </div>
 
@@ -186,19 +203,19 @@ export default function RibbonToolbar({
             <button onClick={onSaveTemplate} disabled={!hasService || serviceItemCount === 0}
               title="현재 예배를 템플릿으로 저장"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
-              <span className="text-base leading-none">📑</span>
-              <span className="text-[10px] mt-0.5">템플릿저장</span>
+              <BookMarked size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">템플릿저장</span>
             </button>
             <button onClick={onOpenTemplateModal} title="템플릿에서 새 예배 만들기"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">📋</span>
-              <span className="text-[10px] mt-0.5">템플릿</span>
+              <LayoutTemplate size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">템플릿</span>
             </button>
             <button onClick={onExportService} disabled={!hasService}
               title="현재 예배를 텍스트 파일로 내보내기"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
-              <span className="text-base leading-none">📤</span>
-              <span className="text-[10px] mt-0.5">내보내기</span>
+              <Upload size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">내보내기</span>
             </button>
           </div>
 
@@ -206,20 +223,25 @@ export default function RibbonToolbar({
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
             <button onClick={onPasteBlock}
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">📋</span>
-              <span className="text-[10px] mt-0.5">붙여넣기</span>
+              <ClipboardPaste size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">붙여넣기</span>
             </button>
-            <div className="flex flex-col gap-0.5">
-              <button onClick={onCutBlock}
-                className="px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-400 text-xs">✂ 잘라내기</button>
-              <button onClick={onCopyBlock}
-                className="px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-400 text-xs">📄 복사하기</button>
-              <button onClick={onActivateFmtPainter} disabled={!hasSelectedBlock}
-                className={`px-2 py-0.5 rounded text-xs disabled:text-zinc-600 disabled:cursor-default ${fmtPainterOn ? "bg-orange-600 text-white" : "hover:bg-zinc-700 text-zinc-400"}`}
-                title="선택한 블록의 서식을 다른 블록에 적용">
-                🖌 서식복사
-              </button>
-            </div>
+            <button onClick={onCutBlock}
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <Scissors size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">잘라내기</span>
+            </button>
+            <button onClick={onCopyBlock}
+              className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
+              <Copy size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">복사하기</span>
+            </button>
+            <button onClick={onActivateFmtPainter} disabled={!hasSelectedBlock}
+              className={`flex flex-col items-center px-1.5 py-0.5 rounded disabled:opacity-30 disabled:cursor-default ${fmtPainterOn ? "bg-orange-600 text-white" : "hover:bg-zinc-700 text-zinc-300"}`}
+              title="선택한 블록의 서식을 다른 블록에 적용">
+              <Paintbrush size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">서식복사</span>
+            </button>
           </div>
 
           {/* 글꼴 */}
@@ -292,19 +314,19 @@ export default function RibbonToolbar({
           <div className="flex items-center gap-0.5 border-l border-zinc-600 pl-2 ml-1">
             <button onClick={onBackupDb} title="데이터베이스 백업..."
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
-              <span className="text-base leading-none">🗄</span>
-              <span className="text-[10px] mt-0.5">백업</span>
+              <Database size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">백업</span>
             </button>
             <button onClick={onRestoreDb} title="데이터베이스 복원..."
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-400">
-              <span className="text-base leading-none">⬆️</span>
-              <span className="text-[10px] mt-0.5">복원</span>
+              <HardDriveDownload size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">복원</span>
             </button>
           </div>
 
           <button onClick={onToggleLoop}
-            className={`px-2 h-6 rounded ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
-            ↺ {isLoop ? "루프 ON" : "루프"}
+            className={`px-2 h-6 rounded flex items-center gap-1 ${isLoop ? "bg-yellow-700 text-yellow-200" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-400"}`}>
+            <Repeat size={13} />{isLoop ? "루프 ON" : "루프"}
           </button>
         </>)}
 
@@ -334,8 +356,8 @@ export default function RibbonToolbar({
           </div>
           <button onClick={onOpenDesignPanel}
             className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-            <span className="text-base leading-none">🎨</span>
-            <span className="text-[10px] mt-0.5">디자인 패널</span>
+            <Palette size={15} />
+            <span className="text-[10px] mt-0.5 whitespace-nowrap">디자인 패널</span>
           </button>
         </>)}
 
@@ -420,13 +442,13 @@ export default function RibbonToolbar({
           </div>
           <button onClick={onTogglePanel}
             className={`flex flex-col items-center px-2 py-0.5 rounded ${showPanel ? "bg-zinc-600 text-white" : "hover:bg-zinc-700 text-zinc-300"}`}>
-            <span className="text-base leading-none">☰</span>
-            <span className="text-[10px] mt-0.5">패널</span>
+            <PanelLeft size={15} />
+            <span className="text-[10px] mt-0.5 whitespace-nowrap">패널</span>
           </button>
           <button onClick={onOpenPreview}
             className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-            <span className="text-base leading-none">🖥</span>
-            <span className="text-[10px] mt-0.5">출력 미리보기</span>
+            <Monitor size={15} />
+            <span className="text-[10px] mt-0.5 whitespace-nowrap">출력 미리보기</span>
           </button>
           {removedPanels && removedPanels.length > 0 && (
             <div className="flex items-center gap-0.5 border-l border-zinc-600 pl-2 ml-1">
@@ -449,28 +471,28 @@ export default function RibbonToolbar({
             <button onClick={onNewSlide} disabled={!hasService}
               title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "새 슬라이드 추가"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base leading-none">🗒</span>
-              <span className="text-[10px] mt-0.5">새 슬라이드</span>
+              <FileText size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">새 슬라이드</span>
             </button>
             <button onClick={onDupSlide} disabled={!hasSlides}
               title={!hasSlides ? "슬라이드가 없습니다" : "현재 슬라이드 복제"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasSlides ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base leading-none">⧉</span>
-              <span className="text-[10px] mt-0.5">복제</span>
+              <Files size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">복제</span>
             </button>
           </div>
           <div className="border-r border-zinc-600 pr-3 mr-1 flex items-center gap-1">
             <button onClick={onAddSong} disabled={!hasService}
               title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "찬양 추가"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base leading-none">🎵</span>
-              <span className="text-[10px] mt-0.5">찬양</span>
+              <Music size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">찬양</span>
             </button>
             <button onClick={onAddScripture} disabled={!hasService}
               title={!hasService ? "순서 탭에서 예배를 먼저 선택하세요" : "성경 구절 추가"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasService ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
-              <span className="text-base leading-none">📖</span>
-              <span className="text-[10px] mt-0.5">성경</span>
+              <BookOpen size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">성경</span>
             </button>
           </div>
           <div className="border-r border-zinc-600 pr-3 mr-1 flex flex-col items-center">
@@ -478,30 +500,150 @@ export default function RibbonToolbar({
               title={!hasSlides ? "순서 탭에서 예배와 찬양을 먼저 추가하세요" : "텍스트 상자 추가"}
               className={`flex flex-col items-center px-2 py-0.5 rounded ${!hasSlides ? "opacity-40 cursor-not-allowed" : "hover:bg-zinc-700 text-zinc-300"}`}>
               <span className="text-base font-bold leading-none">T</span>
-              <span className="text-[10px] mt-0.5">텍스트 상자</span>
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">텍스트 상자</span>
             </button>
           </div>
-          <div className="flex gap-1">
+          {/* 도형 */}
+          <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col gap-0.5">
+            <div className="flex flex-wrap gap-0.5" style={{ maxWidth: 180 }}>
+              {(
+                [
+                  {
+                    type: "rect" as ShapeType, label: "사각형",
+                    svg: <rect x="2" y="4" width="20" height="16" rx="0" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "rounded-rect" as ShapeType, label: "둥근사각",
+                    svg: <rect x="2" y="4" width="20" height="16" rx="4" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "ellipse" as ShapeType, label: "타원",
+                    svg: <ellipse cx="12" cy="12" rx="10" ry="8" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "triangle" as ShapeType, label: "삼각형",
+                    svg: <polygon points="12,3 22,21 2,21" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "diamond" as ShapeType, label: "다이아몬드",
+                    svg: <polygon points="12,2 22,12 12,22 2,12" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "line" as ShapeType, label: "선",
+                    svg: <line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" strokeWidth="2" />,
+                  },
+                  {
+                    type: "arrow-right" as ShapeType, label: "화살표",
+                    svg: <polygon points="2,9 14,9 14,5 22,12 14,19 14,15 2,15" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "star" as ShapeType, label: "별",
+                    svg: <polygon points="12,2 14.4,8.8 22,9 16,13.6 18,21 12,17 6,21 8,13.6 2,9 9.6,8.8" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                  {
+                    type: "pentagon" as ShapeType, label: "오각형",
+                    svg: <polygon points="12,2 22,9 18,21 6,21 2,9" fill="none" stroke="currentColor" strokeWidth="1.5" />,
+                  },
+                ] as const
+              ).map(({ type, label, svg }) => (
+                <button
+                  key={type}
+                  onClick={() => onAddShape(type)}
+                  title={label}
+                  disabled={!hasSlides}
+                  className={`w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-600 ${!hasSlides ? "opacity-40 cursor-not-allowed text-zinc-500" : "text-zinc-300"}`}
+                >
+                  <svg viewBox="0 0 24 24" width="13" height="13">{svg}</svg>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 도형 속성 (선택된 도형이 있을 때) */}
+          {selectedShape && (
+            <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col justify-center gap-0.5">
+              {/* 채우기 */}
+              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+                <label className="relative cursor-pointer flex-shrink-0" title="채우기 색상">
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 3,
+                    background: selectedShape.fillEnabled ? selectedShape.fillColor : "transparent",
+                    border: "1.5px solid rgba(255,255,255,0.25)",
+                    opacity: selectedShape.fillEnabled ? 1 : 0.35,
+                  }} />
+                  <input type="color" value={selectedShape.fillColor}
+                    onChange={e => onUpdateShape({ fillColor: e.target.value })}
+                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                </label>
+                <span onClick={() => onUpdateShape({ fillEnabled: !selectedShape.fillEnabled })}
+                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.fillEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  도형 채우기
+                </span>
+                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+              </div>
+              {/* 윤곽선 */}
+              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+                <label className="relative cursor-pointer flex-shrink-0" title="윤곽선 색상">
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 3,
+                    background: "transparent",
+                    border: `2px solid ${selectedShape.strokeEnabled ? selectedShape.strokeColor : "rgba(255,255,255,0.2)"}`,
+                    opacity: selectedShape.strokeEnabled ? 1 : 0.35,
+                  }} />
+                  <input type="color" value={selectedShape.strokeColor}
+                    onChange={e => onUpdateShape({ strokeColor: e.target.value })}
+                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                </label>
+                <span onClick={() => onUpdateShape({ strokeEnabled: !selectedShape.strokeEnabled })}
+                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.strokeEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  도형 윤곽선
+                </span>
+                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+              </div>
+              {/* 효과 */}
+              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+                <label className="relative cursor-pointer flex-shrink-0" title="그림자 색상">
+                  <div style={{
+                    width: 18, height: 18, borderRadius: 3,
+                    background: "rgba(60,60,80,1)",
+                    boxShadow: selectedShape.shadowEnabled ? `2px 2px 5px ${selectedShape.shadowColor}` : "none",
+                    border: "1.5px solid rgba(255,255,255,0.15)",
+                    opacity: selectedShape.shadowEnabled ? 1 : 0.35,
+                  }} />
+                  <input type="color" value={selectedShape.shadowColor}
+                    onChange={e => onUpdateShape({ shadowColor: e.target.value })}
+                    className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                </label>
+                <span onClick={() => onUpdateShape({ shadowEnabled: !selectedShape.shadowEnabled })}
+                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.shadowEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  도형 효과
+                </span>
+                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+              </div>
+            </div>
+          )}
+
+          <div className="border-l border-zinc-600 pl-2 ml-1 flex gap-1">
             <button onClick={onInsertImage}
               className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">🖼</span>
-              <span className="text-[10px] mt-0.5">이미지</span>
+              <ImageIcon size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">이미지</span>
             </button>
             <button onClick={onInsertVideo}
               className="flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 text-zinc-300">
-              <span className="text-base leading-none">🎬</span>
-              <span className="text-[10px] mt-0.5">비디오</span>
+              <Video size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">비디오</span>
             </button>
             <button onClick={soundName ? onToggleSound : onInsertSound}
               className={`flex flex-col items-center px-2 py-0.5 rounded hover:bg-zinc-700 ${soundPlaying ? "text-green-400" : "text-zinc-300"}`}
               title={soundName ? `${soundName} — 클릭하여 ${soundPlaying ? "일시정지" : "재생"}` : "오디오 파일 열기"}>
-              <span className="text-base leading-none">🔊</span>
-              <span className="text-[10px] mt-0.5">{soundName ? (soundPlaying ? "▶ 재생중" : "⏸ 정지") : "사운드"}</span>
+              <Volume2 size={15} />
+              <span className="text-[10px] mt-0.5 whitespace-nowrap">{soundName ? (soundPlaying ? "재생중" : "정지") : "사운드"}</span>
             </button>
             {soundName && (
               <button onClick={onInsertSound}
                 className="flex flex-col items-center px-1 py-0.5 rounded hover:bg-zinc-700 text-zinc-500" title="다른 파일 열기">
-                <span className="text-xs">📂</span>
+                <FolderOpen size={12} />
               </button>
             )}
           </div>

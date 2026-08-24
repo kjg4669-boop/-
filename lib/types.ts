@@ -31,6 +31,40 @@ export interface TextBlock {
   visible?: boolean; // undefined/true = visible, false = hidden
 }
 
+export type ShapeType =
+  | "rect"
+  | "rounded-rect"
+  | "ellipse"
+  | "triangle"
+  | "diamond"
+  | "line"
+  | "arrow-right"
+  | "star"
+  | "pentagon";
+
+export interface ShapeBlock {
+  id: string;
+  x: number;           // px in 1920×1080 space
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  shapeType: ShapeType;
+  fillEnabled: boolean;
+  fillColor: string;       // e.g. "#3b82f6"
+  fillOpacity: number;     // 0-100
+  strokeEnabled: boolean;
+  strokeColor: string;
+  strokeWidth: number;     // px in 1920×1080 space
+  strokeOpacity: number;   // 0-100
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowBlur: number;
+  shadowX: number;
+  shadowY: number;
+  visible?: boolean;
+}
+
 export interface LyricSlide {
   id: string;
   section: LyricSection;
@@ -40,6 +74,7 @@ export interface LyricSlide {
   chords?: string;   // chord line for musicians e.g. "C  G  Am  F"
   canvas?: {
     textBlocks: TextBlock[];
+    shapeBlocks?: ShapeBlock[];
   };
 }
 
@@ -112,6 +147,7 @@ export interface LayerConfig {
   };
   canvas?: {
     textBlocks: TextBlock[];
+    shapeBlocks?: ShapeBlock[];
     nonce?: number; // increments on every slide navigation to always trigger animation
   };
 }

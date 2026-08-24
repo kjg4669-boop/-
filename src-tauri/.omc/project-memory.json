@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1785223188191,
+  "lastScanned": 1785409587149,
   "projectRoot": "/Volumes/P31/chppt/worship-projector/src-tauri",
   "techStack": {
     "languages": [
@@ -44,7 +44,7 @@
       "path": "capabilities",
       "purpose": null,
       "fileCount": 3,
-      "lastAccessed": 1785223188177,
+      "lastAccessed": 1785409587139,
       "keyFiles": [
         "default.json",
         "main.json",
@@ -55,14 +55,14 @@
       "path": "gen",
       "purpose": null,
       "fileCount": 0,
-      "lastAccessed": 1785223188177,
+      "lastAccessed": 1785409587139,
       "keyFiles": []
     },
     "icons": {
       "path": "icons",
       "purpose": null,
       "fileCount": 18,
-      "lastAccessed": 1785223188178,
+      "lastAccessed": 1785409587139,
       "keyFiles": [
         "128x128.png",
         "128x128@2x.png",
@@ -74,18 +74,21 @@
     "migrations": {
       "path": "migrations",
       "purpose": "Database migrations",
-      "fileCount": 2,
-      "lastAccessed": 1785223188178,
+      "fileCount": 6,
+      "lastAccessed": 1785409587139,
       "keyFiles": [
         "001_initial.sql",
-        "002_fix_fk.sql"
+        "002_fix_fk.sql",
+        "003_bible.sql",
+        "004_service_notes.sql",
+        "005_templates.sql"
       ]
     },
     "src": {
       "path": "src",
       "purpose": "Source code",
       "fileCount": 3,
-      "lastAccessed": 1785223188178,
+      "lastAccessed": 1785409587139,
       "keyFiles": [
         "display.rs",
         "lib.rs",
@@ -96,7 +99,7 @@
       "path": "target",
       "purpose": null,
       "fileCount": 2,
-      "lastAccessed": 1785223188178,
+      "lastAccessed": 1785409587139,
       "keyFiles": [
         "CACHEDIR.TAG"
       ]
@@ -105,7 +108,7 @@
       "path": "gen/schemas",
       "purpose": "Schema definitions",
       "fileCount": 4,
-      "lastAccessed": 1785223188178,
+      "lastAccessed": 1785409587140,
       "keyFiles": [
         "acl-manifests.json",
         "capabilities.json",
@@ -117,31 +120,13 @@
     {
       "path": "src/lib.rs",
       "accessCount": 2,
-      "lastAccessed": 1785223230661,
+      "lastAccessed": 1785897785862,
       "type": "file"
     },
     {
-      "path": "migrations/002_fix_fk.sql",
-      "accessCount": 2,
-      "lastAccessed": 1785230562368,
-      "type": "file"
-    },
-    {
-      "path": "migrations/003_bible.sql",
+      "path": "Cargo.toml",
       "accessCount": 1,
-      "lastAccessed": 1785223220581,
-      "type": "file"
-    },
-    {
-      "path": "src/display.rs",
-      "accessCount": 1,
-      "lastAccessed": 1785223907691,
-      "type": "file"
-    },
-    {
-      "path": "migrations/001_initial.sql",
-      "accessCount": 1,
-      "lastAccessed": 1785230588190,
+      "lastAccessed": 1785897819022,
       "type": "file"
     }
   ],

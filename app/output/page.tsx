@@ -279,10 +279,11 @@ export default function OutputPage() {
           {/* Layer 3: Overlay */}
           {lookVis.overlay && <OverlayLayer config={layerConfig.overlay} />}
 
-          {/* Layer 4: Canvas (free-position text blocks) */}
+          {/* Layer 4: Canvas (free-position text blocks + shapes) */}
           {lookVis.canvas && (
             <CanvasLayer
               blocks={layerConfig.canvas?.textBlocks ?? []}
+              shapeBlocks={layerConfig.canvas?.shapeBlocks ?? []}
               nonce={layerConfig.canvas?.nonce}
               transitionMs={layerConfig.subtitle?.textEntrance === "none" ? 0 : (layerConfig.transitionMs ?? 600)}
               textEntrance={layerConfig.subtitle?.textEntrance}

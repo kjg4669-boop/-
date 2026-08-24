@@ -6,6 +6,7 @@ import type { LayerConfig, SlideMeta, CountdownPayload } from "@/lib/types";
 import { SECTION_LABEL } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AlertBanner from "@/components/AlertBanner";
+import { Timer, MessageSquare, X } from "lucide-react";
 
 function ClockDisplay() {
   const [time, setTime] = useState("");
@@ -157,7 +158,7 @@ export default function StagePage() {
             </span>
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
               {meta.bpm && (
-                <span style={{ fontSize: 13, color: "#f59e0b", marginLeft: 8 }}>♩={meta.bpm}</span>
+                <span style={{ fontSize: 13, color: "#f59e0b", marginLeft: 8 }}>BPM {meta.bpm}</span>
               )}
               <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
                 슬라이드 {meta.slideIndex + 1}/{meta.totalSlides}
@@ -174,8 +175,10 @@ export default function StagePage() {
             fontSize: 15, fontWeight: 700, fontFamily: "monospace",
             color: countdown.remainingMs <= 60000 ? "#f97316" : "#a78bfa",
             background: "rgba(0,0,0,0.3)", borderRadius: 4, padding: "2px 8px",
+            display: "flex", alignItems: "center", gap: 4,
           }}>
-            ⏳ {Math.floor(countdown.remainingMs / 60000)}:{String(Math.floor((countdown.remainingMs % 60000) / 1000)).padStart(2, "0")}
+            <Timer size={14} style={{ display: "inline" }} />
+            {Math.floor(countdown.remainingMs / 60000)}:{String(Math.floor((countdown.remainingMs % 60000) / 1000)).padStart(2, "0")}
           </span>
         )}
         <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginLeft: meta ? 0 : "auto" }}>
@@ -198,7 +201,7 @@ export default function StagePage() {
           onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.7)"; (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.1)"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.25)"; (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
         >
-          ✕
+          <X size={16} />
         </button>
       </div>
 
@@ -335,9 +338,9 @@ export default function StagePage() {
           zIndex: 200, backgroundColor: "rgba(234,179,8,0.92)", color: "#000",
           borderRadius: 8, padding: "12px 32px", fontSize: 28, fontWeight: "bold",
           maxWidth: "80%", textAlign: "center", boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
-          whiteSpace: "pre-wrap",
+          whiteSpace: "pre-wrap", display: "flex", alignItems: "center", gap: 10,
         }}>
-          💬 {stageMsg.text}
+          <MessageSquare size={22} style={{ flexShrink: 0 }} /> {stageMsg.text}
         </div>
       )}
       {/* Alert overlay */}

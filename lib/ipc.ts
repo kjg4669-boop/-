@@ -158,9 +158,13 @@ export const ipc = {
   onCountdown: (cb: (payload: CountdownPayload) => void) =>
     listenEvent<CountdownPayload>("countdown:update", cb),
 
-  // Stage: listen to slide:update with meta
+  // Stage slide update — always sent regardless of isLive/isClear (output window does NOT listen to this)
+  sendStageSlideUpdate: (layerConfig: LayerConfig, meta?: SlideMeta): void => {
+    void emitEvent<SlideUpdatePayload>("stage:slide-update", { layerConfig, meta });
+  },
+  // Stage: listen to dedicated stage:slide-update (always fired, never gated on isLive)
   onSlideUpdateWithMeta: (cb: (layerConfig: LayerConfig, meta?: SlideMeta) => void) =>
-    listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig, p.meta)),
+    listenEvent<SlideUpdatePayload>("stage:slide-update", (p) => cb(p.layerConfig, p.meta)),
 
   // Preview-only update (always sent, even when !isLive — output window does NOT listen to this)
   // Global emit: no other window listens to "preview:update", so this is safe.

@@ -1,13 +1,14 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
-import type { TextBlock } from "@/lib/types";
+import type { TextBlock, ShapeBlock } from "@/lib/types";
 
 const OUTPUT_W = 1920;
 const OUTPUT_H = 1080;
 
 interface Props {
   blocks: TextBlock[];
+  shapeBlocks?: ShapeBlock[];
   nonce?: number;
   /** 0 = instant (no fade); undefined = default 600ms */
   transitionMs?: number;
@@ -65,7 +66,168 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
   );
 }
 
-export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance, textEntranceIntensity }: Props) {
+function ShapeRenderer({ shapes, scale }: { shapes: ShapeBlock[]; scale: number }) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: OUTPUT_W,
+        height: OUTPUT_H,
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
+        pointerEvents: "none",
+      }}
+    >
+      <svg
+        width={OUTPUT_W}
+        height={OUTPUT_H}
+        style={{ position: "absolute", top: 0, left: 0 }}
+      >
+        <defs>
+          {shapes
+            .filter((s) => s.shadowEnabled && s.visible !== false)
+            .map((s) => (
+              <filter
+                key={`f-${s.id}`}
+                id={`shadow-${s.id}`}
+                x="-50%"
+                y="-50%"
+                width="200%"
+                height="200%"
+              >
+                <feDropShadow
+                  dx={s.shadowX}
+                  dy={s.shadowY}
+                  stdDeviation={s.shadowBlur}
+                  floodColor={s.shadowColor}
+                  floodOpacity={0.7}
+                />
+              </filter>
+            ))}
+        </defs>
+        {shapes
+          .filter((s) => s.visible !== false)
+          .map((s) => {
+            const fillColor = s.fillEnabled ? s.fillColor : "none";
+            const fillOpacity = s.fillEnabled ? s.fillOpacity / 100 : 0;
+            const strokeColor = s.strokeEnabled ? s.strokeColor : "none";
+            const strokeOpacity = s.strokeEnabled ? s.strokeOpacity / 100 : 0;
+            const strokeWidth = s.strokeEnabled ? s.strokeWidth : 0;
+            const filterAttr = s.shadowEnabled ? `url(#shadow-${s.id})` : undefined;
+            const cx = s.x + s.width / 2;
+            const cy = s.y + s.height / 2;
+            const transformAttr = s.rotation
+              ? `rotate(${s.rotation} ${cx} ${cy})`
+              : undefined;
+            const commonProps = {
+              fill: fillColor,
+              fillOpacity,
+              stroke: strokeColor,
+              strokeOpacity,
+              strokeWidth,
+              filter: filterAttr,
+              transform: transformAttr,
+            };
+            const x = s.x, y = s.y, w = s.width, h = s.height;
+
+            switch (s.shapeType) {
+              case "rect":
+                return <rect key={s.id} x={x} y={y} width={w} height={h} {...commonProps} />;
+              case "rounded-rect":
+                return (
+                  <rect
+                    key={s.id}
+                    x={x} y={y} width={w} height={h}
+                    rx={Math.min(w, h) * 0.12}
+                    ry={Math.min(w, h) * 0.12}
+                    {...commonProps}
+                  />
+                );
+              case "ellipse":
+                return (
+                  <ellipse
+                    key={s.id}
+                    cx={x + w / 2} cy={y + h / 2}
+                    rx={w / 2} ry={h / 2}
+                    {...commonProps}
+                  />
+                );
+              case "triangle":
+                return (
+                  <polygon
+                    key={s.id}
+                    points={`${x + w / 2},${y} ${x + w},${y + h} ${x},${y + h}`}
+                    {...commonProps}
+                  />
+                );
+              case "diamond":
+                return (
+                  <polygon
+                    key={s.id}
+                    points={`${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`}
+                    {...commonProps}
+                  />
+                );
+              case "line":
+                return (
+                  <line
+                    key={s.id}
+                    x1={x} y1={y + h / 2}
+                    x2={x + w} y2={y + h / 2}
+                    stroke={s.strokeEnabled ? s.strokeColor : "#ffffff"}
+                    strokeOpacity={strokeOpacity}
+                    strokeWidth={s.strokeEnabled ? s.strokeWidth : 4}
+                    filter={filterAttr}
+                    transform={transformAttr}
+                  />
+                );
+              case "arrow-right": {
+                const ah = h * 0.4, aw = w * 0.35;
+                const pts = [
+                  `${x},${y + h / 2 - ah / 2}`,
+                  `${x + w - aw},${y + h / 2 - ah / 2}`,
+                  `${x + w - aw},${y}`,
+                  `${x + w},${y + h / 2}`,
+                  `${x + w - aw},${y + h}`,
+                  `${x + w - aw},${y + h / 2 + ah / 2}`,
+                  `${x},${y + h / 2 + ah / 2}`,
+                ].join(" ");
+                return <polygon key={s.id} points={pts} {...commonProps} />;
+              }
+              case "star": {
+                const r1 = Math.min(w, h) / 2;
+                const r2 = r1 * 0.4;
+                const pts = Array.from({ length: 10 })
+                  .map((_, i) => {
+                    const angle = (Math.PI / 5) * i - Math.PI / 2;
+                    const r = i % 2 === 0 ? r1 : r2;
+                    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+                  })
+                  .join(" ");
+                return <polygon key={s.id} points={pts} {...commonProps} />;
+              }
+              case "pentagon": {
+                const r = Math.min(w, h) / 2;
+                const pts = Array.from({ length: 5 })
+                  .map((_, i) => {
+                    const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
+                    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+                  })
+                  .join(" ");
+                return <polygon key={s.id} points={pts} {...commonProps} />;
+              }
+              default:
+                return null;
+            }
+          })}
+      </svg>
+    </div>
+  );
+}
+
+export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, textEntrance, textEntranceIntensity }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -174,6 +336,9 @@ export default function CanvasLayer({ blocks, nonce, transitionMs, textEntrance,
           </div>
         </div>
       ))}
+      {shapeBlocks && shapeBlocks.length > 0 && (
+        <ShapeRenderer shapes={shapeBlocks} scale={scale} />
+      )}
     </div>
   );
 }

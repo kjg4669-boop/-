@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"pkill -f \\\"tauri dev\\\" 2>/dev/null; pkill -f \\\"worship-projector\\\" 2>/dev/null; pkill -f \\\"next dev\\\" 2>/dev/null; sleep 1\\n\\nDB_PATH=\\\"$HOME/Library/Application Support/com.worship.projec...",
-  "error": "Exit code 1\n-rw-r--r--@ 1 gim-yechan  staff  53248 Jul  9 23:43 /Users/gim-yechan/Library/Application Support/com.worship.projector/worship.db\nDB deleted\n\n-rw-r--r--@ 1 gim-yechan  staff  53248 Jul  9 23:43 /Users/gim-yechan/Library/Application Support/com.worship.projector/worship.db\nDB deleted",
-  "timestamp": "2026-07-28T09:20:43.231Z",
+  "tool_input_preview": "{\"command\":\"git add src-tauri/src/lib.rs hooks/useMenuEvents.ts components/controller/RibbonToolbar.tsx app/controller/page.tsx && git commit -m \\\"$(cat <<'EOF'\\nfeat: 네이티브 메뉴 바에 '도움' 메뉴 추가\\n\\n- lib.r...",
+  "error": "Exit code 128\nfatal: pathspec 'src-tauri/src/lib.rs' did not match any files\n\nfatal: pathspec 'src-tauri/src/lib.rs' did not match any files",
+  "timestamp": "2026-08-05T08:48:26.931Z",
   "retry_count": 1
 }

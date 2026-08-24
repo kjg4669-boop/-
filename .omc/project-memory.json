@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1785227961088,
+  "lastScanned": 1787337808875,
   "projectRoot": "/Volumes/P31/chppt/worship-projector",
   "techStack": {
     "languages": [
@@ -36,6 +36,11 @@
         "name": "react-dom",
         "version": "19.2.4",
         "category": "frontend"
+      },
+      {
+        "name": "vitest",
+        "version": "4.1.10",
+        "category": "testing"
       }
     ],
     "packageManager": "npm",
@@ -43,8 +48,8 @@
   },
   "build": {
     "buildCommand": "npm run build",
-    "testCommand": null,
-    "lintCommand": null,
+    "testCommand": "npm test",
+    "lintCommand": "npm run lint",
     "devCommand": "npm run dev",
     "scripts": {
       "dev": "next dev",
@@ -52,12 +57,16 @@
       "start": "next start",
       "tauri": "tauri",
       "tauri:dev": "tauri dev",
-      "tauri:build": "tauri build"
+      "tauri:build": "tauri build",
+      "dist:mac": "APPLE_SIGNING_IDENTITY=- npm run tauri:build",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "lint": "eslint ."
     }
   },
   "conventions": {
     "namingStyle": "camelCase",
-    "importStyle": null,
+    "importStyle": "ES modules",
     "testPattern": null,
     "fileOrganization": null
   },
@@ -69,7 +78,8 @@
       "components",
       "docs",
       "lib",
-      "public"
+      "public",
+      "tests"
     ],
     "gitBranches": null
   },
@@ -79,7 +89,7 @@
       "path": "app",
       "purpose": "Application code",
       "fileCount": 4,
-      "lastAccessed": 1785227961056,
+      "lastAccessed": 1787337808858,
       "keyFiles": [
         "favicon.ico",
         "globals.css",
@@ -90,37 +100,61 @@
     "components": {
       "path": "components",
       "purpose": "UI components",
-      "fileCount": 1,
-      "lastAccessed": 1785227961064,
+      "fileCount": 3,
+      "lastAccessed": 1787337808858,
       "keyFiles": [
-        "ErrorBoundary.tsx"
+        "AlertBanner.tsx",
+        "ErrorBoundary.tsx",
+        "ErrorToast.tsx"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1787337808863,
+      "keyFiles": [
+        "설치도우미.command"
       ]
     },
     "docs": {
       "path": "docs",
       "purpose": "Documentation",
       "fileCount": 0,
-      "lastAccessed": 1785227961065,
+      "lastAccessed": 1787337808863,
       "keyFiles": []
+    },
+    "hooks": {
+      "path": "hooks",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1787337808863,
+      "keyFiles": [
+        "useAutoSave.ts",
+        "useClock.ts",
+        "useCountdown.ts",
+        "useGlobalErrorCapture.ts",
+        "useKeyboardShortcuts.ts"
+      ]
     },
     "lib": {
       "path": "lib",
       "purpose": "Library code",
-      "fileCount": 8,
-      "lastAccessed": 1785227961066,
+      "fileCount": 15,
+      "lastAccessed": 1787337808864,
       "keyFiles": [
+        "alertDb.ts",
+        "announcementDb.ts",
+        "backingTrackDb.ts",
         "bibleDb.ts",
-        "constants.ts",
-        "db.ts",
-        "ipc.ts",
-        "media.ts"
+        "constants.ts"
       ]
     },
     "out": {
       "path": "out",
       "purpose": "Build output",
       "fileCount": 14,
-      "lastAccessed": 1785227961066,
+      "lastAccessed": 1787337808864,
       "keyFiles": [
         "404.html",
         "__next.__PAGE__.txt",
@@ -133,7 +167,7 @@
       "path": "public",
       "purpose": "Public files",
       "fileCount": 5,
-      "lastAccessed": 1785227961066,
+      "lastAccessed": 1787337808864,
       "keyFiles": [
         "file.svg",
         "globe.svg",
@@ -145,31 +179,43 @@
     "src-tauri": {
       "path": "src-tauri",
       "purpose": null,
-      "fileCount": 4,
-      "lastAccessed": 1785227961067,
+      "fileCount": 5,
+      "lastAccessed": 1787337808865,
       "keyFiles": [
         "Cargo.lock",
         "Cargo.toml",
         "build.rs",
-        "tauri.conf.json"
+        "tauri.conf.json",
+        "worship-projector.db"
       ]
     },
     "stores": {
       "path": "stores",
       "purpose": null,
-      "fileCount": 3,
-      "lastAccessed": 1785227961067,
+      "fileCount": 5,
+      "lastAccessed": 1787337808865,
       "keyFiles": [
+        "errorStore.ts",
         "outputStore.ts",
         "queueStore.ts",
-        "settingsStore.ts"
+        "settingsStore.ts",
+        "videoStore.ts"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1787337808865,
+      "keyFiles": [
+        "setup.ts"
       ]
     },
     "src-tauri/migrations": {
       "path": "src-tauri/migrations",
       "purpose": "Database migrations",
-      "fileCount": 3,
-      "lastAccessed": 1785227961072,
+      "fileCount": 16,
+      "lastAccessed": 1787337808865,
       "keyFiles": [
         "001_initial.sql",
         "002_fix_fk.sql",
@@ -179,297 +225,223 @@
     "src-tauri/src": {
       "path": "src-tauri/src",
       "purpose": "Source code",
-      "fileCount": 3,
-      "lastAccessed": 1785227961073,
+      "fileCount": 5,
+      "lastAccessed": 1787337808866,
       "keyFiles": [
         "display.rs",
         "lib.rs",
         "main.rs"
+      ]
+    },
+    "tests/lib": {
+      "path": "tests/lib",
+      "purpose": "Library code",
+      "fileCount": 2,
+      "lastAccessed": 1787337808866,
+      "keyFiles": [
+        "utils.test.ts",
+        "validators.test.ts"
       ]
     }
   },
   "hotPaths": [
     {
       "path": "app/controller/page.tsx",
-      "accessCount": 22,
-      "lastAccessed": 1785240029453,
+      "accessCount": 134,
+      "lastAccessed": 1787408108197,
       "type": "file"
     },
     {
-      "path": "components/controller/QueuePanel.tsx",
-      "accessCount": 11,
-      "lastAccessed": 1785240001015,
+      "path": "components/controller/RibbonToolbar.tsx",
+      "accessCount": 33,
+      "lastAccessed": 1787408501545,
+      "type": "directory"
+    },
+    {
+      "path": "components/controller/SidebarLayerPanel.tsx",
+      "accessCount": 29,
+      "lastAccessed": 1787343534158,
       "type": "file"
     },
     {
-      "path": "lib/types.ts",
-      "accessCount": 9,
-      "lastAccessed": 1785239878120,
-      "type": "file"
-    },
-    {
-      "path": "lib/db.ts",
-      "accessCount": 9,
-      "lastAccessed": 1785239900760,
-      "type": "file"
-    },
-    {
-      "path": "stores/queueStore.ts",
-      "accessCount": 9,
-      "lastAccessed": 1785239924241,
-      "type": "file"
-    },
-    {
-      "path": "lib/bibleDb.ts",
-      "accessCount": 8,
-      "lastAccessed": 1785238818578,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/LayerSidebar.tsx",
-      "accessCount": 6,
-      "lastAccessed": 1785238533594,
-      "type": "file"
-    },
-    {
-      "path": "app/stage/page.tsx",
-      "accessCount": 5,
-      "lastAccessed": 1785238828714,
+      "path": "components/controller/OutputPreview.tsx",
+      "accessCount": 21,
+      "lastAccessed": 1787341610187,
       "type": "file"
     },
     {
       "path": "",
-      "accessCount": 5,
-      "lastAccessed": 1785239562883,
+      "accessCount": 13,
+      "lastAccessed": 1787546688431,
       "type": "directory"
     },
     {
-      "path": "app/output/page.tsx",
+      "path": "components/layers/CanvasLayer.tsx",
+      "accessCount": 11,
+      "lastAccessed": 1787408121175,
+      "type": "file"
+    },
+    {
+      "path": "components/controller/ControlBar.tsx",
+      "accessCount": 10,
+      "lastAccessed": 1787406375329,
+      "type": "file"
+    },
+    {
+      "path": "app/stage/page.tsx",
+      "accessCount": 10,
+      "lastAccessed": 1787406760781,
+      "type": "file"
+    },
+    {
+      "path": "lib/types.ts",
+      "accessCount": 10,
+      "lastAccessed": 1787408121890,
+      "type": "directory"
+    },
+    {
+      "path": "components/controller/SlideCanvas.tsx",
+      "accessCount": 8,
+      "lastAccessed": 1787408097404,
+      "type": "file"
+    },
+    {
+      "path": "app/preview/page.tsx",
+      "accessCount": 7,
+      "lastAccessed": 1787340192324,
+      "type": "file"
+    },
+    {
+      "path": "hooks/useAutoSave.ts",
+      "accessCount": 7,
+      "lastAccessed": 1787402105581,
+      "type": "file"
+    },
+    {
+      "path": "hooks/useMenuEvents.ts",
+      "accessCount": 7,
+      "lastAccessed": 1787402121485,
+      "type": "file"
+    },
+    {
+      "path": "app/layer-panel/page.tsx",
+      "accessCount": 6,
+      "lastAccessed": 1787343079306,
+      "type": "file"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
       "accessCount": 5,
-      "lastAccessed": 1785240013817,
+      "lastAccessed": 1787401735923,
+      "type": "directory"
+    },
+    {
+      "path": "src-tauri/src/commands/mod.rs",
+      "accessCount": 4,
+      "lastAccessed": 1787340852483,
       "type": "file"
     },
     {
-      "path": "components/controller/BibleBrowser.tsx",
+      "path": "components/controller/SaveAsDialog.tsx",
       "accessCount": 4,
-      "lastAccessed": 1785231767009,
-      "type": "file"
-    },
-    {
-      "path": "src-tauri/migrations/002_fix_fk.sql",
-      "accessCount": 4,
-      "lastAccessed": 1785231784316,
+      "lastAccessed": 1787401961587,
       "type": "file"
     },
     {
       "path": "lib/ipc.ts",
       "accessCount": 4,
-      "lastAccessed": 1785238493504,
-      "type": "file"
+      "lastAccessed": 1787407070634,
+      "type": "directory"
     },
     {
-      "path": "stores/outputStore.ts",
+      "path": "app/output/page.tsx",
       "accessCount": 4,
-      "lastAccessed": 1785238500536,
+      "lastAccessed": 1787407978805,
       "type": "file"
     },
     {
-      "path": "src-tauri/migrations/003_bible.sql",
+      "path": "src-tauri/tauri.conf.json",
       "accessCount": 4,
-      "lastAccessed": 1785239588750,
+      "lastAccessed": 1787546688134,
       "type": "file"
     },
     {
-      "path": "components/layers/BackgroundLayer.tsx",
+      "path": "components/controller",
       "accessCount": 3,
-      "lastAccessed": 1785231767999,
-      "type": "file"
+      "lastAccessed": 1787398300142,
+      "type": "directory"
     },
     {
-      "path": "lib/media.ts",
+      "path": "src-tauri/capabilities/main.json",
       "accessCount": 3,
-      "lastAccessed": 1785238500804,
+      "lastAccessed": 1787401739778,
       "type": "file"
     },
     {
-      "path": "src-tauri/src/commands/mod.rs",
+      "path": "components/controller/LayerSidebar.tsx",
       "accessCount": 3,
-      "lastAccessed": 1785238534549,
+      "lastAccessed": 1787407800333,
       "type": "file"
     },
     {
-      "path": "src-tauri/migrations/001_initial.sql",
+      "path": "stores",
       "accessCount": 3,
-      "lastAccessed": 1785239580138,
-      "type": "file"
+      "lastAccessed": 1787407903921,
+      "type": "directory"
     },
     {
-      "path": "src-tauri/src/lib.rs",
-      "accessCount": 2,
-      "lastAccessed": 1785231770809,
-      "type": "file"
+      "path": "stores/queueStore.ts",
+      "accessCount": 3,
+      "lastAccessed": 1787407908175,
+      "type": "directory"
     },
     {
-      "path": "lib/utils.ts",
-      "accessCount": 2,
-      "lastAccessed": 1785231836467,
-      "type": "file"
-    },
-    {
-      "path": "stores/settingsStore.ts",
-      "accessCount": 2,
-      "lastAccessed": 1785231837001,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/LibraryPanel.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785231838358,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/SlideThumbnailList.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785231839646,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/SlideCanvas.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785231839725,
-      "type": "file"
-    },
-    {
-      "path": "components/layers/SubtitleLayer.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785238515692,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/AddItemPanel.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785238751237,
-      "type": "file"
-    },
-    {
-      "path": "components/layers/CountdownLayer.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1785238751415,
+      "path": "src-tauri/Cargo.toml",
+      "accessCount": 3,
+      "lastAccessed": 1787546699072,
       "type": "file"
     },
     {
       "path": "src-tauri/src",
-      "accessCount": 1,
-      "lastAccessed": 1785230135700,
+      "accessCount": 2,
+      "lastAccessed": 1787339416642,
       "type": "directory"
     },
     {
-      "path": "app/layout.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231748762,
+      "path": "AGENTS.md",
+      "accessCount": 2,
+      "lastAccessed": 1787398554921,
       "type": "file"
     },
     {
-      "path": "app/page.tsx",
+      "path": "lib/db.ts",
+      "accessCount": 2,
+      "lastAccessed": 1787398944514,
+      "type": "directory"
+    },
+    {
+      "path": "src-tauri/migrations",
+      "accessCount": 2,
+      "lastAccessed": 1787399050270,
+      "type": "directory"
+    },
+    {
+      "path": "docs/output-windows.md",
       "accessCount": 1,
-      "lastAccessed": 1785231749250,
+      "lastAccessed": 1787340578833,
       "type": "file"
     },
     {
-      "path": "app/help/page.tsx",
+      "path": "lib",
       "accessCount": 1,
-      "lastAccessed": 1785231749699,
-      "type": "file"
+      "lastAccessed": 1787341984411,
+      "type": "directory"
     },
     {
-      "path": "lib/constants.ts",
+      "path": "components",
       "accessCount": 1,
-      "lastAccessed": 1785231753000,
-      "type": "file"
-    },
-    {
-      "path": "lib/pptxParser.ts",
-      "accessCount": 1,
-      "lastAccessed": 1785231753156,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/SongEditor.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231766942,
-      "type": "file"
-    },
-    {
-      "path": "components/layers/CanvasLayer.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231768853,
-      "type": "file"
-    },
-    {
-      "path": "components/layers/OverlayLayer.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231769875,
-      "type": "file"
-    },
-    {
-      "path": "components/ErrorBoundary.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231770269,
-      "type": "file"
-    },
-    {
-      "path": "src-tauri/src/main.rs",
-      "accessCount": 1,
-      "lastAccessed": 1785231771390,
-      "type": "file"
-    },
-    {
-      "path": "src-tauri/src/display.rs",
-      "accessCount": 1,
-      "lastAccessed": 1785231772269,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/PptxImportModal.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231784535,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/SaveServiceModal.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231785171,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/ServiceListModal.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231785660,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/QuickSearchModal.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231786172,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/ShortcutCheatSheet.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231786552,
-      "type": "file"
-    },
-    {
-      "path": "components/controller/HelpWindow.tsx",
-      "accessCount": 1,
-      "lastAccessed": 1785231787038,
-      "type": "file"
-    },
-    {
-      "path": "src-tauri/migrations/004_service_notes.sql",
-      "accessCount": 1,
-      "lastAccessed": 1785239872344,
-      "type": "file"
+      "lastAccessed": 1787398296419,
+      "type": "directory"
     }
   ],
   "userDirectives": []

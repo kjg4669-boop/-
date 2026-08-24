@@ -18,6 +18,8 @@ import {
   DEFAULT_LAYER_CONFIG,
   type LayerConfig,
   type TextBlock,
+  type ShapeBlock,
+  type ShapeType,
   type LyricSlide,
   type FlatSlide,
   type Service,
@@ -51,6 +53,7 @@ import { useAutoSave } from "@/hooks/useAutoSave";
 import ErrorToast from "@/components/ErrorToast";
 import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
+import SaveAsDialog from "@/components/controller/SaveAsDialog";
 import AboutDialog from "@/components/controller/AboutDialog";
 import SettingsDialog from "@/components/controller/SettingsDialog";
 import OnboardingGuide from "@/components/controller/OnboardingGuide";
@@ -142,6 +145,7 @@ export default function ControllerPage() {
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>("home");
   const [serviceNotes, setServiceNotes] = useState("");
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
   const canvasRef = useRef<SlideCanvasHandle>(null);
   const openedWindowsRef = useRef<Set<RightTab>>(new Set());
@@ -163,6 +167,7 @@ export default function ControllerPage() {
   const pendingAddBlockRef = useRef(false);
   const [showServiceList, setShowServiceList] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -175,12 +180,46 @@ export default function ControllerPage() {
   useEffect(() => { tabOrderRef.current = tabOrder; }, [tabOrder]);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
-  const handleAutoSaved = useCallback(() => {
-    setCtrlNotice({ msg: "자동 저장됨 ✓" });
-    if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
-    ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
-  }, []);
-  useAutoSave(currentService, handleAutoSaved);
+  useAutoSave(currentService, isDirty);
+
+  // deep-link: .wpjson 파일 연결로 앱 열릴 때 자동 로드
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const openFile = async (rawUrl: string) => {
+      const filePath = rawUrl.startsWith("file://")
+        ? decodeURIComponent(new URL(rawUrl).pathname)
+        : rawUrl;
+      if (!filePath.match(/\.(wpjson|json)$/i)) return;
+      try {
+        const { readTextFile } = await import("@tauri-apps/plugin-fs");
+        const content = await readTextFile(filePath);
+        const parsed = JSON.parse(content) as import("@/lib/types").Service;
+        if (parsed && Array.isArray(parsed.items)) {
+          useQueueStore.getState().setCurrentService({ ...parsed, id: parsed.id ?? 0 });
+          setCtrlNotice({ msg: `열림: ${parsed.name}` });
+          if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+          ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+        }
+      } catch (e) {
+        console.error("[file-open]", e);
+      }
+    };
+
+    (async () => {
+      try {
+        const { onOpenUrl, getCurrent } = await import("@tauri-apps/plugin-deep-link");
+        const current = await getCurrent();
+        if (current) for (const url of current) await openFile(url);
+        unlisten = await onOpenUrl(async (urls: string[]) => {
+          for (const url of urls) await openFile(url);
+        });
+      } catch { /* 개발 환경에서는 무시 */ }
+    })();
+
+    return () => { unlisten?.(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [isStageOpen, setIsStageOpen] = useState(false);
   const [stageMsgText, setStageMsgText] = useState("");
   const [stageMsgActive, setStageMsgActive] = useState(false);
@@ -221,6 +260,9 @@ export default function ControllerPage() {
         const reloaded = await serviceDb.get(svc.id);
         if (reloaded) useQueueStore.getState().updateServiceData(reloaded);
         else useQueueStore.getState().setIsDirty(false);
+        setCtrlNotice({ msg: "자동 저장됨" });
+        if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+        ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
       } catch (e) {
         console.warn("[auto-save 30s]", e);
       } finally {
@@ -339,6 +381,11 @@ export default function ControllerPage() {
         copyright: buildCopyrightString(item?.song),
       } : undefined;
       void ipc.sendSlideUpdate(toSend, readyMeta);
+      // Stage display: always send real lines (unaffected by clear state)
+      const stageToSend: LayerConfig = cleared && slide
+        ? { ...lc, subtitle: { ...lc.subtitle, visible: true, lines: slide.lines ?? [], lines2: slide.lines2 ?? [] } }
+        : lc;
+      void ipc.sendStageSlideUpdate(stageToSend, readyMeta);
       ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
       void ipc.sendBlackout(bo);
       void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
@@ -387,13 +434,14 @@ export default function ControllerPage() {
 
   useEffect(() => {
     const shouldSendIpc = isLive && !isFrozen;
-    const { getActiveItem, getActiveLyricSlide } = useQueueStore.getState();
+    const { getActiveItem, getActiveLyricSlide, getFlatSlideList, getActiveFlatSlideIndex } = useQueueStore.getState();
     const item = getActiveItem();
     const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
 
     if (!item) {
       const config = deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults) as LayerConfig;
       setLayerConfig(config);
+      ipc.sendStageSlideUpdate(config);
       if (shouldSendIpc) ipc.sendSlideUpdate(config);
       return;
     }
@@ -434,13 +482,7 @@ export default function ControllerPage() {
     };
     setLayerConfig(newConfig);
 
-    if (!shouldSendIpc) {
-      ipc.sendPreviewUpdate(newConfig);
-      return;
-    }
-
-    // Build SlideMeta for Stage Display
-    const { getFlatSlideList, getActiveFlatSlideIndex } = useQueueStore.getState();
+    // Build SlideMeta — always needed for stage display (regardless of isLive)
     const flatList = getFlatSlideList();
     const flatIdx = getActiveFlatSlideIndex();
     const nextEntry = flatIdx >= 0 && flatIdx + 1 < flatList.length ? flatList[flatIdx + 1] : null;
@@ -458,6 +500,22 @@ export default function ControllerPage() {
       notes: item.notes,
       copyright: buildCopyrightString(item.song),
     };
+    // Stage display always shows real lines (unaffected by isClear / isLive)
+    const stageConfig: LayerConfig = {
+      ...newConfig,
+      subtitle: {
+        ...newConfig.subtitle,
+        visible: !!slide,
+        lines: canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
+        lines2: slide?.lines2 ?? [],
+      },
+    };
+    ipc.sendStageSlideUpdate(stageConfig, slideMeta);
+
+    if (!shouldSendIpc) {
+      ipc.sendPreviewUpdate(newConfig);
+      return;
+    }
 
     ipc.sendSlideUpdate(newConfig, slideMeta);
     ipc.sendPreviewUpdate(newConfig); // keep floating preview in sync when isLive
@@ -833,12 +891,13 @@ export default function ControllerPage() {
   }, []);
 
   const handleCanvasChange = useCallback(
-    (songId: number, slideId: string, canvas: { textBlocks: TextBlock[] }) => {
+    (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: ShapeBlock[] }) => {
       updateSlideCanvas(songId, slideId, canvas);
       if (isLive) {
         const lc = useOutputStore.getState().layerConfig;
         const slide = useQueueStore.getState().getActiveLyricSlide();
         const hasBlocks = canvas.textBlocks.length > 0;
+        const shapeBlocks = canvas.shapeBlocks ?? [];
         const config: LayerConfig = {
           ...lc,
           subtitle: {
@@ -847,7 +906,9 @@ export default function ControllerPage() {
             lines: !isClear && !hasBlocks ? (slide?.lines ?? []) : [],
             lines2: !isClear ? (slide?.lines2 ?? []) : [],
           },
-          canvas: !isClear && hasBlocks ? { textBlocks: canvas.textBlocks } : undefined,
+          canvas: !isClear && (hasBlocks || shapeBlocks.length > 0)
+            ? { textBlocks: canvas.textBlocks, shapeBlocks }
+            : undefined,
         };
         setLayerConfig(config);
         ipc.sendSlideUpdate(config);
@@ -924,7 +985,8 @@ export default function ControllerPage() {
     const item = state.getActiveItem();
     const slide = state.getActiveLyricSlide();
     if (!item?.song?.id || !slide) return;
-    updateSlideCanvas(item.song.id, slide.id, { textBlocks: newBlocks });
+    const currentShapes = slide.canvas?.shapeBlocks ?? [];
+    updateSlideCanvas(item.song.id, slide.id, { textBlocks: newBlocks, shapeBlocks: currentShapes });
     const lc = useOutputStore.getState().layerConfig;
     const visibleCount = newBlocks.filter(b => b.visible !== false).length;
     const config: LayerConfig = {
@@ -935,12 +997,66 @@ export default function ControllerPage() {
         lines: !isClear && newBlocks.length === 0 ? (slide.lines ?? []) : [],
         lines2: !isClear ? (slide.lines2 ?? []) : [],
       },
-      canvas: !isClear && newBlocks.length > 0 ? { textBlocks: newBlocks } : undefined,
+      canvas: !isClear && newBlocks.length > 0
+        ? { textBlocks: newBlocks, shapeBlocks: currentShapes }
+        : (currentShapes.length > 0 ? { textBlocks: [], shapeBlocks: currentShapes } : undefined),
     };
     setLayerConfig(config);
     if (isLive) ipc.sendSlideUpdate(config);
     ipc.sendPreviewUpdate(config);
   }, [isLive, isClear, setLayerConfig, updateSlideCanvas]);
+
+  // Helper: update canvas shapeBlocks array and push to output/preview
+  const applyShapeUpdate = useCallback((newShapes: ShapeBlock[]) => {
+    const state = useQueueStore.getState();
+    const item = state.getActiveItem();
+    const slide = state.getActiveLyricSlide();
+    if (!item?.song?.id || !slide) return;
+    const textBlocks = slide.canvas?.textBlocks ?? [];
+    updateSlideCanvas(item.song.id, slide.id, { textBlocks, shapeBlocks: newShapes });
+    const lc = useOutputStore.getState().layerConfig;
+    const config: LayerConfig = {
+      ...lc,
+      canvas: { ...(lc.canvas ?? { textBlocks: [] }), shapeBlocks: newShapes },
+    };
+    setLayerConfig(config);
+    if (isLive) ipc.sendSlideUpdate(config);
+    ipc.sendPreviewUpdate(config);
+  }, [isLive, setLayerConfig, updateSlideCanvas]);
+
+  const handleAddShape = useCallback((shapeType: ShapeType) => {
+    const state = useQueueStore.getState();
+    const item = state.getActiveItem();
+    const slide = state.getActiveLyricSlide();
+    if (!item?.song?.id || !slide) return;
+    const newShape: ShapeBlock = {
+      id: crypto.randomUUID(),
+      x: 660, y: 340, width: 600, height: 400,
+      shapeType,
+      fillEnabled: shapeType !== "line",
+      fillColor: "#3b82f6",
+      fillOpacity: 80,
+      strokeEnabled: true,
+      strokeColor: "#ffffff",
+      strokeWidth: 4,
+      strokeOpacity: 100,
+      shadowEnabled: false,
+      shadowColor: "#000000",
+      shadowBlur: 10,
+      shadowX: 5,
+      shadowY: 5,
+    };
+    const existing = slide.canvas?.shapeBlocks ?? [];
+    applyShapeUpdate([...existing, newShape]);
+    setSelectedShapeId(newShape.id);
+  }, [applyShapeUpdate]);
+
+  const handleUpdateShape = useCallback((patch: Partial<ShapeBlock>) => {
+    if (!selectedShapeId) return;
+    const shapes = layerConfig.canvas?.shapeBlocks ?? [];
+    const newShapes = shapes.map(s => s.id === selectedShapeId ? { ...s, ...patch } : s);
+    applyShapeUpdate(newShapes);
+  }, [selectedShapeId, layerConfig, applyShapeUpdate]);
 
   const handleLayerToggleVisible = useCallback((layerId: string) => {
     if (layerId === "subtitle") {
@@ -1078,7 +1194,7 @@ export default function ControllerPage() {
         }
       }
       await writeTextFile(filePath, lines.join("\n"));
-      setCtrlNotice({ msg: "내보내기 완료 ✓" });
+      setCtrlNotice({ msg: "내보내기 완료" });
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
     } catch (e) {
@@ -1086,6 +1202,138 @@ export default function ControllerPage() {
       setCtrlNotice({ msg: "내보내기 실패", error: true });
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
       ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+    }
+  }, []);
+
+  const handleSaveAsFile = useCallback(() => {
+    if (!useQueueStore.getState().currentService) return;
+    setShowSaveAsDialog(true);
+  }, []);
+
+  const handleSaveAsConfirm = useCallback(async (filePath: string) => {
+    setShowSaveAsDialog(false);
+    const svc = useQueueStore.getState().currentService;
+    if (!svc) return;
+    try {
+      const ext = filePath.split(".").pop()?.toLowerCase() ?? "wpjson";
+
+      if (ext === "pptx") {
+        const PptxGenJS = (await import("pptxgenjs")).default;
+        const pptx = new PptxGenJS();
+        pptx.layout = "LAYOUT_WIDE";
+
+        const { layerConfig: lc } = useOutputStore.getState();
+        const sub = lc.subtitle;
+        const bg = lc.background;
+        const bgColor = (bg.type === "color" ? bg.color : "#000000")?.replace("#", "") ?? "000000";
+        const fColor = (sub.color ?? "#FFFFFF").replace("#", "");
+        const fSize = Math.round((sub.fontSize ?? 48) * 0.75);
+        const fAlign = (sub.textAlign ?? "center") as "left" | "center" | "right";
+        const fValign = sub.position === "top" ? "top" : sub.position === "bottom" ? "bottom" : "middle";
+        const fBold = sub.fontWeight === "bold";
+        const fItalic = sub.fontStyle === "italic";
+        const fFace = sub.fontFamily ?? "Arial";
+        const bilingual = sub.bilingualEnabled ?? false;
+        const fSize2 = Math.round((sub.fontSize2 ?? 28) * 0.75);
+        const fColor2 = (sub.color2 ?? "#CCCCCC").replace("#", "");
+
+        // 배경 이미지 → base64 data URL 변환 시도
+        let bgDataUrl: string | null = null;
+        if (bg.type === "image" && bg.src) {
+          try {
+            const res = await fetch(bg.src);
+            const blob = await res.blob();
+            bgDataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } catch { /* 실패 시 단색 배경으로 대체 */ }
+        }
+
+        const addSlide = (lines: string[], lines2?: string[]) => {
+          const s = pptx.addSlide();
+          if (bgDataUrl) {
+            s.background = { data: bgDataUrl };
+          } else {
+            s.background = { color: bgColor };
+          }
+          if (bilingual && lines2 && lines2.length > 0) {
+            s.addText(lines.join("\n"), {
+              x: 0.3, y: 0, w: 9.4, h: "65%",
+              fontSize: fSize, color: fColor, align: fAlign, valign: fValign,
+              bold: fBold, italic: fItalic, fontFace: fFace, wrap: true,
+            });
+            s.addText(lines2.join("\n"), {
+              x: 0.3, y: "65%", w: 9.4, h: "35%",
+              fontSize: fSize2, color: fColor2, align: fAlign, valign: "top",
+              bold: sub.fontWeight2 === "bold", italic: sub.fontStyle2 === "italic",
+              fontFace: fFace, wrap: true,
+            });
+          } else {
+            s.addText(lines.join("\n"), {
+              x: 0.3, y: 0, w: 9.4, h: "100%",
+              fontSize: fSize, color: fColor, align: fAlign, valign: fValign,
+              bold: fBold, italic: fItalic, fontFace: fFace, wrap: true,
+            });
+          }
+        };
+
+        for (const item of svc.items) {
+          if (item.song) {
+            for (const slide of item.song.lyrics_json) {
+              addSlide(slide.lines, slide.lines2);
+            }
+          } else {
+            const scriptureSlides = (item.settings_json as import("@/lib/types").ServiceItemSettings)?.scripture?.slides;
+            if (scriptureSlides) {
+              for (const slide of scriptureSlides) addSlide(slide.lines);
+            }
+          }
+        }
+
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+        const buffer = await pptx.write({ outputType: "arraybuffer" }) as ArrayBuffer;
+        await writeFile(filePath, new Uint8Array(buffer));
+      } else {
+        const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+        let content: string;
+        if (ext === "txt") {
+          const lines: string[] = [`# ${svc.name}`, `날짜: ${svc.date}`, ""];
+          for (const item of svc.items) {
+            lines.push(`## ${item.label}`);
+            if (item.song) {
+              for (const slide of item.song.lyrics_json) {
+                lines.push(`[${slide.section} ${slide.sectionIndex}]`);
+                lines.push(...slide.lines);
+                lines.push("");
+              }
+            } else {
+              const scriptureSlides = (item.settings_json as import("@/lib/types").ServiceItemSettings)?.scripture?.slides;
+              if (scriptureSlides && scriptureSlides.length > 0) {
+                for (const slide of scriptureSlides) { lines.push(...slide.lines); }
+                lines.push("");
+              } else {
+                lines.push("");
+              }
+            }
+          }
+          content = lines.join("\n");
+        } else {
+          content = JSON.stringify(svc, null, 2);
+        }
+        await writeTextFile(filePath, content);
+      }
+
+      setCtrlNotice({ msg: "파일로 저장됨" });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+    } catch (e) {
+      console.error("[saveAsFile]", e);
+      setCtrlNotice({ msg: "파일 저장 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 4000);
     }
   }, []);
 
@@ -1107,6 +1355,8 @@ export default function ControllerPage() {
     []
   );
   handleSaveItemRef.current = handleSaveItem;
+
+  const selectedShape = (layerConfig.canvas?.shapeBlocks ?? []).find(s => s.id === selectedShapeId) ?? null;
 
   type FmtPatch = { fontFamily?: string; fontSize?: number; fontWeight?: "normal" | "bold"; fontStyle?: "normal" | "italic"; textDecoration?: "none" | "underline" | "line-through"; color?: string; textAlign?: "left" | "center" | "right" };
 
@@ -1279,12 +1529,18 @@ export default function ControllerPage() {
   useEffect(() => { openOutputRef.current = openOutput; });
 
   const handleSave = useCallback(async () => {
-    if (isSavingRef.current) return; // 중복 저장 방지
     const store = useQueueStore.getState();
     const svc = store.currentService;
     if (!svc) return;
     if (svc.id === -1) {
       setShowSaveModal(true);
+      return;
+    }
+    // 저장 중이면 완료 후 알림만 보여주고 중복 저장은 스킵
+    if (isSavingRef.current) {
+      setCtrlNotice({ msg: "저장 중..." });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 1500);
       return;
     }
     isSavingRef.current = true;
@@ -1293,9 +1549,9 @@ export default function ControllerPage() {
       const reloaded = await serviceDb.get(svc.id);
       if (reloaded) store.updateServiceData(reloaded);
       else store.setIsDirty(false);
-      setCtrlNotice({ msg: "저장됨 ✓", error: false });
+      setCtrlNotice({ msg: "저장됨" });
       if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
-      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
     } catch (e) {
       console.error("[save]", e);
       setCtrlNotice({ msg: "저장에 실패했습니다. 다시 시도해 주세요.", error: true });
@@ -1368,6 +1624,9 @@ export default function ControllerPage() {
       setShowSaveModal(false);
     } catch (e) {
       console.error("[saveAs]", e);
+      setCtrlNotice({ msg: "저장 실패", error: true });
+      if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+      ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 4000);
     }
   }, []);
 
@@ -1468,6 +1727,7 @@ export default function ControllerPage() {
     setRightTab,
     setShowServiceList,
     setShowSaveModal,
+    setShowSaveAsDialog,
     setShowQuickSearch,
     setIsStageOpen,
     showNotice: (msg: string, error?: boolean) => {
@@ -1628,6 +1888,7 @@ export default function ControllerPage() {
         onNewService={handleNewService}
         onOpenService={() => setShowServiceList(true)}
         onSave={handleSave}
+        onSaveAsFile={handleSaveAsFile}
         onBackupDb={handleBackupDb}
         onRestoreDb={handleRestoreDb}
         onNewSlide={handleNewSlide}
@@ -1650,6 +1911,9 @@ export default function ControllerPage() {
         removedPanels={removedTabs}
         panelLabels={{ queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" }}
         onRestorePanel={handleRestoreTab}
+        selectedShape={selectedShape}
+        onAddShape={handleAddShape}
+        onUpdateShape={handleUpdateShape}
       />
       </div>
 
@@ -2070,6 +2334,13 @@ export default function ControllerPage() {
           initialName={currentService?.name !== "새 예배" ? (currentService?.name ?? "") : ""}
           onSave={handleSaveAs}
           onClose={() => setShowSaveModal(false)}
+        />
+      )}
+      {showSaveAsDialog && (
+        <SaveAsDialog
+          defaultName={currentService?.name ?? "새 예배"}
+          onConfirm={handleSaveAsConfirm}
+          onClose={() => setShowSaveAsDialog(false)}
         />
       )}
       {showQuickSearch && (

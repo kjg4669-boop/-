@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"pgrep -l \\\"tauri\\\" 2>/dev/null; pgrep -l \\\"next\\\" 2>/dev/null\",\"description\":\"Check if tauri dev watcher is still running\"}",
-  "error": "Exit code 1",
-  "timestamp": "2026-07-28T09:30:14.228Z",
+  "tool_input_preview": "{\"command\":\"which gh && gh auth status 2>&1 | head -5\",\"description\":\"Check GitHub CLI status\"}",
+  "error": "Exit code 1\ngh not found\n\ngh not found",
+  "timestamp": "2026-08-24T04:51:27.733Z",
   "retry_count": 1
 }

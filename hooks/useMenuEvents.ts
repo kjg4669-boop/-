@@ -18,6 +18,7 @@ export interface MenuEventsOptions {
   setRightTab: React.Dispatch<React.SetStateAction<RightTab>>;
   setShowServiceList: React.Dispatch<React.SetStateAction<boolean>>;
   setShowSaveModal: React.Dispatch<React.SetStateAction<boolean>>;
+  setShowSaveAsDialog: React.Dispatch<React.SetStateAction<boolean>>;
   setShowQuickSearch: React.Dispatch<React.SetStateAction<boolean>>;
   setIsStageOpen: React.Dispatch<React.SetStateAction<boolean>>;
   showNotice: (msg: string, error?: boolean) => void;
@@ -59,7 +60,10 @@ export function useMenuEvents(options: MenuEventsOptions): void {
           listen("menu:new-service",       () => optionsRef.current.handleNewServiceRef.current()),
           listen("menu:open-service",      () => optionsRef.current.setShowServiceList(true)),
           listen("menu:save-service",      () => optionsRef.current.handleSaveRef.current()),
-          listen("menu:save-as",           () => optionsRef.current.setShowSaveModal(true)),
+          listen("menu:save-as",           () => {
+            if (!useQueueStore.getState().currentService) return;
+            optionsRef.current.setShowSaveAsDialog(true);
+          }),
           listen("menu:new-slide",         () => optionsRef.current.handleNewSlideRef.current()),
           listen("menu:dup-slide",         () => optionsRef.current.handleDupSlideRef.current()),
           listen("menu:add-media",         () => optionsRef.current.handleInsertImageRef.current()),
