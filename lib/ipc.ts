@@ -219,8 +219,9 @@ export const ipc = {
     listenEvent<LookApplyPayload>("look:apply", cb),
 
   // Web Remote Control
+  // Returns the generated PIN on success.
   startRemoteServer: (port: number) =>
-    invokeCommand<void>("start_remote_server", { port }),
+    invokeCommand<string>("start_remote_server", { port }),
   stopRemoteServer: () =>
     invokeCommand<void>("stop_remote_server"),
   getLocalIp: () =>

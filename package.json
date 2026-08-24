@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev --features devtools",
     "tauri:build": "tauri build",
     "dist:mac": "APPLE_SIGNING_IDENTITY=- npm run tauri:build",
     "test": "vitest run",

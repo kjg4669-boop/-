@@ -10,7 +10,14 @@ async fn backup_database(app: tauri::AppHandle, dest_path: String) -> Result<(),
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("worship.db");
-    std::fs::copy(&src, &dest_path).map_err(|e| e.to_string())?;
+    // Use SQLite Online Backup API — safe for live, open databases.
+    let src_conn = rusqlite::Connection::open(&src).map_err(|e| e.to_string())?;
+    let mut dst_conn = rusqlite::Connection::open(&dest_path).map_err(|e| e.to_string())?;
+    let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
+        .map_err(|e| e.to_string())?;
+    backup
+        .run_to_completion(5, std::time::Duration::from_millis(250), None)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -21,7 +28,15 @@ async fn restore_database(app: tauri::AppHandle, src_path: String) -> Result<(),
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("worship.db");
-    std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
+    // Use SQLite Online Backup API — copies src into the live DB safely.
+    // The app must be restarted after restore for the new data to take effect.
+    let src_conn = rusqlite::Connection::open(&src_path).map_err(|e| e.to_string())?;
+    let mut dst_conn = rusqlite::Connection::open(&dest).map_err(|e| e.to_string())?;
+    let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
+        .map_err(|e| e.to_string())?;
+    backup
+        .run_to_completion(5, std::time::Duration::from_millis(250), None)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -209,10 +224,15 @@ pub fn run() {
 
             // ── 보기 메뉴 ──────────────────────────────────────────────────
             let v_preview  = MenuItem::with_id(app, "open_preview_output", "출력 미리보기", true, None::<&str>)?;
-            let v_sep_dev  = PredefinedMenuItem::separator(app)?;
-            let v_devtools = MenuItem::with_id(app, "toggle_devtools", "개발자 도구", true, Some("CmdOrCtrl+Alt+I"))?;
 
-            let view_menu = Submenu::with_items(app, "보기", true, &[&v_preview, &v_sep_dev, &v_devtools])?;
+            #[cfg(feature = "devtools")]
+            let view_menu = {
+                let v_sep_dev  = PredefinedMenuItem::separator(app)?;
+                let v_devtools = MenuItem::with_id(app, "toggle_devtools", "개발자 도구", true, Some("CmdOrCtrl+Alt+I"))?;
+                Submenu::with_items(app, "보기", true, &[&v_preview, &v_sep_dev, &v_devtools])?
+            };
+            #[cfg(not(feature = "devtools"))]
+            let view_menu = Submenu::with_items(app, "보기", true, &[&v_preview])?;
 
             // ── 데이터 메뉴 ────────────────────────────────────────────────
             let d_backup  = MenuItem::with_id(app, "backup_db",  "데이터베이스 백업...", true, None::<&str>)?;
@@ -265,6 +285,7 @@ pub fn run() {
                         "show_about"       => { win.emit("menu:about", ()).ok(); }
                         "open_preview_output" => { win.emit("menu:open-preview", ()).ok(); }
                         "open_settings"    => { win.emit("menu:open-settings", ()).ok(); }
+                        #[cfg(feature = "devtools")]
                         "toggle_devtools" => {
                             win.open_devtools();
                             win.emit("menu:toggle-devmode", ()).ok();

@@ -8,6 +8,7 @@ export default function RemotePanel() {
   const [port, setPort] = useState(4316);
   const [running, setRunning] = useState(false);
   const [localIp, setLocalIp] = useState<string | null>(null);
+  const [pin, setPin] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleStart = useCallback(async () => {
@@ -19,7 +20,8 @@ export default function RemotePanel() {
     try {
       const ip = await ipc.getLocalIp();
       setLocalIp(ip);
-      await ipc.startRemoteServer(port);
+      const generatedPin = await ipc.startRemoteServer(port);
+      setPin(generatedPin);
       setRunning(true);
     } catch (e) {
       setError(String(e));
@@ -33,9 +35,11 @@ export default function RemotePanel() {
       console.warn("[Remote] stop failed:", e);
     }
     setRunning(false);
+    setPin(null);
   }, []);
 
-  const url = localIp ? `http://${localIp}:${port}` : null;
+  // PIN is embedded in the URL so the QR code grants access directly.
+  const url = localIp && pin ? `http://${localIp}:${port}/?pin=${pin}` : null;
 
   return (
     <div className="flex flex-col gap-3 p-3 text-xs text-zinc-200">
@@ -71,13 +75,19 @@ export default function RemotePanel() {
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3">
-          {url && (
+          {url && pin && (
             <>
               <div className="bg-white rounded p-2">
                 <QRCodeSVG value={url} size={160} />
               </div>
-              <p className="text-zinc-300 text-center font-mono text-sm">{url}</p>
-              <p className="text-zinc-500 text-xs text-center">스마트폰으로 QR 코드를 스캔하거나 위 주소를 입력하세요.</p>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-zinc-500 text-xs">PIN</p>
+                <p className="font-mono text-2xl font-bold tracking-[0.25em] text-yellow-300 bg-zinc-800 px-4 py-1 rounded">
+                  {pin}
+                </p>
+              </div>
+              <p className="text-zinc-300 text-center font-mono text-xs break-all">{url}</p>
+              <p className="text-zinc-500 text-xs text-center">QR 코드를 스캔하거나 위 주소를 입력하세요.</p>
             </>
           )}
           <button
