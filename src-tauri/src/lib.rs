@@ -223,16 +223,17 @@ pub fn run() {
             ])?;
 
             // ── 보기 메뉴 ──────────────────────────────────────────────────
-            let v_preview  = MenuItem::with_id(app, "open_preview_output", "출력 미리보기", true, None::<&str>)?;
+            let v_quick    = MenuItem::with_id(app, "quick_search",        "슬라이드 빠른 검색...", true, Some("CmdOrCtrl+K"))?;
+            let v_preview  = MenuItem::with_id(app, "open_preview_output", "출력 미리보기",         true, None::<&str>)?;
 
             #[cfg(feature = "devtools")]
             let view_menu = {
                 let v_sep_dev  = PredefinedMenuItem::separator(app)?;
                 let v_devtools = MenuItem::with_id(app, "toggle_devtools", "개발자 도구", true, Some("CmdOrCtrl+Alt+I"))?;
-                Submenu::with_items(app, "보기", true, &[&v_preview, &v_sep_dev, &v_devtools])?
+                Submenu::with_items(app, "보기", true, &[&v_quick, &v_preview, &v_sep_dev, &v_devtools])?
             };
             #[cfg(not(feature = "devtools"))]
-            let view_menu = Submenu::with_items(app, "보기", true, &[&v_preview])?;
+            let view_menu = Submenu::with_items(app, "보기", true, &[&v_quick, &v_preview])?;
 
             // ── 데이터 메뉴 ────────────────────────────────────────────────
             let d_backup  = MenuItem::with_id(app, "backup_db",  "데이터베이스 백업...", true, None::<&str>)?;
@@ -275,6 +276,7 @@ pub fn run() {
                         "add_song"         => { win.emit("menu:add-song", ()).ok(); }
                         "add_media"        => { win.emit("menu:add-media", ()).ok(); }
                         "add_scripture"    => { win.emit("menu:add-scripture", ()).ok(); }
+                        "quick_search"     => { win.emit("menu:quick-search", ()).ok(); }
                         "show_from_start"  => { win.emit("menu:show-from-start", ()).ok(); }
                         "show_from_current"=> { win.emit("menu:show-from-current", ()).ok(); }
                         "hide_slide"       => { win.emit("menu:hide-slide", ()).ok(); }
