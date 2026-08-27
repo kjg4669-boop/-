@@ -9,6 +9,14 @@
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhCNTdBNUI5MzFFRUZEM0UKUldRKy9lNHh1YVZYaXlkWTBlL2oxYWFLbStWS0FZU0tEbzc4RXYwNHFldWJvUmZObkJTVkRDRXQK",
+      "endpoints": [
+        "https://github.com/kjg4669-boop/-/releases/latest/download/latest.json"
+      ]
+    }
+  },
   "app": {
     "windows": [
       {
