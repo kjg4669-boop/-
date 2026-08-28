@@ -4,6 +4,15 @@ import {
   useEffect, useRef, useState, useCallback, useId,
   forwardRef, useImperativeHandle,
 } from "react";
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/\n/g, "<br>");
+}
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
@@ -503,7 +512,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                       }}
                       contentEditable
                       suppressContentEditableWarning
-                      dangerouslySetInnerHTML={{ __html: block.text.replace(/\n/g, "<br>") }}
+                      dangerouslySetInnerHTML={{ __html: escapeHtml(block.text) }}
                       onInput={(e) => { editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText; }}
                       onBlur={() => { handleTextChange(block.id, editingTextRef.current.replace(/\n$/, "")); setEditingId(null); }}
                       style={{

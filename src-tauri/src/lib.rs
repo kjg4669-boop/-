@@ -3,8 +3,20 @@ mod display;
 mod remote;
 mod ndi_output;
 
+fn validate_db_path(path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    if p.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err("경로에 '..'를 사용할 수 없습니다".to_string());
+    }
+    match p.extension().and_then(|e| e.to_str()) {
+        Some("db") | Some("sqlite") | Some("sqlite3") => Ok(()),
+        _ => Err("백업 파일은 .db 또는 .sqlite 확장자여야 합니다".to_string()),
+    }
+}
+
 #[tauri::command]
 async fn backup_database(app: tauri::AppHandle, dest_path: String) -> Result<(), String> {
+    validate_db_path(&dest_path)?;
     let src = app
         .path()
         .app_data_dir()
@@ -23,6 +35,7 @@ async fn backup_database(app: tauri::AppHandle, dest_path: String) -> Result<(),
 
 #[tauri::command]
 async fn restore_database(app: tauri::AppHandle, src_path: String) -> Result<(), String> {
+    validate_db_path(&src_path)?;
     let dest = app
         .path()
         .app_data_dir()

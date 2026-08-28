@@ -18,8 +18,6 @@
     "fs:allow-exists",
     "fs:allow-appdata-read-recursive",
     "fs:allow-appdata-write-recursive",
-    "fs:allow-home-read-recursive",
-    "fs:allow-home-write-recursive",
     "sql:default",
     "sql:allow-execute"
   ]

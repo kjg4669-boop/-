@@ -6599,6 +6599,7 @@ dependencies = [
  "axum",
  "local-ip-address",
  "ndi-sdk",
+ "rand",
  "rusqlite",
  "serde",
  "serde_json",

@@ -1,31 +1,32 @@
 use axum::{
     Router,
-    extract::{Query, State, WebSocketUpgrade},
+    extract::{ConnectInfo, Query, State, WebSocketUpgrade},
     extract::ws::{Message, WebSocket},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::get,
 };
+use rand::Rng;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast;
 
-/// Generate a random 4-digit PIN using system time + PID mixing.
+/// Rate limiting: max failed attempts before lockout.
+const MAX_FAILED_ATTEMPTS: u32 = 5;
+/// Lockout duration after exceeding MAX_FAILED_ATTEMPTS.
+const LOCKOUT_DURATION: Duration = Duration::from_secs(30);
+
+/// Allowed remote command types. Any other type is silently dropped.
+const ALLOWED_COMMANDS: &[&str] = &["next", "prev", "blackout", "goto", "stop"];
+
+/// Generate a cryptographically secure 6-digit PIN using OS CSPRNG.
 fn generate_pin() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    let pid = std::process::id();
-    // XorShift mix of nanoseconds and PID for unpredictability
-    let mut x = nanos ^ (pid.wrapping_shl(16));
-    x ^= x.wrapping_shl(13);
-    x ^= x >> 17;
-    x ^= x.wrapping_shl(5);
-    format!("{:04}", 1000 + (x % 9000))
+    let pin: u32 = rand::thread_rng().gen_range(100000u32..1000000u32);
+    format!("{:06}", pin)
 }
 
 // REMOTE_HTML uses {{PIN}} as a placeholder that is replaced at runtime.
@@ -96,6 +97,9 @@ struct RemoteMsg {
     slide_index: Option<usize>,
 }
 
+/// Per-IP rate limit entry: (failure_count, first_failure_time).
+type FailedAttempts = Arc<std::sync::Mutex<HashMap<String, (u32, Instant)>>>;
+
 pub struct RemoteServerState {
     pub abort_handle: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
     pub state_tx: broadcast::Sender<String>,
@@ -115,29 +119,77 @@ struct AxumState {
     app: AppHandle,
     state_tx: broadcast::Sender<String>,
     pin: String,
+    failed_attempts: FailedAttempts,
+}
+
+/// Returns true if the IP is currently locked out, and updates the failure tracker.
+/// `success` = true clears the counter; false increments it.
+fn check_rate_limit(failed_attempts: &FailedAttempts, ip: &str, success: bool) -> bool {
+    let mut map = match failed_attempts.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    if success {
+        map.remove(ip);
+        return false;
+    }
+    let entry = map.entry(ip.to_string()).or_insert((0, Instant::now()));
+    // Reset counter if the lockout window has expired.
+    if entry.1.elapsed() >= LOCKOUT_DURATION {
+        *entry = (0, Instant::now());
+    }
+    entry.0 += 1;
+    entry.0 > MAX_FAILED_ATTEMPTS
+}
+
+/// Returns true if this IP is already in lockout (without incrementing counter).
+fn is_locked_out(failed_attempts: &FailedAttempts, ip: &str) -> bool {
+    let map = match failed_attempts.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    if let Some(&(count, ts)) = map.get(ip) {
+        count > MAX_FAILED_ATTEMPTS && ts.elapsed() < LOCKOUT_DURATION
+    } else {
+        false
+    }
 }
 
 async fn root_handler(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AxumState>>,
 ) -> Response {
+    let ip = addr.ip().to_string();
+    if is_locked_out(&state.failed_attempts, &ip) {
+        return (StatusCode::TOO_MANY_REQUESTS, Html("<h1>너무 많은 시도. 잠시 후 다시 시도하세요.</h1>")).into_response();
+    }
     let provided = params.get("pin").map(String::as_str).unwrap_or("");
     if provided != state.pin.as_str() {
+        check_rate_limit(&state.failed_attempts, &ip, false);
         return (StatusCode::UNAUTHORIZED, Html("<h1>잘못된 PIN입니다</h1>")).into_response();
     }
+    check_rate_limit(&state.failed_attempts, &ip, true);
     let html = REMOTE_HTML.replace("{{PIN}}", &state.pin);
     Html(html).into_response()
 }
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<HashMap<String, String>>,
     State(state): State<Arc<AxumState>>,
 ) -> Response {
+    let ip = addr.ip().to_string();
+    if is_locked_out(&state.failed_attempts, &ip) {
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many attempts").into_response();
+    }
     let provided = params.get("pin").map(String::as_str).unwrap_or("");
     if provided != state.pin.as_str() {
+        check_rate_limit(&state.failed_attempts, &ip, false);
         return (StatusCode::UNAUTHORIZED, "Invalid PIN").into_response();
     }
+    check_rate_limit(&state.failed_attempts, &ip, true);
     ws.on_upgrade(|socket| handle_socket(socket, state)).into_response()
 }
 
@@ -149,6 +201,10 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AxumState>) {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(cmd) = serde_json::from_str::<RemoteMsg>(&text) {
+                            // Whitelist: only allow known command types.
+                            if !ALLOWED_COMMANDS.contains(&cmd.msg_type.as_str()) {
+                                continue;
+                            }
                             let payload = serde_json::json!({
                                 "type": cmd.msg_type,
                                 "slideIndex": cmd.slide_index,
@@ -177,7 +233,7 @@ pub async fn start_remote_server(
 ) -> Result<String, String> {
     // Check and reject early — drop the guard before any await.
     {
-        let guard = remote.abort_handle.lock().unwrap();
+        let guard = remote.abort_handle.lock().map_err(|e| e.to_string())?;
         if guard.is_some() {
             return Err("already_running".to_string());
         }
@@ -185,20 +241,33 @@ pub async fn start_remote_server(
 
     let pin = generate_pin();
     let state_tx = remote.state_tx.clone();
-    let axum_state = Arc::new(AxumState { app, state_tx, pin: pin.clone() });
+    let failed_attempts: FailedAttempts = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let axum_state = Arc::new(AxumState {
+        app,
+        state_tx,
+        pin: pin.clone(),
+        failed_attempts,
+    });
     let router = Router::new()
         .route("/", get(root_handler))
         .route("/ws", get(ws_handler))
-        .with_state(axum_state);
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
+        .with_state(axum_state)
+        .into_make_service_with_connect_info::<SocketAddr>();
+
+    // Bind to local network IP only — prevents WAN direct access.
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
+    let listener = tokio::net::TcpListener::bind(format!("{local_ip}:{port}"))
         .await
         .map_err(|e| e.to_string())?;
+
     let task = tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
     });
 
     // Re-acquire the lock after the await to store the abort handle.
-    let mut guard = remote.abort_handle.lock().unwrap();
+    let mut guard = remote.abort_handle.lock().map_err(|e| e.to_string())?;
     *guard = Some(task.abort_handle());
     Ok(pin)
 }
@@ -207,7 +276,7 @@ pub async fn start_remote_server(
 pub async fn stop_remote_server(
     remote: tauri::State<'_, RemoteServerState>,
 ) -> Result<(), String> {
-    let mut guard = remote.abort_handle.lock().unwrap();
+    let mut guard = remote.abort_handle.lock().map_err(|e| e.to_string())?;
     if let Some(h) = guard.take() {
         h.abort();
     }
