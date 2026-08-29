@@ -4,21 +4,12 @@ import {
   useEffect, useRef, useState, useCallback, useId,
   forwardRef, useImperativeHandle,
 } from "react";
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/\n/g, "<br>");
-}
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import { toDisplayUrl } from "@/lib/media";
 import type { TextBlock, TextSpan } from "@/lib/types";
-import { applyFormatToSpans } from "@/lib/spanUtils";
+import { applyFormatToSpans, spansToHtml, htmlToSpans } from "@/lib/spanUtils";
 
 const OUTPUT_W = 1920;
 const OUTPUT_H = 1080;
@@ -46,6 +37,7 @@ const MOVE_HANDLES = new Set<HandlePos>(["nw", "n", "ne"]);
 interface Props {
   onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: import("@/lib/types").ShapeBlock[] }) => void;
   onSelectionChange?: (block: TextBlock | null) => void;
+  onSelectionFormatChange?: (fmt: Partial<Omit<TextSpan, "text">> | null) => void;
 }
 
 // Module-level clipboard for text blocks
@@ -69,8 +61,40 @@ function handleCursor(pos: HandlePos): string {
   return "ew-resize";
 }
 
+/** contentEditable 내 문자 오프셋으로 Selection 복원 */
+function setSelectionByOffsets(el: HTMLElement, start: number, end: number) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  let charCount = 0;
+  let startNode: Text | null = null, endNode: Text | null = null;
+  let startOff = 0, endOff = 0;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_ALL);
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node as Text).length;
+      if (!startNode && charCount + len >= start) { startNode = node as Text; startOff = start - charCount; }
+      if (!endNode && charCount + len >= end) { endNode = node as Text; endOff = end - charCount; }
+      if (startNode && endNode) break;
+      charCount += len;
+    } else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName === "BR") {
+      charCount += 1;
+    }
+    node = walker.nextNode();
+  }
+  if (startNode && endNode) {
+    try {
+      const range = document.createRange();
+      range.setStart(startNode, Math.min(startOff, startNode.length));
+      range.setEnd(endNode, Math.min(endOff, endNode.length));
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch { /* 복원 실패 무시 */ }
+  }
+}
+
 const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
-  function SlideCanvas({ onCanvasChange, onSelectionChange }, ref) {
+  function SlideCanvas({ onCanvasChange, onSelectionChange, onSelectionFormatChange }, ref) {
     const activeIdx = useQueueStore((s) => s.getActiveFlatSlideIndex());
     const slides = useQueueStore((s) => s.getFlatSlideList());
     const { layerConfig } = useOutputStore();
@@ -94,6 +118,11 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const editingSelectionRef = useRef<{ start: number; end: number } | null>(null);
     const didDragRef = useRef(false);
     const editingTextRef = useRef<string>("");
+    const contentEditableRef = useRef<HTMLDivElement | null>(null);
+    const editInitializedRef = useRef<string | null>(null);
+    const lastSelectionRef = useRef<{ blockId: string; start: number; end: number; time: number } | null>(null);
+    const onSelectionFormatChangeRef = useRef(onSelectionFormatChange);
+    useEffect(() => { onSelectionFormatChangeRef.current = onSelectionFormatChange; });
     const drawRef = useRef<{ startX: number; startY: number; rect: { x: number; y: number; w: number; h: number } | null } | null>(null);
     const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
@@ -158,14 +187,31 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       },
       isFmtPainterActive: () => fmtPainterActive,
       applyFormatToSelection(blockId, patch) {
-        if (editingId !== blockId || !editingSelectionRef.current) return false;
-        const { start, end } = editingSelectionRef.current;
-        if (start === end) return false;
-        const block = blocksRef.current.find((b) => b.id === blockId);
-        if (!block) return false;
-        const newSpans = applyFormatToSpans(block.text, block.spans, start, end, patch);
-        setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
-        return true;
+        // 1) 편집 중 + 라이브 선택
+        if (editingId === blockId && editingSelectionRef.current) {
+          const { start, end } = editingSelectionRef.current;
+          if (start !== end) {
+            const el = contentEditableRef.current;
+            if (!el) return false;
+            const { text: currentText, spans: currentSpans } = htmlToSpans(el.innerHTML);
+            const newSpans = applyFormatToSpans(currentText, currentSpans, start, end, patch);
+            el.innerHTML = spansToHtml(newSpans, currentText);
+            setSelectionByOffsets(el, start, end);
+            setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
+            return true;
+          }
+        }
+        // 2) select 드롭다운 등 blur 후 1초 이내 저장된 선택 범위 재활용
+        const saved = lastSelectionRef.current;
+        if (saved && saved.blockId === blockId && Date.now() - saved.time < 1000) {
+          const { start, end } = saved;
+          const block = blocksRef.current.find((b) => b.id === blockId);
+          if (!block) return false;
+          const newSpans = applyFormatToSpans(block.text, block.spans, start, end, patch);
+          setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
+          return true;
+        }
+        return false;
       },
     }), [idPrefix, fmtPainterActive, editingId]);
 
@@ -407,6 +453,60 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       return () => window.removeEventListener("keydown", onKey);
     }, [editingId]);
 
+    // selectionchange 로 선택 범위 추적 (onSelect 보다 신뢰성 높음)
+    useEffect(() => {
+      if (!editingId) return;
+      const updateSel = () => {
+        const el = contentEditableRef.current;
+        if (!el) return;
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) { editingSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null); return; }
+        if (!el.contains(sel.anchorNode)) { editingSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null); return; }
+        const range = sel.getRangeAt(0);
+        // BR을 '\n' 1자로 계산하는 오프셋 계산
+        const getOffset = (container: Node, offset: number): number => {
+          let count = 0;
+          const w = document.createTreeWalker(el, NodeFilter.SHOW_ALL);
+          let n: Node | null = w.nextNode();
+          while (n) {
+            if (n === container) return count + (n.nodeType === Node.TEXT_NODE ? offset : 0);
+            if (n.nodeType === Node.TEXT_NODE) count += (n as Text).length;
+            else if (n.nodeType === Node.ELEMENT_NODE && (n as Element).tagName === "BR") count += 1;
+            n = w.nextNode();
+          }
+          return count;
+        };
+        const rawStart = getOffset(range.startContainer, range.startOffset);
+        const rawEnd = getOffset(range.endContainer, range.endOffset);
+        const start = Math.min(rawStart, rawEnd);
+        const end = Math.max(rawStart, rawEnd);
+        if (start !== end) {
+          editingSelectionRef.current = { start, end };
+          lastSelectionRef.current = { blockId: editingId, start, end, time: Date.now() };
+          // 선택 범위 첫 스팬의 서식을 콜백으로 전달 (툴바 활성 상태용)
+          const { spans } = htmlToSpans(el.innerHTML);
+          let pos = 0, selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          for (const span of spans) {
+            if (pos + span.text.length > start) {
+              const { text: _t, ...fmt } = span;
+              selFmt = Object.keys(fmt).length > 0 ? fmt : null;
+              break;
+            }
+            pos += span.text.length;
+          }
+          onSelectionFormatChangeRef.current?.(selFmt);
+        } else {
+          editingSelectionRef.current = null;
+          onSelectionFormatChangeRef.current?.(null);
+        }
+      };
+      document.addEventListener("selectionchange", updateSel);
+      return () => {
+        document.removeEventListener("selectionchange", updateSel);
+        onSelectionFormatChangeRef.current?.(null);
+      };
+    }, [editingId]);
+
     // ── Selected block (first in selection) ──────────────────────────
     const primaryId = selectedIds[0] ?? null;
     const selectedBlock = primaryId ? blocks.find((b) => b.id === primaryId) : null;
@@ -509,16 +609,18 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                     onPointerDown={(e) => e.stopPropagation()}
                   >
                     <div
-                      id={`block-edit-${block.id}`}
                       ref={(el) => {
-                        if (el && document.activeElement !== el) {
-                          editingTextRef.current = block.text;
+                        contentEditableRef.current = el;
+                        if (el && editInitializedRef.current !== block.id) {
+                          // 첫 진입 시만 초기화: 스팬 HTML로 렌더, 전체 선택
+                          editInitializedRef.current = block.id;
+                          el.innerHTML = spansToHtml(block.spans, block.text);
+                          editingTextRef.current = el.innerText;
                           el.focus({ preventScroll: true });
                           const sel = window.getSelection();
                           if (sel) {
                             const range = document.createRange();
                             range.selectNodeContents(el);
-                            // Keep text selected (don't collapse) — lets user type to replace or Delete all at once
                             sel.removeAllRanges();
                             sel.addRange(range);
                           }
@@ -526,48 +628,33 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                       }}
                       contentEditable
                       suppressContentEditableWarning
-                      dangerouslySetInnerHTML={{ __html: escapeHtml(block.text) }}
                       onInput={(e) => {
                         editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText;
-                        editingSelectionRef.current = null;
-                      }}
-                      onSelect={() => {
-                        const sel = window.getSelection();
-                        if (!sel || sel.rangeCount === 0) { editingSelectionRef.current = null; return; }
-                        const range = sel.getRangeAt(0);
-                        const el = document.getElementById(`block-edit-${block.id}`);
-                        if (!el) return;
-                        let start = 0, end = 0;
-                        let foundStart = false;
-                        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-                        let charCount = 0;
-                        let node: Node | null = walker.nextNode();
-                        while (node) {
-                          const nodeLen = (node as Text).length;
-                          if (!foundStart && node === range.startContainer) {
-                            start = charCount + range.startOffset;
-                            foundStart = true;
-                          }
-                          if (node === range.endContainer) {
-                            end = charCount + range.endOffset;
-                            break;
-                          }
-                          charCount += nodeLen;
-                          node = walker.nextNode();
-                        }
-                        if (start !== end) {
-                          editingSelectionRef.current = { start, end };
-                        } else {
-                          editingSelectionRef.current = null;
-                        }
                       }}
                       onBlur={() => {
-                        const newText = editingTextRef.current.replace(/\n$/, "");
-                        if (newText !== block.text) {
-                          // Text changed → spans invalid, reset spans alongside text update
-                          setBlocks((prev) => prev.map((b) => (b.id === block.id ? { ...b, text: newText, spans: undefined } : b)));
-                        } else {
-                          handleTextChange(block.id, newText);
+                        const el = contentEditableRef.current;
+                        editInitializedRef.current = null;
+                        if (el) {
+                          const { text: rawText, spans: rawSpans } = htmlToSpans(el.innerHTML);
+                          // 브라우저가 추가하는 trailing newline 제거
+                          const cleanText = rawText.endsWith("\n") ? rawText.slice(0, -1) : rawText;
+                          // spans를 cleanText 길이에 맞게 trim
+                          let pos = 0;
+                          const cleanSpans: TextSpan[] = [];
+                          for (const span of rawSpans) {
+                            if (pos >= cleanText.length) break;
+                            const remaining = cleanText.length - pos;
+                            if (span.text.length <= remaining) {
+                              cleanSpans.push(span);
+                              pos += span.text.length;
+                            } else {
+                              cleanSpans.push({ ...span, text: span.text.slice(0, remaining) });
+                              break;
+                            }
+                          }
+                          setBlocks((prev) =>
+                            prev.map((b) => b.id === block.id ? { ...b, text: cleanText, spans: cleanSpans } : b)
+                          );
                         }
                         setEditingId(null);
                         editingSelectionRef.current = null;
@@ -616,6 +703,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                         <span
                           key={i}
                           style={{
+                            fontFamily: span.fontFamily,
                             fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
                             fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
                             textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),

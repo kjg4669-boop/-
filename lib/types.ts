@@ -15,6 +15,7 @@ export type LyricSection = "verse" | "chorus" | "bridge" | "pre-chorus" | "outro
 
 export interface TextSpan {
   text: string;
+  fontFamily?: string;
   fontWeight?: "normal" | "bold";
   fontStyle?: "normal" | "italic";
   textDecoration?: "none" | "underline" | "line-through";

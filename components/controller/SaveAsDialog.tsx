@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ChevronLeft, ChevronUp, Home, Monitor, Download, FileText,
-  Folder, File, X, Save, ChevronDown,
+  Folder, File, X, Save, ChevronDown, HardDrive,
 } from "lucide-react";
 import { readDir } from "@tauri-apps/plugin-fs";
 
@@ -59,6 +59,7 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [volumes, setVolumes] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -104,6 +105,16 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
           { label: "문서", path: documents, icon: "document" },
         ]);
         await loadDir(desktop, false);
+        // Load external drives from /Volumes/
+        try {
+          const raw = await readDir("/Volumes");
+          const vols = (raw as { name?: string; isDirectory: boolean }[])
+            .filter((e) => e.name && e.name !== "Macintosh HD" && e.isDirectory)
+            .map((e) => e.name!);
+          if (!cancelled) setVolumes(vols);
+        } catch {
+          /* /Volumes not accessible */
+        }
       } catch {
         /* fallback: stay empty */
       }
@@ -242,6 +253,31 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
                 <span className="truncate">{bm.label}</span>
               </button>
             ))}
+            {volumes.length > 0 && (
+              <>
+                <p className="px-3 mt-3 mb-1 text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">드라이브</p>
+                {volumes.map((vol) => {
+                  const volPath = `/Volumes/${vol}`;
+                  const isActive = currentPath === volPath || currentPath.startsWith(volPath + "/");
+                  return (
+                    <button
+                      key={volPath}
+                      onClick={() => loadDir(volPath)}
+                      className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                        isActive
+                          ? "bg-zinc-700 text-zinc-100"
+                          : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/40"
+                      }`}
+                    >
+                      <span className={isActive ? "text-blue-400" : "text-zinc-500"}>
+                        <HardDrive size={14} />
+                      </span>
+                      <span className="truncate">{vol}</span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
 
           {/* File list */}
@@ -271,13 +307,15 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
                       key={entry.name}
                       onClick={() => handleEntryClick(entry)}
                       onDoubleClick={() => handleEntryDoubleClick(entry)}
+                      style={{ opacity: entry.isDirectory || isSelected ? 1 : 0.38 }}
                       className={[
                         "flex items-center gap-2 px-3 py-[5px] select-none transition-all",
                         entry.isDirectory ? "cursor-pointer" : "cursor-default",
-                        isFile && !isSelected ? "opacity-45" : "opacity-100",
                         isSelected
                           ? "bg-blue-600/25 text-zinc-100"
-                          : "hover:bg-zinc-700/35 text-zinc-300",
+                          : entry.isDirectory
+                          ? "hover:bg-zinc-700/35 text-zinc-300"
+                          : "text-zinc-500",
                       ].join(" ")}
                     >
                       <span className={entry.isDirectory ? "text-yellow-400/80" : "text-zinc-500"}>

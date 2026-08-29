@@ -148,6 +148,7 @@ export default function ControllerPage() {
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
+  const [selectionFormat, setSelectionFormat] = useState<Partial<Omit<TextSpan, "text">> | null>(null);
   const canvasRef = useRef<SlideCanvasHandle>(null);
   const openedWindowsRef = useRef<Set<RightTab>>(new Set());
   openedWindowsRef.current = openedWindows;
@@ -198,9 +199,16 @@ export default function ControllerPage() {
         : rawUrl;
       if (!filePath.match(/\.(wpjson|json)$/i)) return;
       try {
-        const { readTextFile } = await import("@tauri-apps/plugin-fs");
-        const content = await readTextFile(filePath);
-        const parsed = JSON.parse(content) as import("@/lib/types").Service;
+        const { readFile } = await import("@tauri-apps/plugin-fs");
+        const bytes = await readFile(filePath);
+        const { isWpkgBundle, unpackService } = await import("@/lib/wpkg");
+        let parsed: import("@/lib/types").Service;
+        if (isWpkgBundle(bytes)) {
+          const bundleName = filePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "bundle";
+          parsed = await unpackService(bytes, bundleName);
+        } else {
+          parsed = JSON.parse(new TextDecoder().decode(bytes)) as import("@/lib/types").Service;
+        }
         if (parsed && Array.isArray(parsed.items)) {
           useQueueStore.getState().setCurrentService({ ...parsed, id: parsed.id ?? 0 });
           setCtrlNotice({ msg: `열림: ${parsed.name}` });
@@ -1300,7 +1308,15 @@ export default function ControllerPage() {
           }
           content = lines.join("\n");
         } else {
-          content = JSON.stringify(svc, null, 2);
+          // wpjson / json — pack as ZIP bundle (embeds media files like PowerPoint)
+          const { packService } = await import("@/lib/wpkg");
+          const { writeFile: writeFileBin } = await import("@tauri-apps/plugin-fs");
+          const bundleBytes = await packService(svc);
+          await writeFileBin(filePath, bundleBytes);
+          setCtrlNotice({ msg: "파일로 저장됨" });
+          if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+          ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 3000);
+          return;
         }
         await writeTextFile(filePath, content);
       }
@@ -1356,12 +1372,12 @@ export default function ControllerPage() {
   }, [selectedBlock, layerConfig, handleLayerChange]);
 
   const fmt: Required<FmtPatch> = selectedBlock ? {
-    fontFamily: selectedBlock.fontFamily,
-    fontSize: selectedBlock.fontSize,
-    fontWeight: selectedBlock.fontWeight ?? "normal",
-    fontStyle: selectedBlock.fontStyle ?? "normal",
-    textDecoration: selectedBlock.textDecoration ?? "none",
-    color: selectedBlock.color,
+    fontFamily: selectionFormat?.fontFamily ?? selectedBlock.fontFamily,
+    fontSize: selectionFormat?.fontSize ?? selectedBlock.fontSize,
+    fontWeight: selectionFormat?.fontWeight ?? (selectedBlock.fontWeight ?? "normal"),
+    fontStyle: selectionFormat?.fontStyle ?? (selectedBlock.fontStyle ?? "normal"),
+    textDecoration: selectionFormat?.textDecoration ?? (selectedBlock.textDecoration ?? "none"),
+    color: selectionFormat?.color ?? selectedBlock.color,
     textAlign: selectedBlock.textAlign ?? "center",
   } : {
     fontFamily: layerConfig.subtitle.fontFamily,
@@ -1993,7 +2009,7 @@ export default function ControllerPage() {
                 </div>
               )}
               <div style={{ width: `${zoom}%`, minWidth: `${zoom}%`, flexShrink: 0 }} className="px-6">
-                <SlideCanvas ref={canvasRef} onCanvasChange={handleCanvasChange} onSelectionChange={setSelectedBlock} />
+                <SlideCanvas ref={canvasRef} onCanvasChange={handleCanvasChange} onSelectionChange={setSelectedBlock} onSelectionFormatChange={setSelectionFormat} />
               </div>
             </div>
           </div>

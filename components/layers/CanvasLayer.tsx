@@ -64,6 +64,7 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
               <span
                 key={i}
                 style={{
+                  fontFamily: span.fontFamily,
                   fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
                   fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
                   textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),

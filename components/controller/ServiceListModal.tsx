@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { serviceDb } from "@/lib/db";
 import type { Service } from "@/lib/types";
+import { FolderOpen } from "lucide-react";
 
 interface Props {
   onLoad: (service: Service) => void;
@@ -15,6 +16,7 @@ export default function ServiceListModal({ onLoad, onClose, currentServiceId, on
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     serviceDb.list()
@@ -49,6 +51,46 @@ export default function ServiceListModal({ onLoad, onClose, currentServiceId, on
     }
   }
 
+  async function handleImportFile() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const filePath = await open({
+        filters: [{ name: "Worship Projector 파일", extensions: ["wpjson", "json"] }],
+        title: "예배 파일 가져오기",
+      });
+      if (!filePath || typeof filePath !== "string") return;
+
+      setImporting(true);
+      const { readFile } = await import("@tauri-apps/plugin-fs");
+      const bytes = await readFile(filePath);
+      const { isWpkgBundle, unpackService } = await import("@/lib/wpkg");
+      let parsed: Service;
+      if (isWpkgBundle(bytes)) {
+        const bundleName = filePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "bundle";
+        parsed = await unpackService(bytes, bundleName);
+      } else {
+        parsed = JSON.parse(new TextDecoder().decode(bytes)) as Service;
+      }
+      if (!parsed || !Array.isArray(parsed.items)) {
+        alert("올바른 예배 파일이 아닙니다.");
+        return;
+      }
+
+      const newId = await serviceDb.importFromFile(parsed);
+      const reloaded = await serviceDb.get(newId);
+      if (reloaded) {
+        setServices((prev) => [reloaded, ...prev]);
+        onLoad(reloaded);
+      }
+    } catch (e) {
+      console.error("[importFile]", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      alert(`파일을 불러오는 데 실패했습니다.\n\n${msg}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" onClick={onClose}>
       <div
@@ -57,7 +99,18 @@ export default function ServiceListModal({ onLoad, onClose, currentServiceId, on
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-700">
           <h2 className="font-semibold text-white text-sm">예배 불러오기</h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg leading-none">✕</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleImportFile}
+              disabled={importing}
+              title="파일에서 열기 (.wpjson)"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs text-zinc-300 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-40 rounded transition-colors"
+            >
+              <FolderOpen size={13} />
+              {importing ? "가져오는 중..." : "파일에서 열기"}
+            </button>
+            <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg leading-none">✕</button>
+          </div>
         </div>
         <div className="px-4 py-2 bg-amber-900/40 border-b border-amber-700/50 text-amber-300 text-xs">
           ⚠️ 라이브 중 불러오면 출력 화면이 초기화됩니다.

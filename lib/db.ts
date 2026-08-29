@@ -22,18 +22,6 @@ async function getDb() {
   return dbPromise;
 }
 
-async function withTransaction<T>(fn: (conn: Awaited<ReturnType<typeof getDb>>) => Promise<T>): Promise<T> {
-  const conn = await getDb();
-  await conn.execute("BEGIN");
-  try {
-    const result = await fn(conn);
-    await conn.execute("COMMIT");
-    return result;
-  } catch (err) {
-    await conn.execute("ROLLBACK").catch(() => {});
-    throw err;
-  }
-}
 
 // ─── Internal DB row types ───────────────────────────────────────────────────
 
@@ -159,10 +147,9 @@ export const songDb = {
   },
 
   async delete(id: number): Promise<void> {
-    await withTransaction(async (conn) => {
-      await conn.execute("DELETE FROM service_items WHERE song_id = ?", [id]);
-      await conn.execute("DELETE FROM songs WHERE id = ?", [id]);
-    });
+    const conn = await getDb();
+    await conn.execute("DELETE FROM service_items WHERE song_id = ?", [id]);
+    await conn.execute("DELETE FROM songs WHERE id = ?", [id]);
   },
 };
 
@@ -208,16 +195,9 @@ export const mediaDb = {
 
   async delete(id: number): Promise<void> {
     const conn = await getDb();
-    await conn.execute("BEGIN");
-    try {
-      // Null out songs.media_id to avoid stale foreign key references
-      await conn.execute("UPDATE songs SET media_id = NULL WHERE media_id = ?", [id]);
-      await conn.execute("DELETE FROM media WHERE id = ?", [id]);
-      await conn.execute("COMMIT");
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
-    }
+    // Null out songs.media_id to avoid stale foreign key references
+    await conn.execute("UPDATE songs SET media_id = NULL WHERE media_id = ?", [id]);
+    await conn.execute("DELETE FROM media WHERE id = ?", [id]);
   },
 };
 
@@ -288,18 +268,11 @@ export const serviceDb = {
 
   async reorderItems(serviceId: number, orderedIds: number[]): Promise<void> {
     const conn = await getDb();
-    await conn.execute("BEGIN");
-    try {
-      for (let i = 0; i < orderedIds.length; i++) {
-        await conn.execute(
-          "UPDATE service_items SET item_order = ? WHERE id = ? AND service_id = ?",
-          [i, orderedIds[i], serviceId]
-        );
-      }
-      await conn.execute("COMMIT");
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
+    for (let i = 0; i < orderedIds.length; i++) {
+      await conn.execute(
+        "UPDATE service_items SET item_order = ? WHERE id = ? AND service_id = ?",
+        [i, orderedIds[i], serviceId]
+      );
     }
   },
 
@@ -323,20 +296,13 @@ export const serviceDb = {
 
   async saveItems(serviceId: number, items: ServiceItem[]): Promise<void> {
     const conn = await getDb();
-    await conn.execute("BEGIN");
-    try {
-      await conn.execute("DELETE FROM service_items WHERE service_id = ?", [serviceId]);
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        await conn.execute(
-          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
-        );
-      }
-      await conn.execute("COMMIT");
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
+    await conn.execute("DELETE FROM service_items WHERE service_id = ?", [serviceId]);
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      await conn.execute(
+        "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
+      );
     }
   },
 
@@ -360,27 +326,54 @@ export const serviceDb = {
     const original = await serviceDb.get(id);
     if (!original) throw new Error("Service not found");
     const conn = await getDb();
-    await conn.execute("BEGIN");
-    try {
-      const result = await conn.execute(
-        "INSERT INTO services (name, date, notes) VALUES (?, ?, ?)",
-        [`${original.name} (복사)`, original.date, original.notes ?? ""]
+    const result = await conn.execute(
+      "INSERT INTO services (name, date, notes) VALUES (?, ?, ?)",
+      [`${original.name} (복사)`, original.date, original.notes ?? ""]
+    );
+    const newId = result.lastInsertId;
+    if (newId == null) throw new Error("INSERT failed: no lastInsertId (duplicate service)");
+    for (let i = 0; i < original.items.length; i++) {
+      const item = original.items[i];
+      await conn.execute(
+        "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [newId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
       );
-      const newId = result.lastInsertId;
-      if (newId == null) throw new Error("INSERT failed: no lastInsertId (duplicate service)");
-      for (let i = 0; i < original.items.length; i++) {
-        const item = original.items[i];
-        await conn.execute(
-          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-          [newId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label, item.notes ?? ""]
-        );
-      }
-      await conn.execute("COMMIT");
-      return newId;
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
     }
+    return newId;
+  },
+
+  /** Import a full Service (with embedded song data) from a .wpjson file.
+   *  Uses sequential individual INSERTs (no explicit transaction) to avoid
+   *  sqlx connection-pool locking issues. */
+  async importFromFile(service: Service): Promise<number> {
+    const conn = await getDb();
+
+    const svcResult = await conn.execute(
+      "INSERT INTO services (name, date, notes) VALUES (?, ?, ?)",
+      [service.name, service.date ?? new Date().toISOString().slice(0, 10), service.notes ?? ""]
+    );
+    const newServiceId = svcResult.lastInsertId as number;
+
+    for (let i = 0; i < service.items.length; i++) {
+      const item = service.items[i];
+      let songId: number | null = null;
+
+      if (item.type === "song" && item.song) {
+        const s = item.song;
+        const songResult = await conn.execute(
+          "INSERT INTO songs (title, artist, lyrics_json, media_id, ccli_number, copyright_text, publisher, verse_order, bpm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [s.title, s.artist, JSON.stringify(s.lyrics_json), null, s.ccli_number ?? null, s.copyright_text ?? null, s.publisher ?? null, s.verse_order ? JSON.stringify(s.verse_order) : null, s.bpm ?? null]
+        );
+        songId = songResult.lastInsertId as number;
+      }
+
+      await conn.execute(
+        "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [newServiceId, i, item.type, songId, null, JSON.stringify(item.settings_json ?? {}), item.label, item.notes ?? ""]
+      );
+    }
+
+    return newServiceId;
   },
 };
 
@@ -477,27 +470,20 @@ export const templateDb = {
     if (!rows[0]) return null;
     const template = parseTemplate(rows[0]);
 
-    await conn.execute("BEGIN");
-    try {
-      const result = await conn.execute(
-        "INSERT INTO services (name, date) VALUES (?, ?)",
-        [name, date]
+    const result = await conn.execute(
+      "INSERT INTO services (name, date) VALUES (?, ?)",
+      [name, date]
+    );
+    const serviceId = result.lastInsertId;
+    if (serviceId == null) throw new Error("INSERT failed (service from template)");
+    for (let i = 0; i < template.items.length; i++) {
+      const item = template.items[i];
+      await conn.execute(
+        "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
       );
-      const serviceId = result.lastInsertId;
-      if (serviceId == null) throw new Error("INSERT failed (service from template)");
-      for (let i = 0; i < template.items.length; i++) {
-        const item = template.items[i];
-        await conn.execute(
-          "INSERT INTO service_items (service_id, item_order, type, song_id, media_id, settings_json, label) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [serviceId, i, item.type, item.song_id ?? null, item.media_id ?? null, JSON.stringify(item.settings_json), item.label]
-        );
-      }
-      await conn.execute("COMMIT");
-      return serviceDb.get(serviceId);
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
     }
+    return serviceDb.get(serviceId);
   },
 };
 
