@@ -66,7 +66,7 @@ export default function OutputPage() {
       if (!mounted) { unlistenFreeze(); return; }
       unlistenRefs.current.push(unlistenFreeze);
 
-      const unlistenSlide = await ipc.onSlideUpdateWithMeta((config: LayerConfig, meta) => {
+      const unlistenSlide = await ipc.onSlideUpdateFull((config: LayerConfig, meta) => {
         if (!mounted) return;
         if (!isFrozenRef.current) setLayerConfig(config);
         setCopyright(meta?.copyright ?? "");

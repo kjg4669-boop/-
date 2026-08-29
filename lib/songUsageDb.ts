@@ -2,8 +2,10 @@
 
 import Database from "@tauri-apps/plugin-sql";
 
-async function getDb() {
-  return Database.load("sqlite:worship.db");
+let _dbPromise: Promise<Database> | null = null;
+function getDb(): Promise<Database> {
+  if (!_dbPromise) _dbPromise = Database.load("sqlite:worship.db");
+  return _dbPromise;
 }
 
 export interface SongUsageStat {

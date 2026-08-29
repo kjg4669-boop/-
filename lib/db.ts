@@ -22,6 +22,19 @@ async function getDb() {
   return dbPromise;
 }
 
+async function withTransaction<T>(fn: (conn: Awaited<ReturnType<typeof getDb>>) => Promise<T>): Promise<T> {
+  const conn = await getDb();
+  await conn.execute("BEGIN");
+  try {
+    const result = await fn(conn);
+    await conn.execute("COMMIT");
+    return result;
+  } catch (err) {
+    await conn.execute("ROLLBACK").catch(() => {});
+    throw err;
+  }
+}
+
 // ─── Internal DB row types ───────────────────────────────────────────────────
 
 interface SongRow {
@@ -146,16 +159,10 @@ export const songDb = {
   },
 
   async delete(id: number): Promise<void> {
-    const conn = await getDb();
-    await conn.execute("BEGIN");
-    try {
+    await withTransaction(async (conn) => {
       await conn.execute("DELETE FROM service_items WHERE song_id = ?", [id]);
       await conn.execute("DELETE FROM songs WHERE id = ?", [id]);
-      await conn.execute("COMMIT");
-    } catch (err) {
-      await conn.execute("ROLLBACK");
-      throw err;
-    }
+    });
   },
 };
 

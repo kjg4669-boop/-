@@ -205,8 +205,13 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
 
   // Update service data (after DB reload) without resetting activeItemIndex/activeLyricSlideIndex
+  // Clamp activeLyricSlideIndex in case the reloaded service has fewer slides.
   updateServiceData: (service) => {
-    set({ currentService: service, isDirty: false });
+    const { activeItemIndex, activeLyricSlideIndex } = get();
+    const item = service.items[activeItemIndex];
+    const maxSlide = item ? Math.max(0, getItemSlideCount(item) - 1) : 0;
+    const clampedSlide = Math.min(activeLyricSlideIndex, maxSlide);
+    set({ currentService: service, isDirty: false, activeLyricSlideIndex: clampedSlide });
   },
 
   getActiveItem: () => {

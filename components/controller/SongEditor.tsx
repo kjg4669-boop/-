@@ -152,7 +152,9 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
       setAllTags((prev) => [...prev, newTag]);
       setSelectedTagIds((prev) => new Set([...prev, id]));
       setNewTagName("");
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error("[SongEditor] tag create failed:", e);
+    }
   }
 
   function toggleTag(tagId: number) {
@@ -228,7 +230,9 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
       if (!path || typeof path !== "string") return;
       await backingTrackDb.create(song.id, path);
       setBackingTracks(await backingTrackDb.list(song.id));
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.error("[SongEditor] track add failed:", e);
+    }
   }
 
   async function handleSave() {
@@ -557,7 +561,9 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                         const songId = song?.id;
                         await backingTrackDb.delete(track.id);
                         if (songId) setBackingTracks(await backingTrackDb.list(songId));
-                      } catch { /* ignore */ }
+                      } catch (e) {
+                        console.error("[SongEditor] track delete failed:", e);
+                      }
                     }}
                     className="text-zinc-600 hover:text-red-400 text-xs px-1"
                   >✕</button>
@@ -572,7 +578,9 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                         const volume = Number(e.target.value);
                         await backingTrackDb.update(track.id, { volume });
                         setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, volume } : t));
-                      } catch { /* ignore */ }
+                      } catch (e) {
+                        console.error("[SongEditor] track volume update failed:", e);
+                      }
                     }}
                     className="flex-1"
                   />
@@ -586,7 +594,9 @@ export default function SongEditor({ song, onSave, onCancel }: Props) {
                           const repeat = e.target.checked;
                           await backingTrackDb.update(track.id, { repeat });
                           setBackingTracks((prev) => prev.map((t) => t.id === track.id ? { ...t, repeat } : t));
-                        } catch { /* ignore */ }
+                        } catch (e) {
+                          console.error("[SongEditor] track repeat update failed:", e);
+                        }
                       }}
                       className="rounded"
                     />

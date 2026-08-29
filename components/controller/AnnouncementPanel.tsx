@@ -87,7 +87,8 @@ export default function AnnouncementPanel() {
       if (editingId === -1) {
         await announcementDb.create({ ...form, order_num: items.length });
       } else if (editingId !== null) {
-        const existing = items.find((a) => a.id === editingId)!;
+        const existing = items.find((a) => a.id === editingId);
+        if (!existing) return;
         await announcementDb.update({ ...existing, ...form });
       }
       await reload();
@@ -155,7 +156,7 @@ export default function AnnouncementPanel() {
             <label className="text-zinc-400 w-14">표시 시간</label>
             <input
               type="number" min={1} max={300} value={form.duration_sec}
-              onChange={(e) => setForm((f) => ({ ...f, duration_sec: Number(e.target.value) }))}
+              onChange={(e) => setForm((f) => ({ ...f, duration_sec: Math.max(1, Math.min(300, Number(e.target.value) || 1)) }))}
               className="w-16 bg-zinc-900 text-white text-xs rounded px-2 py-1 border border-zinc-700 outline-none"
             />
             <span className="text-zinc-500">초</span>

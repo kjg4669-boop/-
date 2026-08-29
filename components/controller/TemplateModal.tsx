@@ -39,12 +39,14 @@ export default function TemplateModal({ onCreateService, onClose }: Props) {
   async function handleDelete(id: number, name: string) {
     if (!confirm(`"${name}" 템플릿을 삭제하시겠습니까?`)) return;
     setError(null);
+    setDeletingId(id);
     try {
       await templateDb.delete(id);
       setTemplates((prev) => prev.filter((t) => t.id !== id));
-      if (deletingId === id) setDeletingId(null);
     } catch {
       setError("삭제에 실패했습니다.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -87,9 +89,10 @@ export default function TemplateModal({ onCreateService, onClose }: Props) {
               </button>
               <button
                 onClick={() => handleDelete(t.id, t.name)}
-                className="px-2 py-1 text-xs bg-zinc-600 hover:bg-red-700 rounded text-zinc-300 shrink-0"
+                disabled={deletingId === t.id}
+                className="px-2 py-1 text-xs bg-zinc-600 hover:bg-red-700 disabled:opacity-50 rounded text-zinc-300 shrink-0"
               >
-                삭제
+                {deletingId === t.id ? "..." : "삭제"}
               </button>
             </div>
           ))}

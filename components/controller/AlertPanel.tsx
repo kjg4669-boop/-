@@ -21,6 +21,7 @@ export default function AlertPanel() {
   useEffect(() => { void loadTemplates(); }, [loadTemplates]);
 
   async function handleShow() {
+    if (!text.trim()) return;
     const payload: AlertPayload = {
       text, visible: true, duration, position,
       backgroundColor: bgColor, textColor,

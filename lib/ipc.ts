@@ -107,6 +107,9 @@ export const ipc = {
   onSlideUpdate: (cb: (config: LayerConfig) => void) =>
     listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig)),
 
+  onSlideUpdateFull: (cb: (config: LayerConfig, meta?: SlideMeta) => void) =>
+    listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig, p.meta)),
+
   onSubtitleNext: (cb: () => void) => listenEvent("subtitle:next", cb),
 
   onSubtitlePrev: (cb: () => void) => listenEvent("subtitle:prev", cb),

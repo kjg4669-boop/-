@@ -140,6 +140,9 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
       if (!filePath || typeof filePath !== "string") return;
       const text = await readTextFile(filePath);
       const json = JSON.parse(text) as BibleImportJson;
+      if (!json.version || !Array.isArray(json.books)) {
+        throw new Error("올바른 성경 JSON 형식이 아닙니다");
+      }
       await importBibleJson(json);
       const v = await getBibleVersions();
       setVersions(v);
@@ -148,7 +151,8 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
         setSelectedVersionId(v[0].id);
       }
     } catch (e) {
-      console.error("[BibleBrowser] import error", e);
+      console.error("[BibleBrowser] import failed:", e);
+      alert("성경 파일을 불러오는 데 실패했습니다.\n올바른 형식의 JSON 파일인지 확인해 주세요.");
     } finally {
       setIsImporting(false);
     }

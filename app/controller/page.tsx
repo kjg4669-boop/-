@@ -164,6 +164,7 @@ export default function ControllerPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [soundName, setSoundName] = useState<string | null>(null);
   const [soundPlaying, setSoundPlaying] = useState(false);
+  const isSavingRef = useRef(false);
   const pendingAddBlockRef = useRef(false);
   const [showServiceList, setShowServiceList] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -180,7 +181,11 @@ export default function ControllerPage() {
   useEffect(() => { tabOrderRef.current = tabOrder; }, [tabOrder]);
   const outputConnected = useOutputHeartbeat();
   useGlobalErrorCapture();
-  useAutoSave(currentService, isDirty);
+  useAutoSave(currentService, isDirty, () => {
+    setCtrlNotice({ msg: "자동 저장됨" });
+    if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
+    ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
+  });
 
   // deep-link: .wpjson 파일 연결로 앱 열릴 때 자동 로드
   useEffect(() => {
@@ -244,33 +249,6 @@ export default function ControllerPage() {
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, []);
-
-  // Autosave: 30초마다 isDirty면 조용히 저장 (에러 토스트 없음, 중복 방지)
-  const isSavingRef = useRef(false);
-  useEffect(() => {
-    const id = setInterval(async () => {
-      const store = useQueueStore.getState();
-      if (!store.isDirty || isSavingRef.current) return;
-      const svc = store.currentService;
-      if (!svc || svc.id <= 0) return;
-      isSavingRef.current = true;
-      try {
-        await serviceDb.saveItems(svc.id, svc.items);
-        const reloaded = await serviceDb.get(svc.id);
-        if (reloaded) useQueueStore.getState().updateServiceData(reloaded);
-        else useQueueStore.getState().setIsDirty(false);
-        setCtrlNotice({ msg: "자동 저장됨" });
-        if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
-        ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
-      } catch (e) {
-        console.warn("[auto-save 30s]", e);
-      } finally {
-        isSavingRef.current = false;
-      }
-    }, 30000);
-    return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 세션 복원: 마지막 예배 ID를 localStorage에 저장/복원
