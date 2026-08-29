@@ -17,7 +17,8 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import { toDisplayUrl } from "@/lib/media";
-import type { TextBlock } from "@/lib/types";
+import type { TextBlock, TextSpan } from "@/lib/types";
+import { applyFormatToSpans } from "@/lib/spanUtils";
 
 const OUTPUT_W = 1920;
 const OUTPUT_H = 1080;
@@ -34,6 +35,7 @@ export interface SlideCanvasHandle {
   activateFormatPainter: (format: Partial<TextBlock>) => void;
   isFmtPainterActive: () => boolean;
   selectBlock: (id: string) => void;
+  applyFormatToSelection: (blockId: string, patch: Partial<Omit<TextSpan, "text">>) => boolean;
 }
 
 type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -89,6 +91,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     useEffect(() => { onCanvasChangeRef.current = onCanvasChange; });
     const fmtPainterRef = useRef<Partial<TextBlock> | null>(null);
     const [fmtPainterActive, setFmtPainterActive] = useState(false);
+    const editingSelectionRef = useRef<{ start: number; end: number } | null>(null);
     const didDragRef = useRef(false);
     const editingTextRef = useRef<string>("");
     const drawRef = useRef<{ startX: number; startY: number; rect: { x: number; y: number; w: number; h: number } | null } | null>(null);
@@ -154,7 +157,17 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         setFmtPainterActive(true);
       },
       isFmtPainterActive: () => fmtPainterActive,
-    }), [idPrefix, fmtPainterActive]);
+      applyFormatToSelection(blockId, patch) {
+        if (editingId !== blockId || !editingSelectionRef.current) return false;
+        const { start, end } = editingSelectionRef.current;
+        if (start === end) return false;
+        const block = blocksRef.current.find((b) => b.id === blockId);
+        if (!block) return false;
+        const newSpans = applyFormatToSpans(block.text, block.spans, start, end, patch);
+        setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
+        return true;
+      },
+    }), [idPrefix, fmtPainterActive, editingId]);
 
     // Notify parent when selection changes
     const onSelectionRef = useRef(onSelectionChange);
@@ -496,6 +509,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                     onPointerDown={(e) => e.stopPropagation()}
                   >
                     <div
+                      id={`block-edit-${block.id}`}
                       ref={(el) => {
                         if (el && document.activeElement !== el) {
                           editingTextRef.current = block.text;
@@ -513,8 +527,51 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                       contentEditable
                       suppressContentEditableWarning
                       dangerouslySetInnerHTML={{ __html: escapeHtml(block.text) }}
-                      onInput={(e) => { editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText; }}
-                      onBlur={() => { handleTextChange(block.id, editingTextRef.current.replace(/\n$/, "")); setEditingId(null); }}
+                      onInput={(e) => {
+                        editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText;
+                        editingSelectionRef.current = null;
+                      }}
+                      onSelect={() => {
+                        const sel = window.getSelection();
+                        if (!sel || sel.rangeCount === 0) { editingSelectionRef.current = null; return; }
+                        const range = sel.getRangeAt(0);
+                        const el = document.getElementById(`block-edit-${block.id}`);
+                        if (!el) return;
+                        let start = 0, end = 0;
+                        let foundStart = false;
+                        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                        let charCount = 0;
+                        let node: Node | null = walker.nextNode();
+                        while (node) {
+                          const nodeLen = (node as Text).length;
+                          if (!foundStart && node === range.startContainer) {
+                            start = charCount + range.startOffset;
+                            foundStart = true;
+                          }
+                          if (node === range.endContainer) {
+                            end = charCount + range.endOffset;
+                            break;
+                          }
+                          charCount += nodeLen;
+                          node = walker.nextNode();
+                        }
+                        if (start !== end) {
+                          editingSelectionRef.current = { start, end };
+                        } else {
+                          editingSelectionRef.current = null;
+                        }
+                      }}
+                      onBlur={() => {
+                        const newText = editingTextRef.current.replace(/\n$/, "");
+                        if (newText !== block.text) {
+                          // Text changed → spans invalid, reset spans alongside text update
+                          setBlocks((prev) => prev.map((b) => (b.id === block.id ? { ...b, text: newText, spans: undefined } : b)));
+                        } else {
+                          handleTextChange(block.id, newText);
+                        }
+                        setEditingId(null);
+                        editingSelectionRef.current = null;
+                      }}
                       style={{
                         width: "100%",
                         color: block.color,
@@ -554,7 +611,24 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                       outlineOffset: "-1px",
                     }}
                   >
-                    {block.text}
+                    {block.spans && block.spans.length > 0 ? (
+                      block.spans.map((span, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
+                            fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
+                            textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
+                            color: span.color ?? block.color,
+                            fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+                          }}
+                        >
+                          {span.text}
+                        </span>
+                      ))
+                    ) : (
+                      block.text
+                    )}
                   </div>
                 )}
               </div>

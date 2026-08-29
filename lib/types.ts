@@ -13,6 +13,15 @@ export interface MediaItem {
 // Song / Lyrics types
 export type LyricSection = "verse" | "chorus" | "bridge" | "pre-chorus" | "outro" | "intro";
 
+export interface TextSpan {
+  text: string;
+  fontWeight?: "normal" | "bold";
+  fontStyle?: "normal" | "italic";
+  textDecoration?: "none" | "underline" | "line-through";
+  color?: string;
+  fontSize?: number;
+}
+
 export interface TextBlock {
   id: string;
   x: number;        // px within 1920×1080 virtual canvas
@@ -29,6 +38,7 @@ export interface TextBlock {
   textDecoration?: "none" | "underline" | "line-through";
   textAlign?: "left" | "center" | "right";
   visible?: boolean; // undefined/true = visible, false = hidden
+  spans?: TextSpan[];  // undefined이면 블록 단위 스타일 사용
 }
 
 export type ShapeType =

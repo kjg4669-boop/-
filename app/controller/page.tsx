@@ -18,6 +18,7 @@ import {
   DEFAULT_LAYER_CONFIG,
   type LayerConfig,
   type TextBlock,
+  type TextSpan,
   type ShapeBlock,
   type ShapeType,
   type LyricSlide,
@@ -1340,7 +1341,15 @@ export default function ControllerPage() {
 
   const handleFormat = useCallback((patch: FmtPatch) => {
     if (selectedBlock && canvasRef.current) {
-      canvasRef.current.updateBlock(selectedBlock.id, patch);
+      // 먼저 선택 범위에 적용 시도
+      const applied = canvasRef.current.applyFormatToSelection(
+        selectedBlock.id,
+        patch as Partial<Omit<TextSpan, "text">>
+      );
+      if (!applied) {
+        // 선택 범위 없으면 전체 블록에 적용
+        canvasRef.current.updateBlock(selectedBlock.id, patch);
+      }
     } else {
       handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...(patch as Partial<LayerConfig["subtitle"]>) } });
     }

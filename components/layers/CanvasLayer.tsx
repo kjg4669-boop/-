@@ -59,7 +59,24 @@ function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
             padding: "8px",
           }}
         >
-          {block.text}
+          {block.spans && block.spans.length > 0 ? (
+            block.spans.map((span, i) => (
+              <span
+                key={i}
+                style={{
+                  fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
+                  fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
+                  textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
+                  color: span.color ?? block.color,
+                  fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+                }}
+              >
+                {span.text}
+              </span>
+            ))
+          ) : (
+            block.text
+          )}
         </div>
       ))}
     </div>
