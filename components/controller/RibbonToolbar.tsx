@@ -255,13 +255,21 @@ export default function RibbonToolbar({
 
           <div className="w-px h-5 bg-zinc-600 mx-0.5" />
 
-          <button onClick={() => onFormat({ fontWeight: fmt.fontWeight === "bold" ? "normal" : "bold" })}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onFormat({ fontWeight: fmt.fontWeight === "bold" ? "normal" : "bold" })}
             className={`w-6 h-6 rounded font-bold ${fmt.fontWeight === "bold" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>B</button>
-          <button onClick={() => onFormat({ fontStyle: fmt.fontStyle === "italic" ? "normal" : "italic" })}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onFormat({ fontStyle: fmt.fontStyle === "italic" ? "normal" : "italic" })}
             className={`w-6 h-6 rounded italic ${fmt.fontStyle === "italic" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>I</button>
-          <button onClick={() => onFormat({ textDecoration: fmt.textDecoration === "underline" ? "none" : "underline" })}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onFormat({ textDecoration: fmt.textDecoration === "underline" ? "none" : "underline" })}
             className={`w-6 h-6 rounded underline ${fmt.textDecoration === "underline" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>U</button>
-          <button onClick={() => onFormat({ textDecoration: fmt.textDecoration === "line-through" ? "none" : "line-through" })}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onFormat({ textDecoration: fmt.textDecoration === "line-through" ? "none" : "line-through" })}
             className={`w-6 h-6 rounded line-through ${fmt.textDecoration === "line-through" ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>S</button>
 
           <div className="w-px h-5 bg-zinc-600 mx-0.5" />
