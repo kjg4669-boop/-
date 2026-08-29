@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc, emitEvent, isTauri } from "@/lib/ipc";
-import type { LayerConfig, SlideMeta, CountdownPayload } from "@/lib/types";
+import type { LayerConfig, SlideMeta, CountdownPayload, AnnouncementShowPayload } from "@/lib/types";
 import { SECTION_LABEL } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AlertBanner from "@/components/AlertBanner";
@@ -37,6 +37,7 @@ export default function StagePage() {
   const [stageAlert, setStageAlert] = useState<{ text: string; position: string; bgColor: string; textColor: string; } | null>(null);
   const [stageMsg, setStageMsg] = useState<{ text: string } | null>(null);
   const [countdown, setCountdown] = useState<CountdownPayload | null>(null);
+  const [announcement, setAnnouncement] = useState<AnnouncementShowPayload>({ visible: false, title: "", body: "" });
   const unlistenRefs = useRef<Array<() => void>>([]);
   const stageAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -93,8 +94,12 @@ export default function StagePage() {
         setCountdown(p.active ? p : null);
       });
 
+      const unlistenAnnouncement = await ipc.onAnnouncementShow((p) => {
+        if (mounted) setAnnouncement({ visible: p.visible, title: p.title, body: p.body, bgColor: p.bgColor, textColor: p.textColor });
+      });
+
       if (mounted) {
-        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg, unlistenCountdown);
+        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg, unlistenCountdown, unlistenAnnouncement);
         // Signal ready so controller re-sends current state
         await ipc.sendOutputReady();
       } else {
@@ -103,6 +108,7 @@ export default function StagePage() {
         unlistenAlert();
         unlistenStageMsg();
         unlistenCountdown();
+        unlistenAnnouncement();
       }
     }
     void setup();
@@ -331,6 +337,22 @@ export default function StagePage() {
           </div>
         )}
       </div>
+      {/* Announcement overlay */}
+      {announcement.visible && (
+        <div
+          style={{
+            position: "absolute", inset: 0, zIndex: 150,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            backgroundColor: announcement.bgColor ?? "rgba(0,0,0,0.75)",
+            color: announcement.textColor ?? "#ffffff",
+            padding: "1rem",
+          }}
+        >
+          {announcement.title && <p style={{ fontSize: "1.25rem", fontWeight: "bold", marginBottom: "0.5rem", margin: 0 }}>{announcement.title}</p>}
+          {announcement.body && <p style={{ fontSize: "1rem", marginTop: "0.5rem" }}>{announcement.body}</p>}
+        </div>
+      )}
       {/* Stage message overlay (private, operator-to-stage) */}
       {stageMsg && (
         <div style={{

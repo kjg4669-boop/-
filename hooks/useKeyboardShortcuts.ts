@@ -145,12 +145,16 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
         case "PageDown": {
           const st = useQueueStore.getState();
           const svc = st.currentService;
-          if (svc && st.activeItemIndex < svc.items.length - 1) st.setActiveItem(st.activeItemIndex + 1);
+          if (svc && st.activeItemIndex < svc.items.length - 1) {
+            st.setActiveItem(Math.min(st.activeItemIndex + 1, svc.items.length - 1));
+          }
           break;
         }
         case "PageUp": {
           const st = useQueueStore.getState();
-          if (st.activeItemIndex > 0) st.setActiveItem(st.activeItemIndex - 1);
+          if (st.activeItemIndex > 0) {
+            st.setActiveItem(Math.max(0, st.activeItemIndex - 1));
+          }
           break;
         }
         case "f": case "F": o.handleToggleFrozen(); break;
@@ -171,7 +175,9 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
         case "6": case "7": case "8": case "9": {
           const idx = parseInt(e.key) - 1;
           const svc = useQueueStore.getState().currentService;
-          if (svc && idx < svc.items.length) useQueueStore.getState().setActiveItem(idx);
+          if (svc && idx >= 0 && idx < svc.items.length) {
+            useQueueStore.getState().setActiveItem(idx);
+          }
           break;
         }
       }

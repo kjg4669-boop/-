@@ -56,7 +56,15 @@ export default function AnnouncementPanel() {
     advanceLoop(0);
   }, [advanceLoop]);
 
-  useEffect(() => { return () => stopLoop(); }, [stopLoop]);
+  useEffect(() => {
+    return () => {
+      loopingRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, []);
 
   async function reload() {
     const list = await announcementDb.list();
@@ -103,7 +111,7 @@ export default function AnnouncementPanel() {
       <div className="flex items-center justify-between">
         <span className="font-semibold text-sm">공지 루프</span>
         <span className={`text-xs px-2 py-0.5 rounded-full ${looping ? "bg-green-800 text-green-300" : "bg-zinc-700 text-zinc-400"}`}>
-          {looping ? `재생 중 (${currentIdx + 1}/${activeItems.length})` : "중지"}
+          {looping ? `재생 중 (${Math.min(currentIdx + 1, activeItems.length)}/${activeItems.length})` : "중지"}
         </span>
       </div>
 

@@ -81,7 +81,11 @@ export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Pr
   // video:control IPC listener (applies to active slot)
   useEffect(() => {
     if (config.type !== "video") return;
-    const unlistenPromise = ipc.onVideoControl((payload) => {
+
+    let mounted = true;
+    let unlistenFn: (() => void) | null = null;
+
+    ipc.onVideoControl((payload) => {
       const vid = (currentVideoSlot.current === 0 ? videoRef0 : videoRef1).current;
       if (!vid) return;
       switch (payload.action) {
@@ -91,8 +95,15 @@ export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Pr
         case "volume": if (payload.value !== undefined) { vid.volume = Math.max(0, Math.min(1, payload.value)); vid.muted = payload.value === 0; } break;
         case "loop": vid.loop = payload.value === 1; break;
       }
-    });
-    return () => { void unlistenPromise.then((fn) => fn()); };
+    }).then((fn) => {
+      if (mounted) unlistenFn = fn;
+      else fn();
+    }).catch(console.error);
+
+    return () => {
+      mounted = false;
+      unlistenFn?.();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.type]);
 

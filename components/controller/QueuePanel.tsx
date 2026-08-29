@@ -255,20 +255,21 @@ export default function QueuePanel() {
   }
 
   async function deleteItem(itemId: number) {
+    const liveItems = useQueueStore.getState().currentService?.items ?? [];
+    const deletedIndex = liveItems.findIndex((i) => i.id === itemId);
+    if (deletedIndex === -1) return;
+
     try {
       pushHistory();
       await serviceDb.deleteItem(itemId);
-      const liveItems = useQueueStore.getState().currentService?.items ?? [];
-      const deletedIndex = liveItems.findIndex((i) => i.id === itemId);
       const newItems = liveItems.filter((i) => i.id !== itemId);
       updateServiceItems(newItems);
       const currentActive = useQueueStore.getState().activeItemIndex;
-      if (deletedIndex !== -1) {
-        if (deletedIndex < currentActive) {
-          useQueueStore.getState().setActiveItem(currentActive - 1);
-        } else if (deletedIndex === currentActive) {
-          useQueueStore.getState().setActiveItem(newItems.length === 0 ? -1 : Math.min(currentActive, newItems.length - 1));
-        }
+      if (deletedIndex < currentActive) {
+        useQueueStore.getState().setActiveItem(currentActive - 1);
+      } else if (deletedIndex === currentActive) {
+        const nextIdx = newItems.length === 0 ? -1 : Math.min(currentActive, newItems.length - 1);
+        useQueueStore.getState().setActiveItem(nextIdx);
       }
     } catch {
       showOpNotice("항목 삭제에 실패했습니다", true);

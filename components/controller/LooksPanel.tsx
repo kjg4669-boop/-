@@ -97,6 +97,7 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged,
   }
 
   async function handleSaveNew() {
+    if (!editName.trim()) return;
     try {
       const { subtitleSnapshot, backgroundSnapshot } = buildSnapshots();
       await looksDb.create({
@@ -118,6 +119,7 @@ export default function LooksPanel({ currentLookId, onApplyLook, onLooksChanged,
   }
 
   async function handleDelete(id: number) {
+    if (!confirm("이 Look을 삭제하시겠습니까?")) return;
     try {
       await looksDb.delete(id);
       if (currentLookId === id) onApplyLook(null);

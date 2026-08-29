@@ -119,7 +119,7 @@ export default function OutputPage() {
       });
 
       const unlistenAnnouncement = await ipc.onAnnouncementShow((p) => {
-        if (mounted) setAnnouncement({ visible: p.visible, title: p.title, body: p.body });
+        if (mounted) setAnnouncement({ visible: p.visible, title: p.title, body: p.body, bgColor: p.bgColor, textColor: p.textColor });
       });
 
       const unlistenScaleMode = await ipc.onScaleMode((mode) => {

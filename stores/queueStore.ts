@@ -125,7 +125,12 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     }
   },
 
-  setActiveItem: (index) => set({ activeItemIndex: index, activeLyricSlideIndex: 0 }),
+  setActiveItem: (index) => {
+    const { currentService } = get();
+    if (!currentService) { set({ activeItemIndex: -1, activeLyricSlideIndex: 0 }); return; }
+    const bounded = index < 0 ? -1 : Math.min(index, currentService.items.length - 1);
+    set({ activeItemIndex: bounded, activeLyricSlideIndex: 0 });
+  },
 
   nextLyricSlide: () => {
     const state = get();
@@ -283,9 +288,11 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
 
   setActiveFlatSlide: (flatIndex: number) => {
+    const { currentService } = get();
+    if (!currentService) return;
     const list = get().getFlatSlideList();
     const entry = list[flatIndex];
-    if (!entry) return;
+    if (!entry || entry.serviceItemIndex >= currentService.items.length) return;
     set({ activeItemIndex: entry.serviceItemIndex, activeLyricSlideIndex: entry.slideIndex });
   },
 
