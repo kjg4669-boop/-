@@ -8,7 +8,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useVideoStore } from "@/stores/videoStore";
 import { songDb, serviceDb } from "@/lib/db";
-import type { LyricSlide, FlatSlide, Service } from "@/lib/types";
+import type { LyricSlide, FlatSlide, Service, LayerConfig } from "@/lib/types";
 import { newSlideId } from "@/lib/utils";
 import { toDisplayUrl } from "@/lib/media";
 
@@ -182,12 +182,16 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
               ? canvasBlocks.map((b) => b.text)
               : entry.slide.lines;
 
-            // Per-slide background: use assigned phase's background, fallback to current output bg
+            // Per-slide background: video phase > per-slide override > item-level > current output bg
             const phaseBg = (() => {
               const phaseId = slidePhaseMap[entry.slide.id];
-              return phaseId ? phases.find((p) => p.id === phaseId)?.background : undefined;
+              const phase = phaseId ? phases.find((p) => p.id === phaseId) : undefined;
+              return phase?.background.type === "video" ? phase.background : undefined;
             })();
-            const slideBg = phaseBg ?? bg;
+            const serviceItem = currentService?.items[entry.serviceItemIndex];
+            const perSlideBg = serviceItem?.settings_json?.slideBackgrounds?.[entry.slide.id] as LayerConfig["background"] | undefined;
+            const itemLevelBg = serviceItem?.settings_json?.background as LayerConfig["background"] | undefined;
+            const slideBg = phaseBg ?? perSlideBg ?? itemLevelBg ?? bg;
             const thumbBgStyle: React.CSSProperties = (() => {
               if (slideBg.type === "color") return { backgroundColor: slideBg.color ?? "#111" };
               if (slideBg.type === "image" && slideBg.src) {

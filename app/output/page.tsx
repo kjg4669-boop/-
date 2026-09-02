@@ -68,8 +68,10 @@ export default function OutputPage() {
 
       const unlistenSlide = await ipc.onSlideUpdateFull((config: LayerConfig, meta) => {
         if (!mounted) return;
-        if (!isFrozenRef.current) setLayerConfig(config);
-        setCopyright(meta?.copyright ?? "");
+        if (!isFrozenRef.current) {
+          setLayerConfig(config);
+          setCopyright(meta?.copyright ?? "");
+        }
         receivedSlide = true;
         if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
       });

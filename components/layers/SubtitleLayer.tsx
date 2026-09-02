@@ -81,8 +81,11 @@ export default function SubtitleLayer({ config, transitionMs: transitionMsProp, 
         setDisplayedLines2(lines2);
         setAnimKey(k => k + 1);
         setFaded(false);
+      } else {
+        // No text: clear stale content to prevent ghost render if faded later toggles
+        setDisplayedLines([]);
+        setDisplayedLines2([]);
       }
-      // lines.length === 0: keep faded=true (text stays hidden)
     }, fadeMsRef.current);
 
     return () => {

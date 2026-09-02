@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Play, Pause, SkipBack } from "lucide-react";
 import type { LayerConfig, MediaItem } from "@/lib/types";
 import { ipc } from "@/lib/ipc";
 
@@ -137,16 +138,16 @@ export default function BackgroundSection({ layerConfig, onChange, mediaItems, i
                 void ipc.sendVideoControl({ action: isPlaying ? "pause" : "play" });
                 setIsPlaying((v) => !v);
               }}
-              className="flex-1 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600"
+              className="flex-1 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center gap-1"
             >
-              {isPlaying ? "⏸ 일시정지" : "▶ 재생"}
+              {isPlaying ? <><Pause size={12} /> 일시정지</> : <><Play size={12} /> 재생</>}
             </button>
             <button
               onClick={() => { void ipc.sendVideoControl({ action: "seek", value: 0 }); setCurrentTime(0); }}
-              className="px-2 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600"
+              className="px-2 py-1 text-xs rounded bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center"
               title="처음으로"
             >
-              ⏮
+              <SkipBack size={12} />
             </button>
           </div>
 

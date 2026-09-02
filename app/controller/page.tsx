@@ -63,7 +63,7 @@ import RemotePanel from "@/components/controller/RemotePanel";
 import NdiPanel from "@/components/controller/NdiPanel";
 import VideoPanel from "@/components/controller/VideoPanel";
 import { useVideoStore } from "@/stores/videoStore";
-import type { RemoteCommand } from "@/lib/types";
+import type { RemoteCommand, ServiceItemSettings } from "@/lib/types";
 
 type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
@@ -157,7 +157,7 @@ export default function ControllerPage() {
   const saveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleSaveItemRef = useRef<(itemId: number, config: LayerConfig) => Promise<void>>(async () => {});
+  const handleSaveItemRef = useRef<(itemId: number, config: LayerConfig, capturedSlideId?: string | null) => Promise<void>>(async () => {});
   // Slide transition nonce: increments on every slide navigation so animation always fires
   const slideNonceRef = useRef(0);
   // Track previous item to detect item switches vs. same-item slide navigation
@@ -445,16 +445,31 @@ export default function ControllerPage() {
     const base: LayerConfig = isSameItem
       ? useOutputStore.getState().layerConfig
       : (() => {
-          const itemOverrides = item.settings_json ?? {};
+          const { slideBackgrounds: _sb, ...itemOverrides } = item.settings_json ?? {};
           return deepMerge(
             deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults),
             itemOverrides as Partial<LayerConfig>
           ) as LayerConfig;
         })();
 
-    // Auto-apply video phase if this slide has one assigned
+    // Resolve per-slide background: item-level bg → slide-specific override
+    const slideId = slide?.id;
+    const slideBg = slideId ? (item.settings_json?.slideBackgrounds ?? {})[slideId] : undefined;
+    const itemLevelBg = (() => {
+      const { slideBackgrounds: _sb, ...itemOverrides } = item.settings_json ?? {};
+      return (deepMerge(deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults), itemOverrides as Partial<LayerConfig>) as LayerConfig).background;
+    })();
+    // Each slide uses its own per-slide override if set, otherwise the item-level default.
+    const resolvedBg: LayerConfig["background"] = slideBg
+      ? { ...itemLevelBg, ...slideBg } as LayerConfig["background"]
+      : itemLevelBg;
+    const baseWithSlideBg: LayerConfig = { ...base, background: resolvedBg };
+
+    // Auto-apply video phase if this slide has one assigned (only when the phase has an actual video background)
     const videoPhase = slide ? useVideoStore.getState().getPhaseForSlide(slide.id) : null;
-    const effectiveBase: LayerConfig = videoPhase ? { ...base, background: videoPhase.background } : base;
+    const effectiveBase: LayerConfig = (videoPhase && videoPhase.background.type === "video")
+      ? { ...baseWithSlideBg, background: videoPhase.background }
+      : baseWithSlideBg;
 
     const newConfig: LayerConfig = {
       ...effectiveBase,
@@ -921,6 +936,7 @@ export default function ControllerPage() {
       const { getActiveLyricSlide } = useQueueStore.getState();
       const slide = getActiveLyricSlide();
       const canvasBlocks = slide?.canvas?.textBlocks ?? [];
+      const shapeBlocks = slide?.canvas?.shapeBlocks ?? [];
       const withContent: LayerConfig = {
         ...config,
         subtitle: {
@@ -929,19 +945,37 @@ export default function ControllerPage() {
           lines: !isClear && canvasBlocks.length === 0 ? (slide?.lines ?? []) : [],
           lines2: !isClear ? (slide?.lines2 ?? []) : [],
         },
-        canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks } : undefined,
+        canvas: !isClear && (canvasBlocks.length > 0 || shapeBlocks.length > 0)
+          ? { textBlocks: canvasBlocks, shapeBlocks }
+          : undefined,
       };
       setLayerConfig(withContent);
       if (isLive) ipc.sendSlideUpdate(withContent);
       ipc.sendPreviewUpdate(withContent);
       // Auto-save layer settings to the active item (debounced)
+      // Capture slideId NOW (at change time) to prevent race condition if slide navigation
+      // occurs before the debounce fires (within 600ms).
+      const capturedSlideId = slide?.id ?? null;
+
+      // Immediately save current slide's per-slide background so nav effect reads it
+      // before the 600ms DB debounce fires.
+      if (capturedSlideId) {
+        const qs = useQueueStore.getState();
+        const activeItem = qs.currentService?.items[qs.activeItemIndex];
+        if (activeItem) {
+          const ex = activeItem.settings_json ?? {};
+          const updatedSlideBgs = { ...(ex.slideBackgrounds ?? {}), [capturedSlideId]: { ...config.background } };
+          qs.updateItemSettingsJson(activeItem.id, { ...ex, slideBackgrounds: updatedSlideBgs });
+        }
+      }
+
       if (layerAutoSaveTimerRef.current) clearTimeout(layerAutoSaveTimerRef.current);
       layerAutoSaveTimerRef.current = setTimeout(() => {
         layerAutoSaveTimerRef.current = null;
         const { currentService, activeItemIndex } = useQueueStore.getState();
         const itemId = currentService?.items[activeItemIndex]?.id ?? null;
         if (itemId !== null) {
-          void handleSaveItemRef.current(itemId, config);
+          void handleSaveItemRef.current(itemId, config, capturedSlideId);
         } else {
           saveGlobalDefaults(config);
         }
@@ -1333,13 +1367,33 @@ export default function ControllerPage() {
   }, []);
 
   const handleSaveItem = useCallback(
-    async (itemId: number, config: LayerConfig) => {
-      const settings = {
-        background: { ...config.background },
+    async (itemId: number, config: LayerConfig, capturedSlideId?: string | null) => {
+      const { currentService, getActiveLyricSlide } = useQueueStore.getState();
+      const item = currentService?.items.find((i) => i.id === itemId);
+      const existingSettings: ServiceItemSettings = item?.settings_json ?? {};
+      // Use capturedSlideId if provided (prevents race condition on rapid slide navigation)
+      const slideId = capturedSlideId !== undefined ? capturedSlideId : getActiveLyricSlide()?.id;
+
+      const settings: ServiceItemSettings = {
+        ...existingSettings,
         subtitle: (({ visible: _v, lines: _l, lines2: _l2, ...rest }) => rest)(config.subtitle),
         overlay: { ...config.overlay },
         transitionMs: config.transitionMs,
       };
+
+      // Only save item-level background on explicit "이 항목에 적용" button press.
+      // Auto-save (debounce) only saves per-slide override, so other slides keep their own colors.
+      if (capturedSlideId === undefined) {
+        settings.background = { ...config.background };
+      }
+      if (slideId) {
+        // 현재 슬라이드만 per-slide 배경 저장 (다른 슬라이드는 각자의 색상 유지)
+        settings.slideBackgrounds = {
+          ...(existingSettings.slideBackgrounds ?? {}),
+          [slideId]: { ...config.background },
+        };
+      }
+
       try {
         await serviceDb.updateItemSettings(itemId, settings);
         useQueueStore.getState().updateItemSettingsJson(itemId, settings);
@@ -2163,6 +2217,7 @@ export default function ControllerPage() {
                       <LayerSidebar
                         layerConfig={layerConfig}
                         activeItemId={activeItemId}
+                        activeLayerId={activeLayerId}
                         onChange={handleLayerChange}
                         onSaveGlobal={handleSaveGlobal}
                         onSaveItem={handleSaveItem}

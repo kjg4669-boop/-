@@ -181,6 +181,8 @@ export interface ServiceItemSettings {
   overlay?: Partial<LayerConfig["overlay"]>;
   transitionMs?: number;
   scripture?: ScriptureSettings;
+  /** Per-slide background overrides, keyed by LyricSlide.id */
+  slideBackgrounds?: Record<string, Partial<LayerConfig["background"]>>;
 }
 
 export interface FlatSlide {

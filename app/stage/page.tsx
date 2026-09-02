@@ -24,8 +24,8 @@ function ClockDisplay() {
 
 async function closeWindow() {
   if (isTauri()) {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().close();
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("close_stage_display").catch(() => {});
   } else {
     window.close();
   }
