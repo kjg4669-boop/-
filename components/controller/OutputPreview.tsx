@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { LayerConfig } from "@/lib/types";
+import type { LayerConfig, TextBlock, ShapeBlock } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
 
 type BgConfig = LayerConfig["background"];
@@ -29,6 +29,8 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const bg = layerConfig.background;
   const sub = layerConfig.subtitle;
   const canvasBlocks = (layerConfig.canvas?.textBlocks ?? []).filter(b => b.visible !== false);
+  const shapeBlocks = (layerConfig.canvas?.shapeBlocks ?? []).filter(s => s.visible !== false);
+  const canvasLayerOrder = layerConfig.canvas?.layerOrder;
   const FADE_MS = (layerConfig.transitionMs != null && layerConfig.transitionMs > 0) ? layerConfig.transitionMs : 600;
   const fadeMsRef = useRef(FADE_MS);
   fadeMsRef.current = FADE_MS;
@@ -36,7 +38,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const activeLines = sub.visible && sub.lines.length > 0 ? sub.lines : [];
   // Include nonce so animation fires even when content is identical across slides
   const activeLinesKey = `${sub.nonce ?? 0}:${activeLines.join("\0")}`;
-  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
+  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0")}:${shapeBlocks.map(s => `${s.id}:${s.text ?? ""}`).join("\0")}`;
 
   // ── 배경 두 슬롯 크로스페이드 ──────────────────────────────────────
   const bgIdentity = `${bg.type}:${bg.src ?? ""}:${bg.color ?? ""}`;
@@ -54,12 +56,17 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const isFirstRender = useRef(true);
 
   // ── 캔버스 블록 두 슬롯 크로스페이드 ───────────────────────────────
-  const [canvasSlots, setCanvasSlots] = useState<[typeof canvasBlocks, typeof canvasBlocks]>([canvasBlocks, []]);
+  type CanvasSlotData = { blocks: TextBlock[]; shapes: ShapeBlock[]; layerOrder?: string[] };
+  const [canvasSlots, setCanvasSlots] = useState<[CanvasSlotData, CanvasSlotData]>([
+    { blocks: canvasBlocks, shapes: shapeBlocks, layerOrder: canvasLayerOrder },
+    { blocks: [], shapes: [] },
+  ]);
   const [activeCanvasSlot, setActiveCanvasSlot] = useState<0 | 1>(0);
   // slotAnimKeys: -1 means no animation (initial render). Incrementing forces inner div remount → @keyframes restart.
   const [canvasSlotAnimKeys, setCanvasSlotAnimKeys] = useState<[number, number]>([-1, -1]);
   const currentCanvasSlot = useRef<0 | 1>(0);
   const isCanvasFirstRender = useRef(true);
+  const prevCanvasNonceRef = useRef<number>(layerConfig.canvas?.nonce ?? 0);
 
   // Video refs for bg slots
   const videoRefs = useRef<[HTMLVideoElement | null, HTMLVideoElement | null]>([null, null]);
@@ -129,19 +136,24 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
 
   // ── 캔버스 블록 크로스페이드 effect ───────────────────────────────
   useEffect(() => {
+    const currentNonce = layerConfig.canvas?.nonce ?? 0;
+    const nonceChanged = currentNonce !== prevCanvasNonceRef.current;
+    prevCanvasNonceRef.current = currentNonce;
+
     if (isCanvasFirstRender.current) {
       isCanvasFirstRender.current = false;
       setCanvasSlots(prev => {
-        const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]];
-        next[currentCanvasSlot.current] = canvasBlocks;
+        const next: [CanvasSlotData, CanvasSlotData] = [prev[0], prev[1]];
+        next[currentCanvasSlot.current] = { blocks: canvasBlocks, shapes: shapeBlocks, layerOrder: canvasLayerOrder };
         return next;
       });
       return;
     }
-    if (sub.textEntrance === "none") {
+    // In-place update (no crossfade) when: entrance=none, or only content changed (not a slide navigation)
+    if (sub.textEntrance === "none" || !nonceChanged) {
       setCanvasSlots(prev => {
-        const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]];
-        next[currentCanvasSlot.current] = canvasBlocks;
+        const next: [CanvasSlotData, CanvasSlotData] = [prev[0], prev[1]];
+        next[currentCanvasSlot.current] = { blocks: canvasBlocks, shapes: shapeBlocks, layerOrder: canvasLayerOrder };
         return next;
       });
       return;
@@ -151,7 +163,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
 
     // All setState calls batched → one commit:
     //   outer slot div opacity transition fires; inner div remounts → @keyframes restarts.
-    setCanvasSlots(prev => { const next: [typeof canvasBlocks, typeof canvasBlocks] = [prev[0], prev[1]]; next[nextSlot] = canvasBlocks; return next; });
+    setCanvasSlots(prev => { const next: [CanvasSlotData, CanvasSlotData] = [prev[0], prev[1]]; next[nextSlot] = { blocks: canvasBlocks, shapes: shapeBlocks, layerOrder: canvasLayerOrder }; return next; });
     setActiveCanvasSlot(nextSlot);
     setCanvasSlotAnimKeys(prev => { const next: [number, number] = [prev[0], prev[1]]; next[nextSlot]++; return next; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -304,9 +316,8 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
         </div>
       )}
 
-      {/* 캔버스 텍스트 블록 (두 슬롯 크로스페이드) */}
+      {/* 캔버스 블록 (두 슬롯 크로스페이드, 통합 Z-order) */}
       {([0, 1] as const).map((idx) => (
-        // Outer div: stable key, handles opacity crossfade via CSS transition
         <div
           key={idx}
           className="absolute inset-0"
@@ -318,7 +329,6 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
             transform: "translateZ(0)",
           }}
         >
-          {/* Inner div: key changes when slot activates → remount → @keyframes restarts */}
           <div
             key={canvasSlotAnimKeys[idx]}
             className="absolute inset-0"
@@ -330,28 +340,105 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
                   : undefined,
             }}
           >
-            {!isBlackout && canvasSlots[idx as 0 | 1].map((block) => (
-              <div
-                key={block.id}
-                style={{
-                  position: "absolute",
-                  left: block.x * SCALE,
-                  top: (block.y ?? 0) * SCALE,
-                  width: block.width * SCALE,
-                  fontSize: Math.max(6, block.fontSize * SCALE),
-                  fontFamily: block.fontFamily,
-                  fontWeight: block.fontWeight ?? "normal",
-                  fontStyle: block.fontStyle ?? "normal",
-                  color: block.color,
-                  textAlign: block.textAlign ?? "left",
-                  lineHeight: 1.25,
-                  overflow: "hidden",
-                  pointerEvents: "none",
-                }}
-              >
-                {block.text}
-              </div>
-            ))}
+            {!isBlackout && (() => {
+              const slot = canvasSlots[idx as 0 | 1];
+              const blocksById = Object.fromEntries(slot.blocks.map(b => [b.id, b]));
+              const shapesById = Object.fromEntries(slot.shapes.map(s => [s.id, s]));
+              const knownIds = new Set([...slot.blocks.map(b => b.id), ...slot.shapes.map(s => s.id)]);
+              // Use current canvasLayerOrder prop directly so Z-order changes apply instantly
+              const effectiveOrder: string[] = canvasLayerOrder
+                ? [
+                    ...slot.blocks.filter(b => !canvasLayerOrder.includes(b.id)).map(b => b.id),
+                    ...slot.shapes.filter(s => !canvasLayerOrder.includes(s.id)).map(s => s.id),
+                    ...canvasLayerOrder.filter(id => knownIds.has(id)),
+                  ]
+                : [...slot.blocks.map(b => b.id), ...slot.shapes.map(s => s.id)];
+
+              return effectiveOrder.map((id, zOrd) => {
+                const block = blocksById[id];
+                if (block) {
+                  return (
+                    <div
+                      key={id}
+                      style={{
+                        position: "absolute",
+                        left: block.x * SCALE,
+                        top: (block.y ?? 0) * SCALE,
+                        width: block.width * SCALE,
+                        fontSize: Math.max(6, block.fontSize * SCALE),
+                        fontFamily: block.fontFamily,
+                        fontWeight: block.fontWeight ?? "normal",
+                        fontStyle: block.fontStyle ?? "normal",
+                        color: block.color,
+                        textAlign: block.textAlign ?? "left",
+                        lineHeight: 1.25,
+                        overflow: "hidden",
+                        pointerEvents: "none",
+                        zIndex: zOrd + 1,
+                      }}
+                    >
+                      {block.text}
+                    </div>
+                  );
+                }
+                const s = shapesById[id];
+                if (s) {
+                  const filterId = `ps-${idx}-${s.id}`;
+                  const fill = s.fillEnabled ? s.fillColor : "none";
+                  const fillOpacity = s.fillEnabled ? s.fillOpacity / 100 : 0;
+                  const stroke = s.strokeEnabled ? s.strokeColor : "none";
+                  const strokeOpacity = s.strokeEnabled ? s.strokeOpacity / 100 : 0;
+                  const strokeWidth = s.strokeEnabled ? s.strokeWidth : 0;
+                  const filterAttr = s.shadowEnabled ? `url(#${filterId})` : undefined;
+                  const cx = s.x + s.width / 2, cy = s.y + s.height / 2;
+                  const x = s.x, y = s.y, w = s.width, h = s.height;
+                  const cp = { fill, fillOpacity, stroke, strokeOpacity, strokeWidth, filter: filterAttr };
+                  let shapeEl: React.ReactNode = null;
+                  switch (s.shapeType) {
+                    case "rect": shapeEl = <rect x={x} y={y} width={w} height={h} {...cp} />; break;
+                    case "rounded-rect": shapeEl = <rect x={x} y={y} width={w} height={h} rx={Math.min(w,h)*0.12} ry={Math.min(w,h)*0.12} {...cp} />; break;
+                    case "ellipse": shapeEl = <ellipse cx={cx} cy={cy} rx={w/2} ry={h/2} {...cp} />; break;
+                    case "triangle": shapeEl = <polygon points={`${cx},${y} ${x+w},${y+h} ${x},${y+h}`} {...cp} />; break;
+                    case "diamond": shapeEl = <polygon points={`${cx},${y} ${x+w},${cy} ${cx},${y+h} ${x},${cy}`} {...cp} />; break;
+                    case "line": shapeEl = <line x1={x} y1={cy} x2={x+w} y2={cy} stroke={s.strokeEnabled ? s.strokeColor : "#fff"} strokeOpacity={strokeOpacity} strokeWidth={s.strokeEnabled ? s.strokeWidth : 4} filter={filterAttr} />; break;
+                    case "arrow-right": { const ah=h*0.4,aw=w*0.35; shapeEl = <polygon points={[`${x},${cy-ah/2}`,`${x+w-aw},${cy-ah/2}`,`${x+w-aw},${y}`,`${x+w},${cy}`,`${x+w-aw},${y+h}`,`${x+w-aw},${cy+ah/2}`,`${x},${cy+ah/2}`].join(" ")} {...cp} />; break; }
+                    case "star": { const r1=Math.min(w,h)/2,r2=r1*0.4; shapeEl = <polygon points={Array.from({length:10}).map((_,i)=>{const a=(Math.PI/5)*i-Math.PI/2,r=i%2===0?r1:r2;return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`;}).join(" ")} {...cp} />; break; }
+                    case "pentagon": { const r=Math.min(w,h)/2; shapeEl = <polygon points={Array.from({length:5}).map((_,i)=>{const a=(Math.PI*2/5)*i-Math.PI/2;return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`;}).join(" ")} {...cp} />; break; }
+                  }
+                  const fs = s.textFontSize ?? 60;
+                  const lines = (s.text ?? "").split("\n");
+                  const lh = fs * 1.3;
+                  const startY = cy - (lh * lines.length) / 2 + lh / 2;
+                  const anchor = s.textAlign === "left" ? "start" : s.textAlign === "right" ? "end" : "middle";
+                  const textX = s.textAlign === "left" ? x+8 : s.textAlign === "right" ? x+w-8 : cx;
+                  const textEl = s.text ? (
+                    <text textAnchor={anchor} fill={s.textColor ?? "#ffffff"} fontSize={fs}
+                      fontFamily={s.textFontFamily ?? "sans-serif"} fontWeight={s.textFontWeight ?? "normal"}
+                      fontStyle={s.textFontStyle ?? "normal"} textDecoration={s.textDecoration ?? "none"} dominantBaseline="middle">
+                      {lines.map((line, i) => <tspan key={i} x={textX} y={startY + lh * i}>{line}</tspan>)}
+                    </text>
+                  ) : null;
+                  return (
+                    <svg
+                      key={id}
+                      viewBox="0 0 1920 1080"
+                      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: zOrd + 1 }}
+                      preserveAspectRatio="none"
+                    >
+                      {s.shadowEnabled && (
+                        <defs>
+                          <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
+                            <feDropShadow dx={s.shadowX} dy={s.shadowY} stdDeviation={s.shadowBlur} floodColor={s.shadowColor} floodOpacity={0.7} />
+                          </filter>
+                        </defs>
+                      )}
+                      {shapeEl ? <g opacity={s.opacity !== undefined ? s.opacity / 100 : 1}>{shapeEl}{textEl}</g> : null}
+                    </svg>
+                  );
+                }
+                return null;
+              });
+            })()}
           </div>
         </div>
       ))}
@@ -377,7 +464,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
           <div>bg: slot{activeBgSlot} | type: {bg.type}</div>
           <div>sub: slot{activeSlot} | visible: {sub.visible ? "yes" : "NO"} | lines: {sub.lines.length}</div>
           <div>canvas: slot{activeCanvasSlot} | blocks: {canvasBlocks.length}</div>
-          <div>s0: {slots[0].lines.length}줄 | s1: {slots[1].lines.length}줄 | cs0: {canvasSlots[0].length} | cs1: {canvasSlots[1].length}</div>
+          <div>s0: {slots[0].lines.length}줄 | s1: {slots[1].lines.length}줄 | cs0: {canvasSlots[0].blocks.length} | cs1: {canvasSlots[1].blocks.length}</div>
           {debugLog.map((e, i) => <div key={i} style={{ color: "#aaffcc" }}>{e}</div>)}
         </div>
       )}

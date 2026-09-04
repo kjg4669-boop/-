@@ -8,7 +8,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import BackgroundLayer from "@/components/layers/BackgroundLayer";
 import { toDisplayUrl } from "@/lib/media";
-import type { TextBlock, TextSpan } from "@/lib/types";
+import type { TextBlock, TextSpan, ShapeBlock } from "@/lib/types";
 import { applyFormatToSpans, spansToHtml, htmlToSpans } from "@/lib/spanUtils";
 
 const OUTPUT_W = 1920;
@@ -27,6 +27,8 @@ export interface SlideCanvasHandle {
   isFmtPainterActive: () => boolean;
   selectBlock: (id: string) => void;
   applyFormatToSelection: (blockId: string, patch: Partial<Omit<TextSpan, "text">>) => boolean;
+  syncTextBlocks: (blocks: TextBlock[]) => void;
+  applyFormatToShapeText: (shapeId: string, patch: Partial<Omit<TextSpan, "text">>) => boolean;
 }
 
 type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -35,9 +37,12 @@ type HandlePos = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 const MOVE_HANDLES = new Set<HandlePos>(["nw", "n", "ne"]);
 
 interface Props {
-  onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: import("@/lib/types").ShapeBlock[] }) => void;
+  onCanvasChange?: (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: ShapeBlock[] }) => void;
   onSelectionChange?: (block: TextBlock | null) => void;
   onSelectionFormatChange?: (fmt: Partial<Omit<TextSpan, "text">> | null) => void;
+  selectedShapeId?: string | null;
+  onSelectShape?: (id: string | null) => void;
+  onUpdateShapeById?: (id: string, patch: Partial<ShapeBlock>) => void;
 }
 
 // Module-level clipboard for text blocks
@@ -94,7 +99,7 @@ function setSelectionByOffsets(el: HTMLElement, start: number, end: number) {
 }
 
 const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
-  function SlideCanvas({ onCanvasChange, onSelectionChange, onSelectionFormatChange }, ref) {
+  function SlideCanvas({ onCanvasChange, onSelectionChange, onSelectionFormatChange, selectedShapeId, onSelectShape, onUpdateShapeById }, ref) {
     const activeIdx = useQueueStore((s) => s.getActiveFlatSlideIndex());
     const slides = useQueueStore((s) => s.getFlatSlideList());
     const { layerConfig } = useOutputStore();
@@ -109,7 +114,10 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const [blocks, setBlocks] = useState<TextBlock[]>([]);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [editingShapeId, setEditingShapeId] = useState<string | null>(null);
+    const editingShapeTextRef = useRef<string>("");
     const slideChangedRef = useRef(false);
+    const externalBlockSyncRef = useRef(false);
     const currentSlideRef = useRef<{ songId: number; slideId: string } | null>(null);
     const onCanvasChangeRef = useRef(onCanvasChange);
     useEffect(() => { onCanvasChangeRef.current = onCanvasChange; });
@@ -121,8 +129,16 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const contentEditableRef = useRef<HTMLDivElement | null>(null);
     const editInitializedRef = useRef<string | null>(null);
     const lastSelectionRef = useRef<{ blockId: string; start: number; end: number; time: number } | null>(null);
+    const shapeContentEditableRef = useRef<HTMLDivElement | null>(null);
+    const editingShapeSelectionRef = useRef<{ start: number; end: number } | null>(null);
+    const editingShapeInitializedRef = useRef<string | null>(null);
+    const lastShapeSelectionRef = useRef<{ shapeId: string; start: number; end: number; time: number } | null>(null);
+    const pendingSelectionRestoreRef = useRef<{ blockId: string; start: number; end: number } | null>(null);
+    const pendingShapeSelectionRestoreRef = useRef<{ shapeId: string; start: number; end: number } | null>(null);
     const onSelectionFormatChangeRef = useRef(onSelectionFormatChange);
     useEffect(() => { onSelectionFormatChangeRef.current = onSelectionFormatChange; });
+    const onSelectShapeRef = useRef(onSelectShape);
+    useEffect(() => { onSelectShapeRef.current = onSelectShape; });
     const drawRef = useRef<{ startX: number; startY: number; rect: { x: number; y: number; w: number; h: number } | null } | null>(null);
     const [drawRect, setDrawRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
@@ -186,34 +202,73 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         setFmtPainterActive(true);
       },
       isFmtPainterActive: () => fmtPainterActive,
-      applyFormatToSelection(blockId, patch) {
-        // 1) 편집 중 + 라이브 선택
-        if (editingId === blockId && editingSelectionRef.current) {
-          const { start, end } = editingSelectionRef.current;
-          if (start !== end) {
-            const el = contentEditableRef.current;
-            if (!el) return false;
-            const { text: currentText, spans: currentSpans } = htmlToSpans(el.innerHTML);
-            const newSpans = applyFormatToSpans(currentText, currentSpans, start, end, patch);
-            el.innerHTML = spansToHtml(newSpans, currentText);
-            setSelectionByOffsets(el, start, end);
-            setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
-            return true;
-          }
+      syncTextBlocks(newBlocks) {
+        externalBlockSyncRef.current = true;
+        setBlocks(newBlocks);
+      },
+      applyFormatToShapeText(shapeId, patch) {
+        if (editingShapeId !== shapeId) return false;
+        // 라이브 선택 우선, 없으면 grace period 저장값 사용
+        const liveRange = editingShapeSelectionRef.current;
+        const savedRange = lastShapeSelectionRef.current?.shapeId === shapeId &&
+          Date.now() - lastShapeSelectionRef.current.time < 30000 ? lastShapeSelectionRef.current : null;
+        const selRange = (liveRange && liveRange.start !== liveRange.end) ? liveRange
+          : (savedRange && savedRange.start !== savedRange.end) ? savedRange : null;
+        if (!selRange) return false;
+        const { start, end } = selRange;
+        const el = shapeContentEditableRef.current;
+        if (el) {
+          // DOM에서 직접 읽어 항상 최신 상태 반영
+          const { text: currentText, spans: currentSpans } = htmlToSpans(el.innerHTML);
+          const newSpans = applyFormatToSpans(currentText, currentSpans, start, end, patch);
+          el.innerHTML = spansToHtml(newSpans, currentText);
+          el.focus({ preventScroll: true });
+          setSelectionByOffsets(el, start, end);
+          onUpdateShapeByIdRef.current?.(shapeId, { text: currentText, textSpans: newSpans });
+        } else {
+          // 폴백: contentEditable 미마운트 시 재진입
+          const shape = useOutputStore.getState().layerConfig.canvas?.shapeBlocks?.find(s => s.id === shapeId);
+          if (!shape) return false;
+          const newSpans = applyFormatToSpans(shape.text ?? "", shape.textSpans, start, end, patch);
+          onUpdateShapeByIdRef.current?.(shapeId, { textSpans: newSpans });
+          pendingShapeSelectionRestoreRef.current = { shapeId, start, end };
+          editingShapeInitializedRef.current = null;
+          setEditingShapeId(shapeId);
         }
-        // 2) select 드롭다운 등 blur 후 1초 이내 저장된 선택 범위 재활용
-        const saved = lastSelectionRef.current;
-        if (saved && saved.blockId === blockId && Date.now() - saved.time < 1000) {
-          const { start, end } = saved;
+        return true;
+      },
+      applyFormatToSelection(blockId, patch) {
+        if (editingId !== blockId) return false;
+        // 라이브 선택 우선, 없으면 grace period 저장값 사용
+        const liveRange = editingSelectionRef.current;
+        const savedRange = lastSelectionRef.current?.blockId === blockId &&
+          Date.now() - lastSelectionRef.current.time < 30000 ? lastSelectionRef.current : null;
+        const selRange = (liveRange && liveRange.start !== liveRange.end) ? liveRange
+          : (savedRange && savedRange.start !== savedRange.end) ? savedRange : null;
+        if (!selRange) return false;
+        const { start, end } = selRange;
+        const el = contentEditableRef.current;
+        if (el) {
+          // DOM에서 직접 읽어 항상 최신 상태 반영
+          const { text: currentText, spans: currentSpans } = htmlToSpans(el.innerHTML);
+          const newSpans = applyFormatToSpans(currentText, currentSpans, start, end, patch);
+          el.innerHTML = spansToHtml(newSpans, currentText);
+          el.focus({ preventScroll: true });
+          setSelectionByOffsets(el, start, end);
+          setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans, text: currentText } : b)));
+        } else {
+          // 폴백: contentEditable 미마운트 시 재진입
           const block = blocksRef.current.find((b) => b.id === blockId);
           if (!block) return false;
           const newSpans = applyFormatToSpans(block.text, block.spans, start, end, patch);
           setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, spans: newSpans } : b)));
-          return true;
+          pendingSelectionRestoreRef.current = { blockId, start, end };
+          editInitializedRef.current = null;
+          setEditingId(blockId);
         }
-        return false;
+        return true;
       },
-    }), [idPrefix, fmtPainterActive, editingId]);
+    }), [idPrefix, fmtPainterActive, editingId, editingShapeId]);
 
     // Notify parent when selection changes
     const onSelectionRef = useRef(onSelectionChange);
@@ -250,6 +305,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
 
       setSelectedIds([]);
       setEditingId(null);
+      setEditingShapeId(null);
     }, [activeIdx, activeSlide?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Scale via ResizeObserver
@@ -265,9 +321,11 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     // Notify parent on block change
     useEffect(() => {
       if (slideChangedRef.current) { slideChangedRef.current = false; return; }
+      if (externalBlockSyncRef.current) { externalBlockSyncRef.current = false; return; }
       const info = currentSlideRef.current;
       if (!info) return;
-      onCanvasChangeRef.current?.(info.songId, info.slideId, { textBlocks: blocks });
+      const existingShapeBlocks = useOutputStore.getState().layerConfig.canvas?.shapeBlocks;
+      onCanvasChangeRef.current?.(info.songId, info.slideId, { textBlocks: blocks, shapeBlocks: existingShapeBlocks });
     }, [blocks]);
 
     // ── Drag refs ─────────────────────────────────────────────────────
@@ -284,6 +342,16 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       blockId: string; cxClient: number; cyClient: number;
       startAngle: number; origRotation: number;
     } | null>(null);
+    const shapeMoveRef = useRef<{
+      shapeId: string; startCX: number; startCY: number; origX: number; origY: number;
+    } | null>(null);
+    const shapeResizeRef = useRef<{
+      shapeId: string; handle: HandlePos;
+      startCX: number; startCY: number;
+      origX: number; origY: number; origW: number; origH: number;
+    } | null>(null);
+    const onUpdateShapeByIdRef = useRef(onUpdateShapeById);
+    onUpdateShapeByIdRef.current = onUpdateShapeById;
 
     const handlePointerMove = useCallback((e: React.PointerEvent) => {
       if (moveRef.current) {
@@ -328,6 +396,33 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         setBlocks((prev) =>
           prev.map((b) => (b.id === d.blockId ? { ...b, rotation } : b))
         );
+      } else if (shapeMoveRef.current) {
+        const d = shapeMoveRef.current;
+        const dx = (e.clientX - d.startCX) / scale;
+        const dy = (e.clientY - d.startCY) / scale;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+          didDragRef.current = true;
+          onUpdateShapeByIdRef.current?.(d.shapeId, {
+            x: Math.round(Math.max(0, d.origX + dx)),
+            y: Math.round(Math.max(0, d.origY + dy)),
+          });
+        }
+      } else if (shapeResizeRef.current) {
+        const d = shapeResizeRef.current;
+        const dx = (e.clientX - d.startCX) / scale;
+        const dy = (e.clientY - d.startCY) / scale;
+        const minW = 20, minH = 20;
+        let x = d.origX, y = d.origY, w = d.origW, h = d.origH;
+        const p = d.handle;
+        if (p.includes("e")) w = Math.max(minW, d.origW + dx);
+        if (p.includes("s")) h = Math.max(minH, d.origH + dy);
+        if (p.includes("w")) { w = Math.max(minW, d.origW - dx); x = d.origX + d.origW - w; }
+        if (p.includes("n")) { h = Math.max(minH, d.origH - dy); y = d.origY + d.origH - h; }
+        didDragRef.current = true;
+        onUpdateShapeByIdRef.current?.(d.shapeId, {
+          x: Math.round(x), y: Math.round(y),
+          width: Math.round(w), height: Math.round(h),
+        });
       } else if (drawRef.current) {
         const d = drawRef.current;
         const rect = containerRef.current?.getBoundingClientRect();
@@ -348,6 +443,8 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       moveRef.current = null;
       resizeRef.current = null;
       rotateRef.current = null;
+      shapeMoveRef.current = null;
+      shapeResizeRef.current = null;
       if (drawRef.current) {
         const r = drawRef.current.rect;
         drawRef.current = null;
@@ -364,6 +461,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
 
     const handleCanvasDblClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
       if ((e.target as HTMLElement).closest("[data-block-id]")) return;
+      if ((e.target as HTMLElement).closest("[data-shape-id]")) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const cx = Math.round((e.clientX - rect.left) / scale);
@@ -384,7 +482,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
 
     const handleCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
       if (e.button !== 0) return;
-      if ((e.target as HTMLElement).closest("[data-block-id]") || (e.target as HTMLElement).closest("[data-handle]")) return;
+      if ((e.target as HTMLElement).closest("[data-block-id]") || (e.target as HTMLElement).closest("[data-handle]") || (e.target as HTMLElement).closest("[data-shape-id]")) return;
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const startX = (e.clientX - rect.left) / scale;
@@ -396,6 +494,9 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const handleBlockPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>, block: TextBlock) => {
       if (editingId === block.id) return;
       e.stopPropagation();
+      onSelectShapeRef.current?.(null);
+      setEditingId(null);
+      setEditingShapeId(null);
       // Format painter mode: apply stored format to clicked block
       if (fmtPainterRef.current) {
         const fmt = fmtPainterRef.current;
@@ -431,9 +532,12 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
 
     const handleCanvasClick = useCallback((e: React.MouseEvent) => {
       if (!(e.target as HTMLElement).closest("[data-block-id]") &&
-          !(e.target as HTMLElement).closest("[data-handle]")) {
+          !(e.target as HTMLElement).closest("[data-handle]") &&
+          !(e.target as HTMLElement).closest("[data-shape-id]")) {
         setSelectedIds([]);
         setEditingId(null);
+        setEditingShapeId(null);
+        onSelectShapeRef.current?.(null);
       }
     }, []);
 
@@ -507,6 +611,66 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       };
     }, [editingId]);
 
+    // selectionchange for shape text editing
+    useEffect(() => {
+      if (!editingShapeId) return;
+      const updateSel = () => {
+        const el = shapeContentEditableRef.current;
+        if (!el) return;
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode)) {
+          editingShapeSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null); return;
+        }
+        const range = sel.getRangeAt(0);
+        const getOffset = (container: Node, offset: number): number => {
+          let count = 0;
+          const w = document.createTreeWalker(el, NodeFilter.SHOW_ALL);
+          let n: Node | null = w.nextNode();
+          while (n) {
+            if (n === container) return count + (n.nodeType === Node.TEXT_NODE ? offset : 0);
+            if (n.nodeType === Node.TEXT_NODE) count += (n as Text).length;
+            else if (n.nodeType === Node.ELEMENT_NODE && (n as Element).tagName === "BR") count += 1;
+            n = w.nextNode();
+          }
+          return count;
+        };
+        const rawStart = getOffset(range.startContainer, range.startOffset);
+        const rawEnd = getOffset(range.endContainer, range.endOffset);
+        const start = Math.min(rawStart, rawEnd);
+        const end = Math.max(rawStart, rawEnd);
+        if (start !== end) {
+          editingShapeSelectionRef.current = { start, end };
+          lastShapeSelectionRef.current = { shapeId: editingShapeId, start, end, time: Date.now() };
+          const { spans } = htmlToSpans(el.innerHTML);
+          let pos = 0, selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          for (const span of spans) {
+            if (pos + span.text.length > start) { const { text: _t, ...fmt } = span; selFmt = Object.keys(fmt).length > 0 ? fmt : null; break; }
+            pos += span.text.length;
+          }
+          onSelectionFormatChangeRef.current?.(selFmt);
+        } else {
+          editingShapeSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null);
+        }
+      };
+      document.addEventListener("selectionchange", updateSel);
+      return () => { document.removeEventListener("selectionchange", updateSel); onSelectionFormatChangeRef.current?.(null); };
+    }, [editingShapeId]);
+
+    // Reset text block init guard when editingId commits to null (same pattern as shapes below)
+    useEffect(() => {
+      if (!editingId) {
+        editInitializedRef.current = null;
+      }
+    }, [editingId]);
+
+    // Reset shape init guard only after editingShapeId actually commits to null,
+    // preventing premature reset during intermediate Zustand-triggered re-renders.
+    useEffect(() => {
+      if (!editingShapeId) {
+        editingShapeInitializedRef.current = null;
+      }
+    }, [editingShapeId]);
+
     // ── Selected block (first in selection) ──────────────────────────
     const primaryId = selectedIds[0] ?? null;
     const selectedBlock = primaryId ? blocks.find((b) => b.id === primaryId) : null;
@@ -571,156 +735,386 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
               <BackgroundLayer config={layerConfig.background} skipPlaybackEmit />
             )}
 
-            {blocks.map((block) => (
-              <div
-                key={block.id}
-                data-block-id={block.id}
-                style={{
-                  position: "absolute",
-                  left: block.x, top: block.y,
-                  width: block.width, height: block.height ?? DEFAULT_H,
-                  transform: block.rotation ? `rotate(${block.rotation}deg)` : undefined,
-                  cursor: editingId === block.id ? "text" : "move",
-                  userSelect: "none",
-                  zIndex: 11,
-                }}
-                onPointerDown={(e) => handleBlockPointerDown(e, block)}
-                onDoubleClick={(e) => handleBlockDblClick(e, block.id)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (selectedIds.includes(block.id) && selectedIds.length === 1 && !didDragRef.current) {
-                    setEditingId(block.id);
-                  }
-                }}
-              >
-                {editingId === block.id ? (
-                  <div
-                    style={{
-                      display: "flex",
-                      width: "100%", height: "100%",
-                      alignItems: "flex-start",
-                      justifyContent: block.textAlign === "left" ? "flex-start" : block.textAlign === "right" ? "flex-end" : "center",
-                      background: "rgba(0,0,0,0.6)",
-                      outline: "1px dashed rgba(180,180,180,0.6)",
-                      outlineOffset: "-1px",
-                      padding: "8px",
-                      boxSizing: "border-box",
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  >
+            {/* ── Elements in layer order (text blocks + shapes) ────────── */}
+            {(() => {
+              const shapeBlocks = layerConfig.canvas?.shapeBlocks ?? [];
+              const layerOrder = layerConfig.canvas?.layerOrder;
+              const visibleShapes = shapeBlocks.filter((s) => s.visible !== false);
+              const knownIds = new Set([...blocks.map((b) => b.id), ...visibleShapes.map((s) => s.id)]);
+              const effectiveOrder: string[] = layerOrder
+                ? [
+                    ...blocks.filter((b) => !layerOrder.includes(b.id)).map((b) => b.id),
+                    ...visibleShapes.filter((s) => !layerOrder.includes(s.id)).map((s) => s.id),
+                    ...layerOrder.filter((id) => knownIds.has(id)),
+                  ]
+                : [...blocks.map((b) => b.id), ...visibleShapes.map((s) => s.id)];
+              const blocksById = Object.fromEntries(blocks.map((b) => [b.id, b]));
+              const shapesById = Object.fromEntries(shapeBlocks.map((s) => [s.id, s]));
+              const positionOf = Object.fromEntries(effectiveOrder.map((id, pos) => [id, pos]));
+
+              // Content layers: each element gets z = 10 + position*2
+              const contentEls = effectiveOrder.map((id, position) => {
+                const contentZ = 10 + position * 2;
+                const block = blocksById[id];
+                if (block) {
+                  return (
                     <div
-                      ref={(el) => {
-                        contentEditableRef.current = el;
-                        if (el && editInitializedRef.current !== block.id) {
-                          // 첫 진입 시만 초기화: 스팬 HTML로 렌더, 전체 선택
-                          editInitializedRef.current = block.id;
-                          el.innerHTML = spansToHtml(block.spans, block.text);
-                          editingTextRef.current = el.innerText;
-                          el.focus({ preventScroll: true });
-                          const sel = window.getSelection();
-                          if (sel) {
-                            const range = document.createRange();
-                            range.selectNodeContents(el);
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                          }
-                        }
-                      }}
-                      contentEditable
-                      suppressContentEditableWarning
-                      onInput={(e) => {
-                        editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText;
-                      }}
-                      onBlur={() => {
-                        const el = contentEditableRef.current;
-                        editInitializedRef.current = null;
-                        if (el) {
-                          const { text: rawText, spans: rawSpans } = htmlToSpans(el.innerHTML);
-                          // 브라우저가 추가하는 trailing newline 제거
-                          const cleanText = rawText.endsWith("\n") ? rawText.slice(0, -1) : rawText;
-                          // spans를 cleanText 길이에 맞게 trim
-                          let pos = 0;
-                          const cleanSpans: TextSpan[] = [];
-                          for (const span of rawSpans) {
-                            if (pos >= cleanText.length) break;
-                            const remaining = cleanText.length - pos;
-                            if (span.text.length <= remaining) {
-                              cleanSpans.push(span);
-                              pos += span.text.length;
-                            } else {
-                              cleanSpans.push({ ...span, text: span.text.slice(0, remaining) });
-                              break;
-                            }
-                          }
-                          setBlocks((prev) =>
-                            prev.map((b) => b.id === block.id ? { ...b, text: cleanText, spans: cleanSpans } : b)
-                          );
-                        }
-                        setEditingId(null);
-                        editingSelectionRef.current = null;
-                      }}
+                      key={block.id}
+                      data-block-id={block.id}
                       style={{
-                        width: "100%",
-                        color: block.color,
-                        fontSize: block.fontSize,
-                        fontFamily: block.fontFamily,
-                        fontWeight: block.fontWeight ?? "normal",
-                        fontStyle: block.fontStyle ?? "normal",
-                        textDecoration: block.textDecoration ?? "none",
-                        textAlign: block.textAlign ?? "center",
-                        lineHeight: 1.3,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "keep-all",
-                        outline: "none",
-                        cursor: "text",
-                        userSelect: "text",
+                        position: "absolute",
+                        left: block.x, top: block.y,
+                        width: block.width, height: block.height ?? DEFAULT_H,
+                        transform: block.rotation ? `rotate(${block.rotation}deg)` : undefined,
+                        cursor: editingId === block.id ? "text" : "move",
+                        userSelect: "none",
+                        zIndex: contentZ,
                       }}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      width: "100%", height: "100%",
-                      display: "flex", alignItems: "flex-start",
-                      justifyContent:
-                        block.textAlign === "left" ? "flex-start"
-                        : block.textAlign === "right" ? "flex-end" : "center",
-                      fontSize: block.fontSize, color: block.color,
-                      fontFamily: block.fontFamily,
-                      fontWeight: block.fontWeight ?? "normal",
-                      fontStyle: block.fontStyle ?? "normal",
-                      textDecoration: block.textDecoration ?? "none",
-                      textAlign: block.textAlign ?? "center",
-                      lineHeight: 1.3, whiteSpace: "pre-wrap",
-                      wordBreak: "keep-all", padding: "8px",
-                      // Show outline only when selected
-                      outline: selectedIds.includes(block.id) ? "1px dashed rgba(180,180,180,0.6)" : "none",
-                      outlineOffset: "-1px",
-                    }}
-                  >
-                    {block.spans && block.spans.length > 0 ? (
-                      block.spans.map((span, i) => (
-                        <span
-                          key={i}
+                      onPointerDown={(e) => handleBlockPointerDown(e, block)}
+                      onDoubleClick={(e) => handleBlockDblClick(e, block.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedIds.includes(block.id) && selectedIds.length === 1 && !didDragRef.current) {
+                          setEditingId(block.id);
+                        }
+                      }}
+                    >
+                      {editingId === block.id ? (
+                        <div
                           style={{
-                            fontFamily: span.fontFamily,
-                            fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
-                            fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
-                            textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
-                            color: span.color ?? block.color,
-                            fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+                            display: "flex",
+                            width: "100%", height: "100%",
+                            alignItems: "flex-start",
+                            justifyContent: block.textAlign === "left" ? "flex-start" : block.textAlign === "right" ? "flex-end" : "center",
+                            background: "rgba(0,0,0,0.6)",
+                            outline: "1px dashed rgba(180,180,180,0.6)",
+                            outlineOffset: "-1px",
+                            padding: "8px",
+                            boxSizing: "border-box",
+                          }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <div
+                            ref={(el) => {
+                              contentEditableRef.current = el;
+                              if (el && editInitializedRef.current !== block.id) {
+                                // 첫 진입 시만 초기화: 스팬 HTML로 렌더, 전체 선택
+                                editInitializedRef.current = block.id;
+                                el.innerHTML = spansToHtml(block.spans, block.text);
+                                editingTextRef.current = el.innerText;
+                                el.focus({ preventScroll: true });
+                                const pending = pendingSelectionRestoreRef.current;
+                                if (pending && pending.blockId === block.id) {
+                                  pendingSelectionRestoreRef.current = null;
+                                  setSelectionByOffsets(el, pending.start, pending.end);
+                                } else {
+                                  const sel = window.getSelection();
+                                  if (sel) {
+                                    const range = document.createRange();
+                                    range.selectNodeContents(el);
+                                    sel.removeAllRanges();
+                                    sel.addRange(range);
+                                  }
+                                }
+                              }
+                            }}
+                            contentEditable
+                            suppressContentEditableWarning
+                            onInput={(e) => {
+                              editingTextRef.current = (e.currentTarget as HTMLDivElement).innerText;
+                            }}
+                            onBlur={() => {
+                              const el = contentEditableRef.current;
+                              if (el) {
+                                const { text: rawText, spans: rawSpans } = htmlToSpans(el.innerHTML);
+                                // 브라우저가 추가하는 trailing newline 제거
+                                const cleanText = rawText.endsWith("\n") ? rawText.slice(0, -1) : rawText;
+                                // spans를 cleanText 길이에 맞게 trim
+                                let pos = 0;
+                                const cleanSpans: TextSpan[] = [];
+                                for (const span of rawSpans) {
+                                  if (pos >= cleanText.length) break;
+                                  const remaining = cleanText.length - pos;
+                                  if (span.text.length <= remaining) {
+                                    cleanSpans.push(span);
+                                    pos += span.text.length;
+                                  } else {
+                                    cleanSpans.push({ ...span, text: span.text.slice(0, remaining) });
+                                    break;
+                                  }
+                                }
+                                setBlocks((prev) =>
+                                  prev.map((b) => b.id === block.id ? { ...b, text: cleanText, spans: cleanSpans } : b)
+                                );
+                              }
+                              editingSelectionRef.current = null;
+                            }}
+                            style={{
+                              width: "100%",
+                              color: block.color,
+                              fontSize: block.fontSize,
+                              fontFamily: block.fontFamily,
+                              fontWeight: block.fontWeight ?? "normal",
+                              fontStyle: block.fontStyle ?? "normal",
+                              textDecoration: block.textDecoration ?? "none",
+                              textAlign: block.textAlign ?? "center",
+                              lineHeight: 1.3,
+                              whiteSpace: "pre-wrap",
+                              wordBreak: "keep-all",
+                              outline: "none",
+                              cursor: "text",
+                              userSelect: "text",
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            width: "100%", height: "100%",
+                            display: "flex", alignItems: "flex-start",
+                            justifyContent:
+                              block.textAlign === "left" ? "flex-start"
+                              : block.textAlign === "right" ? "flex-end" : "center",
+                            fontSize: block.fontSize, color: block.color,
+                            fontFamily: block.fontFamily,
+                            fontWeight: block.fontWeight ?? "normal",
+                            fontStyle: block.fontStyle ?? "normal",
+                            textDecoration: block.textDecoration ?? "none",
+                            textAlign: block.textAlign ?? "center",
+                            lineHeight: 1.3, whiteSpace: "pre-wrap",
+                            wordBreak: "keep-all", padding: "8px",
+                            // Show outline only when selected
+                            outline: selectedIds.includes(block.id) ? "1px dashed rgba(180,180,180,0.6)" : "none",
+                            outlineOffset: "-1px",
                           }}
                         >
-                          {span.text}
-                        </span>
-                      ))
-                    ) : (
-                      block.text
+                          {block.spans && block.spans.length > 0 ? (
+                            block.spans.map((span, i) => (
+                              <span
+                                key={i}
+                                style={{
+                                  fontFamily: span.fontFamily,
+                                  fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
+                                  fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
+                                  textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
+                                  color: span.color ?? block.color,
+                                  fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+                                }}
+                              >
+                                {span.text}
+                              </span>
+                            ))
+                          ) : (
+                            block.text
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                const s = shapesById[id];
+                if (!s) return null;
+                // Build individual shape SVG (rotation now applied via transform attribute)
+                const fill = s.fillEnabled ? s.fillColor : "none";
+                const fillOpacity = s.fillEnabled ? s.fillOpacity / 100 : 0;
+                const stroke = s.strokeEnabled ? s.strokeColor : "none";
+                const strokeOpacity = s.strokeEnabled ? s.strokeOpacity / 100 : 0;
+                const strokeWidth = s.strokeEnabled ? s.strokeWidth : 0;
+                const filterAttr = s.shadowEnabled ? `url(#shadow-${s.id})` : undefined;
+                const cx = s.x + s.width / 2, cy = s.y + s.height / 2;
+                const x = s.x, y = s.y, w = s.width, h = s.height;
+                const transformAttr = s.rotation ? `rotate(${s.rotation} ${cx} ${cy})` : undefined;
+                const cp = { fill, fillOpacity, stroke, strokeOpacity, strokeWidth, filter: filterAttr, transform: transformAttr };
+                let shapeEl: React.ReactNode = null;
+                switch (s.shapeType) {
+                  case "rect": shapeEl = <rect x={x} y={y} width={w} height={h} {...cp} />; break;
+                  case "rounded-rect": shapeEl = <rect x={x} y={y} width={w} height={h} rx={Math.min(w,h)*0.12} ry={Math.min(w,h)*0.12} {...cp} />; break;
+                  case "ellipse": shapeEl = <ellipse cx={cx} cy={cy} rx={w/2} ry={h/2} {...cp} />; break;
+                  case "triangle": shapeEl = <polygon points={`${cx},${y} ${x+w},${y+h} ${x},${y+h}`} {...cp} />; break;
+                  case "diamond": shapeEl = <polygon points={`${cx},${y} ${x+w},${cy} ${cx},${y+h} ${x},${cy}`} {...cp} />; break;
+                  case "line": shapeEl = <line x1={x} y1={cy} x2={x+w} y2={cy} stroke={s.strokeEnabled ? s.strokeColor : "#ffffff"} strokeOpacity={strokeOpacity} strokeWidth={s.strokeEnabled ? s.strokeWidth : 4} filter={filterAttr} transform={transformAttr} />; break;
+                  case "arrow-right": {
+                    const ah = h*0.4, aw = w*0.35;
+                    const pts = [`${x},${cy-ah/2}`,`${x+w-aw},${cy-ah/2}`,`${x+w-aw},${y}`,`${x+w},${cy}`,`${x+w-aw},${y+h}`,`${x+w-aw},${cy+ah/2}`,`${x},${cy+ah/2}`].join(" ");
+                    shapeEl = <polygon points={pts} {...cp} />; break;
+                  }
+                  case "star": {
+                    const r1 = Math.min(w,h)/2, r2 = r1*0.4;
+                    const pts = Array.from({length:10}).map((_,i) => { const a=(Math.PI/5)*i-Math.PI/2; const r=i%2===0?r1:r2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+                    shapeEl = <polygon points={pts} {...cp} />; break;
+                  }
+                  case "pentagon": {
+                    const r = Math.min(w,h)/2;
+                    const pts = Array.from({length:5}).map((_,i) => { const a=(Math.PI*2/5)*i-Math.PI/2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+                    shapeEl = <polygon points={pts} {...cp} />; break;
+                  }
+                }
+                return (
+                  <svg
+                    key={id}
+                    style={{ position: "absolute", top: 0, left: 0, width: OUTPUT_W, height: OUTPUT_H, zIndex: contentZ, pointerEvents: "none", opacity: s.opacity !== undefined ? s.opacity / 100 : 1 }}
+                  >
+                    {s.shadowEnabled && (
+                      <defs>
+                        <filter id={`shadow-${s.id}`} x="-50%" y="-50%" width="200%" height="200%">
+                          <feDropShadow dx={s.shadowX} dy={s.shadowY} stdDeviation={s.shadowBlur} floodColor={s.shadowColor} floodOpacity={0.7} />
+                        </filter>
+                      </defs>
                     )}
+                    {shapeEl}
+                  </svg>
+                );
+              });
+
+              // Interaction overlays: z = shapeContentZ + 1 so they sit just above their shape SVG
+              // Only render overlays for visible shapes (mirrors effectiveOrder which uses visibleShapes)
+              const overlayEls = visibleShapes.map((shape) => {
+                const pos = positionOf[shape.id] ?? -1;
+                const overlayZ = pos >= 0 ? 10 + pos * 2 + 1 : 42;
+                const isSelected = selectedShapeId === shape.id;
+                const isEditingShape = editingShapeId === shape.id;
+                const shapeTextStyle: React.CSSProperties = {
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center",
+                  justifyContent: shape.textAlign === "left" ? "flex-start" : shape.textAlign === "right" ? "flex-end" : "center",
+                  color: shape.textColor ?? "#ffffff",
+                  fontSize: shape.textFontSize ?? 60,
+                  fontFamily: shape.textFontFamily ?? "sans-serif",
+                  fontWeight: shape.textFontWeight ?? "normal",
+                  fontStyle: shape.textFontStyle ?? "normal",
+                  textDecoration: shape.textDecoration ?? "none",
+                  textAlign: shape.textAlign ?? "center",
+                  padding: 8, boxSizing: "border-box",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "hidden",
+                };
+                return (
+                  <div
+                    key={`overlay-${shape.id}`}
+                    data-shape-id={shape.id}
+                    style={{
+                      position: "absolute",
+                      left: shape.x, top: shape.y,
+                      width: shape.width, height: shape.height,
+                      zIndex: overlayZ,
+                      cursor: isEditingShape ? "text" : isSelected ? "move" : "pointer",
+                      outline: isSelected ? "2px solid #3b82f6" : "none",
+                      outlineOffset: isSelected ? 2 : 0,
+                      boxSizing: "border-box",
+                    }}
+                    onPointerDown={(e) => {
+                      if (isEditingShape) return;
+                      if (e.button !== 0) return;
+                      e.stopPropagation();
+                      onSelectShape?.(shape.id);
+                      setSelectedIds([]);
+                      setEditingId(null);
+                      setEditingShapeId(null);
+                      shapeMoveRef.current = {
+                        shapeId: shape.id,
+                        startCX: e.clientX, startCY: e.clientY,
+                        origX: shape.x, origY: shape.y,
+                      };
+                    }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      onSelectShape?.(shape.id);
+                      editingShapeTextRef.current = shape.text ?? "";
+                      setEditingShapeId(shape.id);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {isEditingShape ? (
+                      <div
+                        key="shape-editing"
+                        contentEditable
+                        suppressContentEditableWarning
+                        style={{ ...shapeTextStyle, outline: "1px dashed rgba(180,180,180,0.6)", outlineOffset: -1, cursor: "text", userSelect: "text" }}
+                        ref={(el) => {
+                          shapeContentEditableRef.current = el;
+                          if (el && editingShapeInitializedRef.current !== shape.id) {
+                            editingShapeInitializedRef.current = shape.id;
+                            el.innerHTML = spansToHtml(shape.textSpans, shape.text ?? "");
+                            el.focus({ preventScroll: true });
+                            const pending = pendingShapeSelectionRestoreRef.current;
+                            if (pending && pending.shapeId === shape.id) {
+                              pendingShapeSelectionRestoreRef.current = null;
+                              setSelectionByOffsets(el, pending.start, pending.end);
+                            } else {
+                              const sel = window.getSelection();
+                              if (sel) { const r = document.createRange(); r.selectNodeContents(el); sel.removeAllRanges(); sel.addRange(r); }
+                            }
+                          }
+                        }}
+                        onBlur={() => {
+                          const el = shapeContentEditableRef.current;
+                          if (el) {
+                            const { text: rawText, spans: rawSpans } = htmlToSpans(el.innerHTML);
+                            const cleanText = rawText.endsWith("\n") ? rawText.slice(0, -1) : rawText;
+                            let pos = 0;
+                            const cleanSpans: TextSpan[] = [];
+                            for (const span of rawSpans) {
+                              if (pos >= cleanText.length) break;
+                              const remaining = cleanText.length - pos;
+                              if (span.text.length <= remaining) { cleanSpans.push(span); pos += span.text.length; }
+                              else { cleanSpans.push({ ...span, text: span.text.slice(0, remaining) }); break; }
+                            }
+                            onUpdateShapeByIdRef.current?.(shape.id, { text: cleanText, textSpans: cleanSpans });
+                          }
+                          editingShapeSelectionRef.current = null;
+                        }}
+                        onKeyDown={(e) => { if (e.key === "Escape") { setEditingShapeId(null); } }}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      />
+                    ) : shape.text ? (
+                      <div style={{ ...shapeTextStyle, pointerEvents: "none" }}>
+                        {shape.textSpans && shape.textSpans.length > 0
+                          ? shape.textSpans.map((span, i) => (
+                              <span key={i} style={{
+                                fontFamily: span.fontFamily,
+                                fontWeight: span.fontWeight ?? (shape.textFontWeight ?? "normal"),
+                                fontStyle: span.fontStyle ?? (shape.textFontStyle ?? "normal"),
+                                textDecoration: span.textDecoration ?? (shape.textDecoration ?? "none"),
+                                color: span.color ?? shape.textColor ?? "#ffffff",
+                                fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+                              }}>{span.text}</span>
+                            ))
+                          : shape.text}
+                      </div>
+                    ) : null}
+                    {isSelected && RESIZE_HANDLES.map(({ pos, left, top }) => (
+                      <div
+                        key={pos}
+                        data-handle={pos}
+                        style={{
+                          position: "absolute",
+                          left, top,
+                          width: 8, height: 8,
+                          background: "#ffffff",
+                          border: "1.5px solid #3b82f6",
+                          borderRadius: 1,
+                          cursor: handleCursor(pos),
+                          zIndex: 43,
+                          transform: "translate(-50%, -50%)",
+                          flexShrink: 0,
+                        }}
+                        onPointerDown={(e) => {
+                          if (e.button !== 0) return;
+                          e.stopPropagation();
+                          shapeResizeRef.current = {
+                            shapeId: shape.id, handle: pos as HandlePos,
+                            startCX: e.clientX, startCY: e.clientY,
+                            origX: shape.x, origY: shape.y,
+                            origW: shape.width, origH: shape.height,
+                          };
+                        }}
+                      />
+                    ))}
                   </div>
-                )}
-              </div>
-            ))}
+                );
+              });
+
+              return <>{contentEls}{overlayEls}</>;
+            })()}
           </div>
 
           {blocks.length === 0 && (

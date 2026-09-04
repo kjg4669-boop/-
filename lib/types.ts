@@ -73,7 +73,18 @@ export interface ShapeBlock {
   shadowBlur: number;
   shadowX: number;
   shadowY: number;
+  opacity?: number;    // 0-100, default 100
   visible?: boolean;
+  // Text inside shape
+  text?: string;
+  textSpans?: TextSpan[];
+  textColor?: string;
+  textFontSize?: number;
+  textFontFamily?: string;
+  textFontWeight?: string;
+  textFontStyle?: string;
+  textDecoration?: "none" | "underline" | "line-through";
+  textAlign?: "left" | "center" | "right";
 }
 
 export interface LyricSlide {
@@ -86,6 +97,7 @@ export interface LyricSlide {
   canvas?: {
     textBlocks: TextBlock[];
     shapeBlocks?: ShapeBlock[];
+    layerOrder?: string[]; // element IDs bottom-to-top; last = highest Z
   };
 }
 
@@ -159,6 +171,7 @@ export interface LayerConfig {
   canvas?: {
     textBlocks: TextBlock[];
     shapeBlocks?: ShapeBlock[];
+    layerOrder?: string[]; // element IDs bottom-to-top; last = highest Z
     nonce?: number; // increments on every slide navigation to always trigger animation
   };
 }

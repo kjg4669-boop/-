@@ -15,237 +15,173 @@ interface Props {
   textEntrance?: string;
   /** 0-100; slide: px distance, zoom: scale depth. Default 50. */
   textEntranceIntensity?: number;
+  /** Element IDs bottom-to-top. When provided, all blocks+shapes render with unified z-order. */
+  layerOrder?: string[];
 }
 
-function BlockList({ blocks, scale }: { blocks: TextBlock[]; scale: number }) {
+type SlotData = { blocks: TextBlock[]; shapes: ShapeBlock[]; layerOrder?: string[] };
+
+/** Render a single text block inside a scale container */
+function SingleTextBlock({ block, scale, zIdx }: { block: TextBlock; scale: number; zIdx: number }) {
   return (
-    <div
-      style={{
+    <div style={{
+      position: "absolute", top: 0, left: 0,
+      width: OUTPUT_W, height: OUTPUT_H,
+      transform: `scale(${scale})`, transformOrigin: "top left",
+      zIndex: zIdx, pointerEvents: "none",
+    }}>
+      <div style={{
         position: "absolute",
-        top: 0,
-        left: 0,
-        width: OUTPUT_W,
-        height: OUTPUT_H,
-        transform: `scale(${scale})`,
-        transformOrigin: "top left",
-      }}
-    >
-      {blocks.map((block) => (
-        <div
-          key={block.id}
-          style={{
-            position: "absolute",
-            left: block.x,
-            top: block.y,
-            width: block.width,
-            height: block.height,
-            transform: block.rotation ? `rotate(${block.rotation}deg)` : undefined,
-            display: "flex",
-            alignItems: "flex-start",
-            justifyContent:
-              block.textAlign === "left" ? "flex-start"
-              : block.textAlign === "right" ? "flex-end"
-              : "center",
-            fontSize: block.fontSize,
-            color: block.color,
-            fontFamily: block.fontFamily,
-            fontWeight: block.fontWeight ?? "normal",
-            fontStyle: block.fontStyle ?? "normal",
-            textDecoration: block.textDecoration ?? "none",
-            textAlign: block.textAlign ?? "center",
-            lineHeight: 1.3,
-            whiteSpace: "pre-wrap",
-            wordBreak: "keep-all",
-            padding: "8px",
-          }}
-        >
-          {block.spans && block.spans.length > 0 ? (
-            block.spans.map((span, i) => (
-              <span
-                key={i}
-                style={{
-                  fontFamily: span.fontFamily,
-                  fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
-                  fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
-                  textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
-                  color: span.color ?? block.color,
-                  fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
-                }}
-              >
-                {span.text}
-              </span>
-            ))
-          ) : (
-            block.text
-          )}
-        </div>
-      ))}
+        left: block.x,
+        top: block.y,
+        width: block.width,
+        height: block.height,
+        transform: block.rotation ? `rotate(${block.rotation}deg)` : undefined,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent:
+          block.textAlign === "left" ? "flex-start"
+          : block.textAlign === "right" ? "flex-end"
+          : "center",
+        fontSize: block.fontSize,
+        color: block.color,
+        fontFamily: block.fontFamily,
+        fontWeight: block.fontWeight ?? "normal",
+        fontStyle: block.fontStyle ?? "normal",
+        textDecoration: block.textDecoration ?? "none",
+        textAlign: block.textAlign ?? "center",
+        lineHeight: 1.3,
+        whiteSpace: "pre-wrap",
+        wordBreak: "keep-all",
+        padding: "8px",
+      }}>
+        {block.spans && block.spans.length > 0 ? (
+          block.spans.map((span, i) => (
+            <span key={i} style={{
+              fontFamily: span.fontFamily,
+              fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
+              fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
+              textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
+              color: span.color ?? block.color,
+              fontSize: span.fontSize !== undefined ? `${span.fontSize}px` : undefined,
+            }}>
+              {span.text}
+            </span>
+          ))
+        ) : (
+          block.text
+        )}
+      </div>
     </div>
   );
 }
 
-function ShapeRenderer({ shapes, scale }: { shapes: ShapeBlock[]; scale: number }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: OUTPUT_W,
-        height: OUTPUT_H,
-        transform: `scale(${scale})`,
-        transformOrigin: "top left",
-        pointerEvents: "none",
-      }}
-    >
-      <svg
-        width={OUTPUT_W}
-        height={OUTPUT_H}
-        style={{ position: "absolute", top: 0, left: 0 }}
-      >
-        <defs>
-          {shapes
-            .filter((s) => s.shadowEnabled && s.visible !== false)
-            .map((s) => (
-              <filter
-                key={`f-${s.id}`}
-                id={`shadow-${s.id}`}
-                x="-50%"
-                y="-50%"
-                width="200%"
-                height="200%"
-              >
-                <feDropShadow
-                  dx={s.shadowX}
-                  dy={s.shadowY}
-                  stdDeviation={s.shadowBlur}
-                  floodColor={s.shadowColor}
-                  floodOpacity={0.7}
-                />
-              </filter>
-            ))}
-        </defs>
-        {shapes
-          .filter((s) => s.visible !== false)
-          .map((s) => {
-            const fillColor = s.fillEnabled ? s.fillColor : "none";
-            const fillOpacity = s.fillEnabled ? s.fillOpacity / 100 : 0;
-            const strokeColor = s.strokeEnabled ? s.strokeColor : "none";
-            const strokeOpacity = s.strokeEnabled ? s.strokeOpacity / 100 : 0;
-            const strokeWidth = s.strokeEnabled ? s.strokeWidth : 0;
-            const filterAttr = s.shadowEnabled ? `url(#shadow-${s.id})` : undefined;
-            const cx = s.x + s.width / 2;
-            const cy = s.y + s.height / 2;
-            const transformAttr = s.rotation
-              ? `rotate(${s.rotation} ${cx} ${cy})`
-              : undefined;
-            const commonProps = {
-              fill: fillColor,
-              fillOpacity,
-              stroke: strokeColor,
-              strokeOpacity,
-              strokeWidth,
-              filter: filterAttr,
-              transform: transformAttr,
-            };
-            const x = s.x, y = s.y, w = s.width, h = s.height;
+/** Render a single shape inside its own SVG scale container */
+function SingleShape({ shape, scale, zIdx }: { shape: ShapeBlock; scale: number; zIdx: number }) {
+  const filterId = `shadow-${shape.id}`;
+  const fillColor = shape.fillEnabled ? shape.fillColor : "none";
+  const fillOpacity = shape.fillEnabled ? shape.fillOpacity / 100 : 0;
+  const strokeColor = shape.strokeEnabled ? shape.strokeColor : "none";
+  const strokeOpacity = shape.strokeEnabled ? shape.strokeOpacity / 100 : 0;
+  const strokeWidth = shape.strokeEnabled ? shape.strokeWidth : 0;
+  const filterAttr = shape.shadowEnabled ? `url(#${filterId})` : undefined;
+  const cx = shape.x + shape.width / 2;
+  const cy = shape.y + shape.height / 2;
+  const transformAttr = shape.rotation ? `rotate(${shape.rotation} ${cx} ${cy})` : undefined;
+  const x = shape.x, y = shape.y, w = shape.width, h = shape.height;
+  const cp = { fill: fillColor, fillOpacity, stroke: strokeColor, strokeOpacity, strokeWidth, filter: filterAttr, transform: transformAttr };
 
-            switch (s.shapeType) {
-              case "rect":
-                return <rect key={s.id} x={x} y={y} width={w} height={h} {...commonProps} />;
-              case "rounded-rect":
-                return (
-                  <rect
-                    key={s.id}
-                    x={x} y={y} width={w} height={h}
-                    rx={Math.min(w, h) * 0.12}
-                    ry={Math.min(w, h) * 0.12}
-                    {...commonProps}
-                  />
-                );
-              case "ellipse":
-                return (
-                  <ellipse
-                    key={s.id}
-                    cx={x + w / 2} cy={y + h / 2}
-                    rx={w / 2} ry={h / 2}
-                    {...commonProps}
-                  />
-                );
-              case "triangle":
-                return (
-                  <polygon
-                    key={s.id}
-                    points={`${x + w / 2},${y} ${x + w},${y + h} ${x},${y + h}`}
-                    {...commonProps}
-                  />
-                );
-              case "diamond":
-                return (
-                  <polygon
-                    key={s.id}
-                    points={`${x + w / 2},${y} ${x + w},${y + h / 2} ${x + w / 2},${y + h} ${x},${y + h / 2}`}
-                    {...commonProps}
-                  />
-                );
-              case "line":
-                return (
-                  <line
-                    key={s.id}
-                    x1={x} y1={y + h / 2}
-                    x2={x + w} y2={y + h / 2}
-                    stroke={s.strokeEnabled ? s.strokeColor : "#ffffff"}
-                    strokeOpacity={strokeOpacity}
-                    strokeWidth={s.strokeEnabled ? s.strokeWidth : 4}
-                    filter={filterAttr}
-                    transform={transformAttr}
-                  />
-                );
-              case "arrow-right": {
-                const ah = h * 0.4, aw = w * 0.35;
-                const pts = [
-                  `${x},${y + h / 2 - ah / 2}`,
-                  `${x + w - aw},${y + h / 2 - ah / 2}`,
-                  `${x + w - aw},${y}`,
-                  `${x + w},${y + h / 2}`,
-                  `${x + w - aw},${y + h}`,
-                  `${x + w - aw},${y + h / 2 + ah / 2}`,
-                  `${x},${y + h / 2 + ah / 2}`,
-                ].join(" ");
-                return <polygon key={s.id} points={pts} {...commonProps} />;
-              }
-              case "star": {
-                const r1 = Math.min(w, h) / 2;
-                const r2 = r1 * 0.4;
-                const pts = Array.from({ length: 10 })
-                  .map((_, i) => {
-                    const angle = (Math.PI / 5) * i - Math.PI / 2;
-                    const r = i % 2 === 0 ? r1 : r2;
-                    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
-                  })
-                  .join(" ");
-                return <polygon key={s.id} points={pts} {...commonProps} />;
-              }
-              case "pentagon": {
-                const r = Math.min(w, h) / 2;
-                const pts = Array.from({ length: 5 })
-                  .map((_, i) => {
-                    const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
-                    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
-                  })
-                  .join(" ");
-                return <polygon key={s.id} points={pts} {...commonProps} />;
-              }
-              default:
-                return null;
-            }
-          })}
+  let shapeEl: React.ReactNode = null;
+  switch (shape.shapeType) {
+    case "rect": shapeEl = <rect x={x} y={y} width={w} height={h} {...cp} />; break;
+    case "rounded-rect": shapeEl = <rect x={x} y={y} width={w} height={h} rx={Math.min(w,h)*0.12} ry={Math.min(w,h)*0.12} {...cp} />; break;
+    case "ellipse": shapeEl = <ellipse cx={cx} cy={cy} rx={w/2} ry={h/2} {...cp} />; break;
+    case "triangle": shapeEl = <polygon points={`${x+w/2},${y} ${x+w},${y+h} ${x},${y+h}`} {...cp} />; break;
+    case "diamond": shapeEl = <polygon points={`${x+w/2},${y} ${x+w},${cy} ${x+w/2},${y+h} ${x},${cy}`} {...cp} />; break;
+    case "line": shapeEl = <line x1={x} y1={cy} x2={x+w} y2={cy} stroke={shape.strokeEnabled ? shape.strokeColor : "#ffffff"} strokeOpacity={strokeOpacity} strokeWidth={shape.strokeEnabled ? shape.strokeWidth : 4} filter={filterAttr} transform={transformAttr} />; break;
+    case "arrow-right": {
+      const ah = h*0.4, aw = w*0.35;
+      const pts = [`${x},${cy-ah/2}`,`${x+w-aw},${cy-ah/2}`,`${x+w-aw},${y}`,`${x+w},${cy}`,`${x+w-aw},${y+h}`,`${x+w-aw},${cy+ah/2}`,`${x},${cy+ah/2}`].join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+    case "star": {
+      const r1 = Math.min(w,h)/2, r2 = r1*0.4;
+      const pts = Array.from({length:10}).map((_,i) => { const a=(Math.PI/5)*i-Math.PI/2, r=i%2===0?r1:r2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+    case "pentagon": {
+      const r = Math.min(w,h)/2;
+      const pts = Array.from({length:5}).map((_,i) => { const a=(Math.PI*2/5)*i-Math.PI/2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+  }
+
+  const fs = shape.textFontSize ?? 60;
+  const hasSpans = shape.textSpans && shape.textSpans.length > 0;
+  let textEl: React.ReactNode = null;
+  if (shape.text) {
+    if (hasSpans) {
+      textEl = (
+        <foreignObject key="t" x={x} y={y} width={w} height={h}>
+          <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
+            justifyContent: shape.textAlign==="left"?"flex-start": shape.textAlign==="right"?"flex-end":"center",
+            fontSize:fs, fontFamily:shape.textFontFamily??"sans-serif",
+            fontWeight:shape.textFontWeight??"normal", fontStyle:shape.textFontStyle??"normal",
+            textDecoration:shape.textDecoration??"none", color:shape.textColor??"#ffffff",
+            textAlign:shape.textAlign??"center", padding:8, boxSizing:"border-box",
+            whiteSpace:"pre-wrap", wordBreak:"break-word", overflow:"hidden" }}>
+            {shape.textSpans!.map((span,i) => (
+              <span key={i} style={{ fontFamily:span.fontFamily,
+                fontWeight:span.fontWeight??(shape.textFontWeight??"normal"),
+                fontStyle:span.fontStyle??(shape.textFontStyle??"normal"),
+                textDecoration:span.textDecoration??(shape.textDecoration??"none"),
+                color:span.color??shape.textColor??"#ffffff",
+                fontSize:span.fontSize!==undefined?span.fontSize:undefined }}>
+                {span.text}
+              </span>
+            ))}
+          </div>
+        </foreignObject>
+      );
+    } else {
+      const lines = shape.text.split("\n");
+      const lh = fs*1.3;
+      const startY = cy-(lh*lines.length)/2+lh/2;
+      const anchor = shape.textAlign==="left"?"start": shape.textAlign==="right"?"end":"middle";
+      const textX = shape.textAlign==="left"?x+8: shape.textAlign==="right"?x+w-8:cx;
+      textEl = (
+        <text key="t" textAnchor={anchor} fill={shape.textColor??"#ffffff"} fontSize={fs}
+          fontFamily={shape.textFontFamily??"sans-serif"} fontWeight={shape.textFontWeight??"normal"}
+          fontStyle={shape.textFontStyle??"normal"} textDecoration={shape.textDecoration??"none"} dominantBaseline="middle">
+          {lines.map((line,i) => <tspan key={i} x={textX} y={startY+lh*i}>{line}</tspan>)}
+        </text>
+      );
+    }
+  }
+
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0,
+      width: OUTPUT_W, height: OUTPUT_H,
+      transform: `scale(${scale})`, transformOrigin: "top left",
+      zIndex: zIdx, pointerEvents: "none",
+      opacity: shape.opacity !== undefined ? shape.opacity / 100 : 1,
+    }}>
+      <svg width={OUTPUT_W} height={OUTPUT_H} style={{ position: "absolute", top: 0, left: 0 }}>
+        {shape.shadowEnabled && (
+          <defs>
+            <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx={shape.shadowX} dy={shape.shadowY} stdDeviation={shape.shadowBlur} floodColor={shape.shadowColor} floodOpacity={0.7} />
+            </filter>
+          </defs>
+        )}
+        {shapeEl ? <g>{shapeEl}{textEl}</g> : null}
       </svg>
     </div>
   );
 }
 
-export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, textEntrance, textEntranceIntensity }: Props) {
+export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, textEntrance, textEntranceIntensity, layerOrder }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
@@ -255,33 +191,37 @@ export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, 
 
   // ── Two-slot crossfade ────────────────────────────────────────────────
   const visibleBlocks = blocks.filter(b => b.visible !== false);
-  // Include nonce + visible state so animation fires on visibility toggle too
-  const blocksKey = `${nonce ?? 0}:${visibleBlocks.map(b => `${b.id}:${b.text}`).join("\0")}`;
-  const [slots, setSlots] = useState<[TextBlock[], TextBlock[]]>([visibleBlocks, []]);
+  const visibleShapes = (shapeBlocks ?? []).filter(s => s.visible !== false);
+  const blocksKey = `${nonce ?? 0}:${visibleBlocks.map(b => `${b.id}:${b.text}`).join("\0")}:${visibleShapes.map(s => `${s.id}:${s.text ?? ""}`).join("\0")}`;
+  const [slots, setSlots] = useState<[SlotData, SlotData]>([
+    { blocks: visibleBlocks, shapes: visibleShapes, layerOrder },
+    { blocks: [], shapes: [], layerOrder: undefined },
+  ]);
   const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
-  // slotAnimKeys: each element starts at -1 (no animation on initial render).
-  // Incrementing a slot's key forces its inner div to remount → CSS @keyframes restarts.
   const [slotAnimKeys, setSlotAnimKeys] = useState<[number, number]>([-1, -1]);
   const currentSlot = useRef<0 | 1>(0);
   const isFirstRender = useRef(true);
+  const prevNonceRef = useRef<number>(nonce ?? 0);
 
   useEffect(() => {
+    const nonceChanged = (nonce ?? 0) !== prevNonceRef.current;
+    prevNonceRef.current = nonce ?? 0;
+
     if (isFirstRender.current) {
       isFirstRender.current = false;
-      // 첫 변경은 애니메이션 없이 현재 슬롯 내용만 업데이트
       setSlots(prev => {
-        const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = visibleBlocks;
+        const next: [SlotData, SlotData] = [prev[0], prev[1]];
+        next[currentSlot.current] = { blocks: visibleBlocks, shapes: visibleShapes, layerOrder };
         return next;
       });
       return;
     }
 
-    // Instant swap
-    if (fadeMsRef.current === 0 || textEntrance === "none") {
+    // In-place update (no crossfade) when: transitions disabled, entrance=none, or only content changed (not a slide navigation)
+    if (fadeMsRef.current === 0 || textEntrance === "none" || !nonceChanged) {
       setSlots(prev => {
-        const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]];
-        next[currentSlot.current] = visibleBlocks;
+        const next: [SlotData, SlotData] = [prev[0], prev[1]];
+        next[currentSlot.current] = { blocks: visibleBlocks, shapes: visibleShapes, layerOrder };
         return next;
       });
       return;
@@ -289,17 +229,13 @@ export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, 
 
     const nextSlot = (1 - currentSlot.current) as 0 | 1;
     currentSlot.current = nextSlot;
-
-    // All three setState calls are batched into one React commit:
-    //   - outer slot div: opacity CSS transition fires (0 → 1)
-    //   - inner div: remounts (slotAnimKeys[nextSlot] incremented) → @keyframes starts from "from"
-    setSlots(prev => { const next: [TextBlock[], TextBlock[]] = [prev[0], prev[1]]; next[nextSlot] = visibleBlocks; return next; });
+    setSlots(prev => { const next: [SlotData, SlotData] = [prev[0], prev[1]]; next[nextSlot] = { blocks: visibleBlocks, shapes: visibleShapes, layerOrder }; return next; });
     setActiveSlot(nextSlot);
     setSlotAnimKeys(prev => { const next: [number, number] = [prev[0], prev[1]]; next[nextSlot]++; return next; });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocksKey]);
 
-  // ── Container scale (fills output canvas) ──────────────────────────
+  // ── Container scale ──────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -325,24 +261,19 @@ export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, 
       style={{ position: "absolute", inset: 0, zIndex: 40, transform: "translateZ(0)", pointerEvents: "none" }}
     >
       {([0, 1] as const).map((idx) => (
-        // Outer div: stable key, handles opacity crossfade via CSS transition
         <div
           key={idx}
           style={{
-            position: "absolute",
-            inset: 0,
+            position: "absolute", inset: 0,
             opacity: activeSlot === idx ? 1 : 0,
             transition: `opacity ${FADE_MS}ms ease`,
             pointerEvents: "none",
           }}
         >
-          {/* Inner div: key changes when slot activates → remount → CSS @keyframes restarts.
-              Outer handles opacity; this handles transform animation (no opacity in keyframes). */}
           <div
             key={slotAnimKeys[idx]}
             style={{
-              position: "absolute",
-              inset: 0,
+              position: "absolute", inset: 0,
               ...({ "--enter-dist": enterDist, "--enter-scale": enterScale } as React.CSSProperties),
               animation:
                 hasTransformEntrance && FADE_MS > 0 && slotAnimKeys[idx] >= 0
@@ -350,13 +281,31 @@ export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, 
                   : undefined,
             }}
           >
-            <BlockList blocks={slots[idx]} scale={scale} />
+            {(() => {
+              const slot = slots[idx];
+              const blocksById = Object.fromEntries(slot.blocks.map(b => [b.id, b]));
+              const shapesById = Object.fromEntries(slot.shapes.map(s => [s.id, s]));
+              const knownIds = new Set([...slot.blocks.map(b => b.id), ...slot.shapes.map(s => s.id)]);
+              // Use the current layerOrder prop directly so Z-order changes apply instantly
+              const effectiveOrder: string[] = layerOrder
+                ? [
+                    ...slot.blocks.filter(b => !layerOrder.includes(b.id)).map(b => b.id),
+                    ...slot.shapes.filter(s => !layerOrder.includes(s.id)).map(s => s.id),
+                    ...layerOrder.filter(id => knownIds.has(id)),
+                  ]
+                : [...slot.blocks.map(b => b.id), ...slot.shapes.map(s => s.id)];
+
+              return effectiveOrder.map((id, zOrd) => {
+                const block = blocksById[id];
+                if (block) return <SingleTextBlock key={id} block={block} scale={scale} zIdx={zOrd + 1} />;
+                const shape = shapesById[id];
+                if (shape) return <SingleShape key={id} shape={shape} scale={scale} zIdx={zOrd + 1} />;
+                return null;
+              });
+            })()}
           </div>
         </div>
       ))}
-      {shapeBlocks && shapeBlocks.length > 0 && (
-        <ShapeRenderer shapes={shapeBlocks} scale={scale} />
-      )}
     </div>
   );
 }

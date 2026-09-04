@@ -49,8 +49,8 @@ export default function LayerPanelPage() {
         onMoveDown={(layerId) => {
           emit("layer:moveDown", { layerId }).catch(() => {});
         }}
-        onReorder={(layerId, toArrayIndex) => {
-          emit("layer:reorder", { layerId, toArrayIndex }).catch(() => {});
+        onReorder={(fromLayerId, toLayerId) => {
+          emit("layer:reorder", { fromLayerId, toLayerId }).catch(() => {});
         }}
         onAddBlock={() => {
           emit("layer:addBlock", {}).catch(() => {});

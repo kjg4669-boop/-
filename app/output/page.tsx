@@ -290,6 +290,7 @@ export default function OutputPage() {
               transitionMs={layerConfig.subtitle?.textEntrance === "none" ? 0 : (layerConfig.transitionMs ?? 600)}
               textEntrance={layerConfig.subtitle?.textEntrance}
               textEntranceIntensity={layerConfig.subtitle?.textEntranceIntensity}
+              layerOrder={layerConfig.canvas?.layerOrder}
             />
           )}
 

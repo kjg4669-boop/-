@@ -11,12 +11,12 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Eye, EyeOff, Lock, Layers, Video, Type, Image as ImageIcon,
-  GripVertical, Plus, Trash2, Copy,
+  GripVertical, Plus, Trash2, Copy, Square,
 } from "lucide-react";
 import type { LayerConfig } from "@/lib/types";
 
 // ── 레이어 타입 ────────────────────────────────────────────────────────
-export type LayerType = "video" | "text" | "image" | "background";
+export type LayerType = "video" | "text" | "image" | "background" | "shape";
 
 export interface LayerItem {
   id: string;
@@ -33,6 +33,7 @@ const TYPE_ICONS: Record<LayerType, React.ComponentType<{ size?: number; classNa
   video: Video,
   image: ImageIcon,
   text: Type,
+  shape: Square,
 };
 
 const TYPE_COLORS: Record<LayerType, string> = {
@@ -40,24 +41,66 @@ const TYPE_COLORS: Record<LayerType, string> = {
   image:      "#10b981",
   video:      "#3b82f6",
   background: "#6b7280",
+  shape:      "#a855f7",
+};
+
+const SHAPE_NAMES: Record<string, string> = {
+  rect: "사각형", "rounded-rect": "둥근사각", ellipse: "타원",
+  triangle: "삼각형", diamond: "다이아몬드", line: "선",
+  "arrow-right": "화살표", star: "별", pentagon: "오각형",
 };
 
 // ── layerConfig → LayerItem[] ─────────────────────────────────────────
 export function deriveLayersFromConfig(config: LayerConfig): LayerItem[] {
   const layers: LayerItem[] = [];
   const canvasBlocks = config.canvas?.textBlocks ?? [];
+  const shapeBlocks = config.canvas?.shapeBlocks ?? [];
+  const layerOrder = config.canvas?.layerOrder;
 
-  for (let i = canvasBlocks.length - 1; i >= 0; i--) {
-    const block = canvasBlocks[i];
-    layers.push({
-      id: `canvas:${block.id}`,
-      name: block.text.trim() || `텍스트 블록 ${i + 1}`,
-      type: "text",
-      isVisible: block.visible !== false,
-      isLocked: false,
-      arrayIndex: i,
-      arrayTotal: canvasBlocks.length,
-    });
+  const blocksById = Object.fromEntries(canvasBlocks.map(b => [b.id, b]));
+  const shapesById = Object.fromEntries(shapeBlocks.map(s => [s.id, s]));
+  const allIds = [...canvasBlocks.map(b => b.id), ...shapeBlocks.map(s => s.id)];
+
+  // Effective order bottom-to-top. If layerOrder provided, use it (unlisted IDs go at bottom).
+  let effectiveOrder: string[];
+  if (layerOrder) {
+    const knownSet = new Set(layerOrder);
+    effectiveOrder = [
+      ...allIds.filter(id => !knownSet.has(id)),
+      ...layerOrder.filter(id => blocksById[id] !== undefined || shapesById[id] !== undefined),
+    ];
+  } else {
+    effectiveOrder = allIds;
+  }
+
+  // Panel shows highest Z first → iterate effectiveOrder in reverse
+  for (let i = effectiveOrder.length - 1; i >= 0; i--) {
+    const id = effectiveOrder[i];
+    const block = blocksById[id];
+    if (block) {
+      layers.push({
+        id: `canvas:${id}`,
+        name: block.text.trim() || `텍스트 블록 ${i + 1}`,
+        type: "text",
+        isVisible: block.visible !== false,
+        isLocked: false,
+        arrayIndex: i,
+        arrayTotal: effectiveOrder.length,
+      });
+    } else {
+      const shape = shapesById[id];
+      if (shape) {
+        layers.push({
+          id: `shape:${id}`,
+          name: SHAPE_NAMES[shape.shapeType] ?? "도형",
+          type: "shape",
+          isVisible: shape.visible !== false,
+          isLocked: false,
+          arrayIndex: i,
+          arrayTotal: effectiveOrder.length,
+        });
+      }
+    }
   }
 
   const bg = config.background;
@@ -208,7 +251,7 @@ export interface SidebarLayerPanelProps {
   onToggleVisible: (id: string) => void;
   onMoveUp?: (id: string) => void;
   onMoveDown?: (id: string) => void;
-  onReorder?: (layerId: string, toArrayIndex: number) => void;
+  onReorder?: (fromLayerId: string, toLayerId: string) => void;
   onAddBlock?: () => void;
   onDuplicateBlock?: (layerId: string) => void;
   onDeleteBlock?: (layerId: string) => void;
@@ -249,15 +292,13 @@ export default function SidebarLayerPanel({
     const { active, over } = event;
     if (!over || active.id === over.id || !onReorder) return;
 
-    const ids = canvasLayers.map((l) => l.id);
-    const oldPanelIdx = ids.indexOf(active.id as string);
-    const newPanelIdx = ids.indexOf(over.id as string);
-    if (oldPanelIdx < 0 || newPanelIdx < 0) return;
-
-    const total = canvasLayers.length;
-    const toArrayIndex = (total - 1) - newPanelIdx;
-    onReorder(active.id as string, toArrayIndex);
-  }, [canvasLayers, onReorder]);
+    const activeId = active.id as string;
+    const overId   = over.id as string;
+    const isCanvasEl = (id: string) => id.startsWith("canvas:") || id.startsWith("shape:");
+    if (isCanvasEl(activeId) && isCanvasEl(overId)) {
+      onReorder(activeId, overId);
+    }
+  }, [onReorder]);
 
   const handleDragCancel = useCallback(() => setDraggingId(null), []);
 

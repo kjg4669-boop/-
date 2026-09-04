@@ -147,6 +147,8 @@ export default function ControllerPage() {
   const [serviceNotes, setServiceNotes] = useState("");
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+  const [defaultShapeFill, setDefaultShapeFill] = useState("#3b82f6");
+  const [defaultShapeStroke, setDefaultShapeStroke] = useState("#ffffff");
   const [fmtPainterOn, setFmtPainterOn] = useState(false);
   const [selectionFormat, setSelectionFormat] = useState<Partial<Omit<TextSpan, "text">> | null>(null);
   const canvasRef = useRef<SlideCanvasHandle>(null);
@@ -435,6 +437,7 @@ export default function ControllerPage() {
 
     const slide = getActiveLyricSlide();
     const canvasBlocks = slide?.canvas?.textBlocks ?? [];
+    const shapeBlocks = slide?.canvas?.shapeBlocks ?? [];
     const nonce = ++slideNonceRef.current;
 
     // Same item (slide navigation within song): preserve current style settings (textEntrance etc.)
@@ -480,7 +483,7 @@ export default function ControllerPage() {
         lines2: !isClear ? (slide?.lines2 ?? []) : [],
         nonce,
       },
-      canvas: !isClear && canvasBlocks.length > 0 ? { textBlocks: canvasBlocks, nonce } : undefined,
+      canvas: !isClear && (canvasBlocks.length > 0 || shapeBlocks.length > 0) ? { textBlocks: canvasBlocks, shapeBlocks, nonce } : undefined,
     };
     setLayerConfig(newConfig);
 
@@ -872,8 +875,8 @@ export default function ControllerPage() {
         handleLayerMoveDownRef.current(ev.payload.layerId);
       }).then((fn) => unlisteners.push(fn));
 
-      listen<{ layerId: string; toArrayIndex: number }>("layer:reorder", (ev) => {
-        handleLayerReorderRef.current(ev.payload.layerId, ev.payload.toArrayIndex);
+      listen<{ fromLayerId: string; toLayerId: string }>("layer:reorder", (ev) => {
+        handleLayerReorderRef.current(ev.payload.fromLayerId, ev.payload.toLayerId);
       }).then((fn) => unlisteners.push(fn));
 
       listen("layer:addBlock", () => {
@@ -895,26 +898,25 @@ export default function ControllerPage() {
   const handleCanvasChange = useCallback(
     (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: ShapeBlock[] }) => {
       updateSlideCanvas(songId, slideId, canvas);
-      if (isLive) {
-        const lc = useOutputStore.getState().layerConfig;
-        const slide = useQueueStore.getState().getActiveLyricSlide();
-        const hasBlocks = canvas.textBlocks.length > 0;
-        const shapeBlocks = canvas.shapeBlocks ?? [];
-        const config: LayerConfig = {
-          ...lc,
-          subtitle: {
-            ...lc.subtitle,
-            visible: !isClear && !hasBlocks,
-            lines: !isClear && !hasBlocks ? (slide?.lines ?? []) : [],
-            lines2: !isClear ? (slide?.lines2 ?? []) : [],
-          },
-          canvas: !isClear && (hasBlocks || shapeBlocks.length > 0)
-            ? { textBlocks: canvas.textBlocks, shapeBlocks }
-            : undefined,
-        };
-        setLayerConfig(config);
-        ipc.sendSlideUpdate(config);
-      }
+      const lc = useOutputStore.getState().layerConfig;
+      const slide = useQueueStore.getState().getActiveLyricSlide();
+      const hasBlocks = canvas.textBlocks.length > 0;
+      const shapeBlocks = canvas.shapeBlocks ?? [];
+      const config: LayerConfig = {
+        ...lc,
+        subtitle: {
+          ...lc.subtitle,
+          visible: !isClear && !hasBlocks,
+          lines: !isClear && !hasBlocks ? (slide?.lines ?? []) : [],
+          lines2: !isClear ? (slide?.lines2 ?? []) : [],
+        },
+        canvas: !isClear && (hasBlocks || shapeBlocks.length > 0)
+          ? { textBlocks: canvas.textBlocks, shapeBlocks, layerOrder: lc.canvas?.layerOrder }
+          : undefined,
+      };
+      setLayerConfig(config);
+      ipc.sendPreviewUpdate(config);
+      if (isLive) ipc.sendSlideUpdate(config);
       // Capture lyrics_json now (before debounce fires) to avoid stale service data
       const songNow = useQueueStore.getState().currentService?.items.find((i) => i.song?.id === songId)?.song;
       if (!songNow) return;
@@ -1005,26 +1007,30 @@ export default function ControllerPage() {
     const state = useQueueStore.getState();
     const item = state.getActiveItem();
     const slide = state.getActiveLyricSlide();
-    if (!item?.song?.id || !slide) return;
-    const currentShapes = slide.canvas?.shapeBlocks ?? [];
-    updateSlideCanvas(item.song.id, slide.id, { textBlocks: newBlocks, shapeBlocks: currentShapes });
     const lc = useOutputStore.getState().layerConfig;
+    const currentShapes = lc.canvas?.shapeBlocks ?? [];
+    const currentLayerOrder = lc.canvas?.layerOrder;
+    // Save to DB only when a lyric slide is active
+    if (item?.song?.id && slide) {
+      updateSlideCanvas(item.song.id, slide.id, { textBlocks: newBlocks, shapeBlocks: currentShapes, layerOrder: currentLayerOrder });
+    }
     const visibleCount = newBlocks.filter(b => b.visible !== false).length;
     const config: LayerConfig = {
       ...lc,
       subtitle: {
         ...lc.subtitle,
         visible: !isClear && visibleCount === 0 && newBlocks.length === 0,
-        lines: !isClear && newBlocks.length === 0 ? (slide.lines ?? []) : [],
-        lines2: !isClear ? (slide.lines2 ?? []) : [],
+        lines: !isClear && newBlocks.length === 0 ? (slide?.lines ?? []) : [],
+        lines2: !isClear ? (slide?.lines2 ?? []) : [],
       },
       canvas: !isClear && newBlocks.length > 0
-        ? { textBlocks: newBlocks, shapeBlocks: currentShapes }
-        : (currentShapes.length > 0 ? { textBlocks: [], shapeBlocks: currentShapes } : undefined),
+        ? { textBlocks: newBlocks, shapeBlocks: currentShapes, layerOrder: currentLayerOrder }
+        : (currentShapes.length > 0 ? { textBlocks: [], shapeBlocks: currentShapes, layerOrder: currentLayerOrder } : undefined),
     };
     setLayerConfig(config);
     if (isLive) ipc.sendSlideUpdate(config);
     ipc.sendPreviewUpdate(config);
+    canvasRef.current?.syncTextBlocks(newBlocks);
   }, [isLive, isClear, setLayerConfig, updateSlideCanvas]);
 
   // Helper: update canvas shapeBlocks array and push to output/preview
@@ -1032,10 +1038,12 @@ export default function ControllerPage() {
     const state = useQueueStore.getState();
     const item = state.getActiveItem();
     const slide = state.getActiveLyricSlide();
-    if (!item?.song?.id || !slide) return;
-    const textBlocks = slide.canvas?.textBlocks ?? [];
-    updateSlideCanvas(item.song.id, slide.id, { textBlocks, shapeBlocks: newShapes });
     const lc = useOutputStore.getState().layerConfig;
+    const textBlocks = lc.canvas?.textBlocks ?? [];
+    // Save to DB only when a lyric slide is active
+    if (item?.song?.id && slide) {
+      updateSlideCanvas(item.song.id, slide.id, { textBlocks, shapeBlocks: newShapes, layerOrder: lc.canvas?.layerOrder });
+    }
     const config: LayerConfig = {
       ...lc,
       canvas: { ...(lc.canvas ?? { textBlocks: [] }), shapeBlocks: newShapes },
@@ -1055,10 +1063,10 @@ export default function ControllerPage() {
       x: 660, y: 340, width: 600, height: 400,
       shapeType,
       fillEnabled: shapeType !== "line",
-      fillColor: "#3b82f6",
-      fillOpacity: 80,
+      fillColor: defaultShapeFill,
+      fillOpacity: 100,
       strokeEnabled: true,
-      strokeColor: "#ffffff",
+      strokeColor: defaultShapeStroke,
       strokeWidth: 4,
       strokeOpacity: 100,
       shadowEnabled: false,
@@ -1070,14 +1078,20 @@ export default function ControllerPage() {
     const existing = slide.canvas?.shapeBlocks ?? [];
     applyShapeUpdate([...existing, newShape]);
     setSelectedShapeId(newShape.id);
-  }, [applyShapeUpdate]);
+  }, [applyShapeUpdate, defaultShapeFill, defaultShapeStroke]);
 
   const handleUpdateShape = useCallback((patch: Partial<ShapeBlock>) => {
     if (!selectedShapeId) return;
-    const shapes = layerConfig.canvas?.shapeBlocks ?? [];
+    const shapes = useOutputStore.getState().layerConfig.canvas?.shapeBlocks ?? [];
     const newShapes = shapes.map(s => s.id === selectedShapeId ? { ...s, ...patch } : s);
     applyShapeUpdate(newShapes);
-  }, [selectedShapeId, layerConfig, applyShapeUpdate]);
+  }, [selectedShapeId, applyShapeUpdate]);
+
+  const handleUpdateShapeById = useCallback((id: string, patch: Partial<ShapeBlock>) => {
+    const shapes = useOutputStore.getState().layerConfig.canvas?.shapeBlocks ?? [];
+    const newShapes = shapes.map(s => s.id === id ? { ...s, ...patch } : s);
+    applyShapeUpdate(newShapes);
+  }, [applyShapeUpdate]);
 
   const handleLayerToggleVisible = useCallback((layerId: string) => {
     if (layerId === "subtitle") {
@@ -1089,8 +1103,13 @@ export default function ControllerPage() {
       const blocks = layerConfig.canvas?.textBlocks ?? [];
       const newBlocks = blocks.map(b => b.id === blockId ? { ...b, visible: b.visible === false } : b);
       applyCanvasBlocksUpdate(newBlocks);
+    } else if (layerId.startsWith("shape:")) {
+      const shapeId = layerId.slice("shape:".length);
+      const shapes = layerConfig.canvas?.shapeBlocks ?? [];
+      const newShapes = shapes.map(s => s.id === shapeId ? { ...s, visible: s.visible !== false ? false : true } : s);
+      applyShapeUpdate(newShapes);
     }
-  }, [layerConfig, handleLayerChange, applyCanvasBlocksUpdate]);
+  }, [layerConfig, handleLayerChange, applyCanvasBlocksUpdate, applyShapeUpdate]);
 
   const handleLayerMoveUp = useCallback((layerId: string) => {
     if (!layerId.startsWith("canvas:")) return;
@@ -1114,17 +1133,54 @@ export default function ControllerPage() {
     applyCanvasBlocksUpdate(newBlocks);
   }, [layerConfig, applyCanvasBlocksUpdate]);
 
-  const handleLayerReorder = useCallback((layerId: string, toArrayIndex: number) => {
-    if (!layerId.startsWith("canvas:")) return;
-    const blockId = layerId.slice("canvas:".length);
-    const blocks = layerConfig.canvas?.textBlocks ?? [];
-    const fromIdx = blocks.findIndex((b) => b.id === blockId);
-    if (fromIdx < 0 || toArrayIndex < 0 || toArrayIndex >= blocks.length) return;
-    const newBlocks = [...blocks];
-    const [moved] = newBlocks.splice(fromIdx, 1);
-    newBlocks.splice(toArrayIndex, 0, moved);
-    applyCanvasBlocksUpdate(newBlocks);
-  }, [layerConfig, applyCanvasBlocksUpdate]);
+  const handleLayerReorder = useCallback((fromLayerId: string, toLayerId: string) => {
+    const lc = useOutputStore.getState().layerConfig;
+    const qState = useQueueStore.getState();
+    const item = qState.getActiveItem();
+    const slide = qState.getActiveLyricSlide();
+
+    const stripPrefix = (id: string) =>
+      id.startsWith("canvas:") ? id.slice("canvas:".length)
+      : id.startsWith("shape:") ? id.slice("shape:".length) : null;
+
+    const fromId = stripPrefix(fromLayerId);
+    const toId = stripPrefix(toLayerId);
+    if (!fromId || !toId || fromId === toId) return;
+
+    const canvas = lc.canvas;
+    const textBlocks = canvas?.textBlocks ?? [];
+    const shapeBlocks = canvas?.shapeBlocks ?? [];
+    const allIds = [...textBlocks.map(b => b.id), ...shapeBlocks.map(s => s.id)];
+
+    // Build current effective layerOrder (bottom-to-top Z)
+    const existingOrder = canvas?.layerOrder;
+    const knownSet = new Set(existingOrder ?? []);
+    const effectiveOrder: string[] = existingOrder
+      ? [
+          ...allIds.filter(id => !knownSet.has(id)),
+          ...existingOrder.filter(id => allIds.includes(id)),
+        ]
+      : [...allIds];
+
+    const fromIdx = effectiveOrder.indexOf(fromId);
+    const toIdx = effectiveOrder.indexOf(toId);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+
+    const newOrder = [...effectiveOrder];
+    newOrder.splice(fromIdx, 1);
+    newOrder.splice(toIdx, 0, fromId);
+
+    const config: LayerConfig = {
+      ...lc,
+      canvas: { ...(canvas ?? { textBlocks: [] }), layerOrder: newOrder },
+    };
+    if (item?.song?.id && slide) {
+      updateSlideCanvas(item.song.id, slide.id, { textBlocks, shapeBlocks, layerOrder: newOrder });
+    }
+    setLayerConfig(config);
+    if (isLive) ipc.sendSlideUpdate(config);
+    ipc.sendPreviewUpdate(config);
+  }, [isLive, updateSlideCanvas, setLayerConfig]);
 
   const handleLayerAddBlock = useCallback(() => {
     // Delegate to handleAddBlock which handles the pending-slide case
@@ -1132,26 +1188,46 @@ export default function ControllerPage() {
   }, [handleAddBlock]);
 
   const handleLayerDuplicateBlock = useCallback((layerId: string) => {
-    if (!layerId.startsWith("canvas:")) return;
-    const blockId = layerId.slice("canvas:".length);
-    const blocks = layerConfig.canvas?.textBlocks ?? [];
-    const original = blocks.find((b) => b.id === blockId);
-    if (!original) return;
-    const newBlock: TextBlock = {
-      ...original,
-      id: crypto.randomUUID(),
-      x: Math.min(original.x + 30, 1920 - original.width),
-      y: Math.min(original.y + 30, 1080 - (original.height ?? 200)),
-    };
-    applyCanvasBlocksUpdate([...blocks, newBlock]);
-  }, [layerConfig, applyCanvasBlocksUpdate]);
+    if (layerId.startsWith("canvas:")) {
+      const blockId = layerId.slice("canvas:".length);
+      const blocks = layerConfig.canvas?.textBlocks ?? [];
+      const original = blocks.find((b) => b.id === blockId);
+      if (!original) return;
+      const newBlock: TextBlock = {
+        ...original,
+        id: crypto.randomUUID(),
+        x: Math.min(original.x + 30, 1920 - original.width),
+        y: Math.min(original.y + 30, 1080 - (original.height ?? 200)),
+      };
+      applyCanvasBlocksUpdate([...blocks, newBlock]);
+    } else if (layerId.startsWith("shape:")) {
+      const shapeId = layerId.slice("shape:".length);
+      const shapes = layerConfig.canvas?.shapeBlocks ?? [];
+      const original = shapes.find((s) => s.id === shapeId);
+      if (!original) return;
+      const newShape: ShapeBlock = {
+        ...original,
+        id: crypto.randomUUID(),
+        x: Math.min(original.x + 30, 1920 - original.width),
+        y: Math.min(original.y + 30, 1080 - original.height),
+      };
+      applyShapeUpdate([...shapes, newShape]);
+      setSelectedShapeId(newShape.id);
+    }
+  }, [layerConfig, applyCanvasBlocksUpdate, applyShapeUpdate]);
 
   const handleLayerDeleteBlock = useCallback((layerId: string) => {
-    if (!layerId.startsWith("canvas:")) return;
-    const blockId = layerId.slice("canvas:".length);
-    const blocks = layerConfig.canvas?.textBlocks ?? [];
-    applyCanvasBlocksUpdate(blocks.filter((b) => b.id !== blockId));
-  }, [layerConfig, applyCanvasBlocksUpdate]);
+    if (layerId.startsWith("canvas:")) {
+      const blockId = layerId.slice("canvas:".length);
+      const blocks = layerConfig.canvas?.textBlocks ?? [];
+      applyCanvasBlocksUpdate(blocks.filter((b) => b.id !== blockId));
+    } else if (layerId.startsWith("shape:")) {
+      const shapeId = layerId.slice("shape:".length);
+      const shapes = layerConfig.canvas?.shapeBlocks ?? [];
+      applyShapeUpdate(shapes.filter((s) => s.id !== shapeId));
+      if (selectedShapeId === shapeId) setSelectedShapeId(null);
+    }
+  }, [layerConfig, applyCanvasBlocksUpdate, applyShapeUpdate, selectedShapeId]);
 
   const handleSaveGlobal = useCallback((config: LayerConfig) => {
     saveGlobalDefaults(config);
@@ -1420,10 +1496,28 @@ export default function ControllerPage() {
         // 선택 범위 없으면 전체 블록에 적용
         canvasRef.current.updateBlock(selectedBlock.id, patch);
       }
+    } else if (selectedShapeId) {
+      // 도형 텍스트 — 먼저 선택 범위에 적용 시도
+      const applied = canvasRef.current?.applyFormatToShapeText(
+        selectedShapeId,
+        patch as Partial<Omit<TextSpan, "text">>
+      );
+      if (!applied) {
+        // 선택 범위 없으면 전체 기본 속성 업데이트
+        const shapePatch: Partial<ShapeBlock> = {};
+        if (patch.fontFamily !== undefined) shapePatch.textFontFamily = patch.fontFamily;
+        if (patch.fontSize !== undefined) shapePatch.textFontSize = patch.fontSize;
+        if (patch.fontWeight !== undefined) shapePatch.textFontWeight = patch.fontWeight;
+        if (patch.fontStyle !== undefined) shapePatch.textFontStyle = patch.fontStyle;
+        if (patch.textDecoration !== undefined) shapePatch.textDecoration = patch.textDecoration;
+        if (patch.color !== undefined) shapePatch.textColor = patch.color;
+        if (patch.textAlign !== undefined) shapePatch.textAlign = patch.textAlign;
+        handleUpdateShape(shapePatch);
+      }
     } else {
       handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...(patch as Partial<LayerConfig["subtitle"]>) } });
     }
-  }, [selectedBlock, layerConfig, handleLayerChange]);
+  }, [selectedBlock, selectedShapeId, handleUpdateShape, layerConfig, handleLayerChange]);
 
   const fmt: Required<FmtPatch> = selectedBlock ? {
     fontFamily: selectionFormat?.fontFamily ?? selectedBlock.fontFamily,
@@ -1433,6 +1527,14 @@ export default function ControllerPage() {
     textDecoration: selectionFormat?.textDecoration ?? (selectedBlock.textDecoration ?? "none"),
     color: selectionFormat?.color ?? selectedBlock.color,
     textAlign: selectedBlock.textAlign ?? "center",
+  } : selectedShape ? {
+    fontFamily: selectionFormat?.fontFamily ?? selectedShape.textFontFamily ?? "sans-serif",
+    fontSize: selectionFormat?.fontSize ?? selectedShape.textFontSize ?? 60,
+    fontWeight: selectionFormat?.fontWeight ?? (selectedShape.textFontWeight as "normal" | "bold") ?? "normal",
+    fontStyle: selectionFormat?.fontStyle ?? (selectedShape.textFontStyle as "normal" | "italic") ?? "normal",
+    textDecoration: selectionFormat?.textDecoration ?? selectedShape.textDecoration ?? "none",
+    color: selectionFormat?.color ?? selectedShape.textColor ?? "#ffffff",
+    textAlign: selectedShape.textAlign ?? "center",
   } : {
     fontFamily: layerConfig.subtitle.fontFamily,
     fontSize: layerConfig.subtitle.fontSize,
@@ -1971,6 +2073,10 @@ export default function ControllerPage() {
         selectedShape={selectedShape}
         onAddShape={handleAddShape}
         onUpdateShape={handleUpdateShape}
+        defaultShapeFill={defaultShapeFill}
+        defaultShapeStroke={defaultShapeStroke}
+        onSetDefaultShapeFill={setDefaultShapeFill}
+        onSetDefaultShapeStroke={setDefaultShapeStroke}
       />
       </div>
 
@@ -2063,7 +2169,7 @@ export default function ControllerPage() {
                 </div>
               )}
               <div style={{ width: `${zoom}%`, minWidth: `${zoom}%`, flexShrink: 0 }} className="px-6">
-                <SlideCanvas ref={canvasRef} onCanvasChange={handleCanvasChange} onSelectionChange={setSelectedBlock} onSelectionFormatChange={setSelectionFormat} />
+                <SlideCanvas ref={canvasRef} onCanvasChange={handleCanvasChange} onSelectionChange={setSelectedBlock} onSelectionFormatChange={setSelectionFormat} selectedShapeId={selectedShapeId} onSelectShape={setSelectedShapeId} onUpdateShapeById={handleUpdateShapeById} />
               </div>
             </div>
           </div>
@@ -2296,6 +2402,8 @@ export default function ControllerPage() {
                     setRightTab("settings");
                     if (id.startsWith("canvas:")) {
                       canvasRef.current?.selectBlock(id.slice("canvas:".length));
+                    } else if (id.startsWith("shape:")) {
+                      setSelectedShapeId(id.slice("shape:".length));
                     } else if (id === "subtitle") {
                       const slide = useQueueStore.getState().getActiveLyricSlide();
                       if (slide) canvasRef.current?.selectBlock(`${slide.id}-lyric`);

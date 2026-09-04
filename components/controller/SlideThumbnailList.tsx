@@ -8,7 +8,7 @@ import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useVideoStore } from "@/stores/videoStore";
 import { songDb, serviceDb } from "@/lib/db";
-import type { LyricSlide, FlatSlide, Service, LayerConfig } from "@/lib/types";
+import type { LyricSlide, FlatSlide, Service, LayerConfig, ShapeBlock } from "@/lib/types";
 import { newSlideId } from "@/lib/utils";
 import { toDisplayUrl } from "@/lib/media";
 
@@ -44,6 +44,82 @@ const SECTION_DOT: Record<string, string> = {
 
 // 슬라이드 클립보드 (모듈 레벨)
 let slideClipboard: LyricSlide | null = null;
+
+function renderThumbnailShape(s: ShapeBlock) {
+  const fill = s.fillEnabled ? s.fillColor : "none";
+  const fillOpacity = s.fillEnabled ? s.fillOpacity / 100 : 0;
+  const stroke = s.strokeEnabled ? s.strokeColor : "none";
+  const strokeOpacity = s.strokeEnabled ? s.strokeOpacity / 100 : 0;
+  const strokeWidth = s.strokeEnabled ? s.strokeWidth : 0;
+  const cx = s.x + s.width / 2, cy = s.y + s.height / 2;
+  const x = s.x, y = s.y, w = s.width, h = s.height;
+  const cp = { fill, fillOpacity, stroke, strokeOpacity, strokeWidth };
+  let shapeEl: React.ReactNode = null;
+  switch (s.shapeType) {
+    case "rect": shapeEl = <rect x={x} y={y} width={w} height={h} {...cp} />; break;
+    case "rounded-rect": shapeEl = <rect x={x} y={y} width={w} height={h} rx={Math.min(w,h)*0.12} ry={Math.min(w,h)*0.12} {...cp} />; break;
+    case "ellipse": shapeEl = <ellipse cx={cx} cy={cy} rx={w/2} ry={h/2} {...cp} />; break;
+    case "triangle": shapeEl = <polygon points={`${cx},${y} ${x+w},${y+h} ${x},${y+h}`} {...cp} />; break;
+    case "diamond": shapeEl = <polygon points={`${cx},${y} ${x+w},${cy} ${cx},${y+h} ${x},${cy}`} {...cp} />; break;
+    case "line": shapeEl = <line x1={x} y1={cy} x2={x+w} y2={cy} stroke={s.strokeEnabled ? s.strokeColor : "#fff"} strokeOpacity={strokeOpacity} strokeWidth={s.strokeEnabled ? s.strokeWidth : 4} />; break;
+    case "arrow-right": {
+      const ah = h*0.4, aw = w*0.35;
+      const pts = [`${x},${cy-ah/2}`,`${x+w-aw},${cy-ah/2}`,`${x+w-aw},${y}`,`${x+w},${cy}`,`${x+w-aw},${y+h}`,`${x+w-aw},${cy+ah/2}`,`${x},${cy+ah/2}`].join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+    case "star": {
+      const r1 = Math.min(w,h)/2, r2 = r1*0.4;
+      const pts = Array.from({length:10}).map((_,i) => { const a=(Math.PI/5)*i-Math.PI/2; const r=i%2===0?r1:r2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+    case "pentagon": {
+      const r = Math.min(w,h)/2;
+      const pts = Array.from({length:5}).map((_,i) => { const a=(Math.PI*2/5)*i-Math.PI/2; return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`; }).join(" ");
+      shapeEl = <polygon points={pts} {...cp} />; break;
+    }
+  }
+  const textEl = s.text ? (() => {
+    const fs = s.textFontSize ?? 60;
+    const hasSpans = s.textSpans && s.textSpans.length > 0;
+    if (hasSpans) {
+      return (
+        <foreignObject x={x} y={y} width={w} height={h}>
+          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center",
+            justifyContent: s.textAlign === "left" ? "flex-start" : s.textAlign === "right" ? "flex-end" : "center",
+            fontSize: fs, fontFamily: s.textFontFamily ?? "sans-serif",
+            fontWeight: s.textFontWeight ?? "normal", fontStyle: s.textFontStyle ?? "normal",
+            textDecoration: s.textDecoration ?? "none", color: s.textColor ?? "#ffffff",
+            textAlign: s.textAlign ?? "center", padding: 8, boxSizing: "border-box" as const,
+            whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "hidden" }}>
+            {s.textSpans!.map((span, i) => (
+              <span key={i} style={{ fontFamily: span.fontFamily,
+                fontWeight: span.fontWeight ?? (s.textFontWeight ?? "normal"),
+                fontStyle: span.fontStyle ?? (s.textFontStyle ?? "normal"),
+                textDecoration: span.textDecoration ?? (s.textDecoration ?? "none"),
+                color: span.color ?? s.textColor ?? "#ffffff",
+                fontSize: span.fontSize !== undefined ? span.fontSize : undefined }}>
+                {span.text}
+              </span>
+            ))}
+          </div>
+        </foreignObject>
+      );
+    }
+    const lines = s.text.split("\n");
+    const lh = fs * 1.3;
+    const startY = cy - (lh * lines.length) / 2 + lh / 2;
+    const anchor = s.textAlign === "left" ? "start" : s.textAlign === "right" ? "end" : "middle";
+    const textX = s.textAlign === "left" ? x + 8 : s.textAlign === "right" ? x + w - 8 : cx;
+    return (
+      <text textAnchor={anchor} fill={s.textColor ?? "#ffffff"} fontSize={fs}
+        fontFamily={s.textFontFamily ?? "sans-serif"} fontWeight={s.textFontWeight ?? "normal"}
+        fontStyle={s.textFontStyle ?? "normal"} textDecoration={s.textDecoration ?? "none"} dominantBaseline="middle">
+        {lines.map((line, i) => <tspan key={i} x={textX} y={startY + lh * i}>{line}</tspan>)}
+      </text>
+    );
+  })() : null;
+  return shapeEl ? <g key={s.id} opacity={s.opacity !== undefined ? s.opacity / 100 : 1}>{shapeEl}{textEl}</g> : null;
+}
 
 function slideKey(entry: FlatSlide): string {
   return `${entry.serviceItemIndex}-${entry.songId}-${entry.slideIndex}`;
@@ -178,6 +254,7 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
             const isActive = flatIdx === activeIdx;
             const isHidden = hiddenSlideKeys.has(id);
             const canvasBlocks = entry.slide.canvas?.textBlocks ?? [];
+            const shapeBlocks = (entry.slide.canvas?.shapeBlocks ?? []).filter((s) => s.visible !== false);
             const previewLines = canvasBlocks.length > 0
               ? canvasBlocks.map((b) => b.text)
               : entry.slide.lines;
@@ -287,6 +364,16 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
                               <div style={{ fontSize: 6, color: "#444" }}>빈 슬라이드</div>
                             )}
                           </div>
+                        )}
+                        {/* Shape blocks SVG (viewBox auto-scales to thumbnail) */}
+                        {shapeBlocks.length > 0 && (
+                          <svg
+                            viewBox="0 0 1920 1080"
+                            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+                            preserveAspectRatio="none"
+                          >
+                            {shapeBlocks.map(renderThumbnailShape)}
+                          </svg>
                         )}
                         {entry.songId >= 0 && (
                           <span style={{

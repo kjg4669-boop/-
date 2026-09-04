@@ -102,6 +102,10 @@ interface Props {
   selectedShape: ShapeBlock | null;
   onAddShape: (type: ShapeType) => void;
   onUpdateShape: (patch: Partial<ShapeBlock>) => void;
+  defaultShapeFill: string;
+  defaultShapeStroke: string;
+  onSetDefaultShapeFill: (color: string) => void;
+  onSetDefaultShapeStroke: (color: string) => void;
 }
 
 const TAB_LABELS: Record<RibbonTab, string> = {
@@ -127,6 +131,7 @@ export default function RibbonToolbar({
   looks, currentLookId, onApplyLook,
   removedPanels, panelLabels, onRestorePanel,
   selectedShape, onAddShape, onUpdateShape,
+  defaultShapeFill, defaultShapeStroke, onSetDefaultShapeFill, onSetDefaultShapeStroke,
 }: Props) {
   function setSubtitle(patch: Partial<LayerConfig["subtitle"]>) {
     onLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...patch } });
@@ -157,7 +162,7 @@ export default function RibbonToolbar({
       </div>
 
       {/* Row 3: 탭 콘텐츠 */}
-      <div className="h-9 flex items-center gap-0.5 px-2 border-b border-zinc-700 bg-[#2d2d2d] flex-shrink-0 text-xs overflow-x-auto">
+      <div className="min-h-9 flex items-center gap-0.5 px-2 border-b border-zinc-700 bg-[#2d2d2d] flex-shrink-0 text-xs overflow-x-auto">
 
         {ribbonTab === "home" && (<>
           {/* 파일 작업 */}
@@ -274,13 +279,16 @@ export default function RibbonToolbar({
 
           <div className="w-px h-5 bg-zinc-600 mx-0.5" />
 
-          <input type="color" value={fmt.color} onChange={(e) => onFormat({ color: e.target.value })}
+          <input type="color" value={fmt.color}
+            onChange={(e) => onFormat({ color: e.target.value })}
             className="w-6 h-6 rounded cursor-pointer border border-zinc-600 bg-transparent p-0" title="글자 색상" />
 
           <div className="w-px h-5 bg-zinc-600 mx-0.5" />
 
           {(["left", "center", "right"] as const).map((align) => (
-            <button key={align} onClick={() => onFormat({ textAlign: align })}
+            <button key={align}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onFormat({ textAlign: align })}
               className={`w-6 h-6 rounded ${fmt.textAlign === align ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}
               title={align === "left" ? "왼쪽" : align === "center" ? "가운데" : "오른쪽"}>
               {align === "left" ? "⫷" : align === "center" ? "☰" : "⫸"}
@@ -513,6 +521,31 @@ export default function RibbonToolbar({
           </div>
           {/* 도형 */}
           <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col gap-0.5">
+            {/* 기본 색상 설정 */}
+            <div className="flex items-center gap-1.5 px-0.5">
+              <label className="relative cursor-pointer flex-shrink-0" title="채우기 색상">
+                <div style={{
+                  width: 16, height: 16, borderRadius: 2,
+                  background: defaultShapeFill,
+                  border: "1.5px solid rgba(255,255,255,0.3)",
+                }} />
+                <input type="color" value={defaultShapeFill}
+                  onChange={e => onSetDefaultShapeFill(e.target.value)}
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+              </label>
+              <span className="text-[10px] text-zinc-400 select-none">채우기</span>
+              <label className="relative cursor-pointer flex-shrink-0" title="윤곽선 색상">
+                <div style={{
+                  width: 16, height: 16, borderRadius: 2,
+                  background: "transparent",
+                  border: `2px solid ${defaultShapeStroke}`,
+                }} />
+                <input type="color" value={defaultShapeStroke}
+                  onChange={e => onSetDefaultShapeStroke(e.target.value)}
+                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+              </label>
+              <span className="text-[10px] text-zinc-400 select-none">윤곽선</span>
+            </div>
             <div className="flex flex-wrap gap-0.5" style={{ maxWidth: 180 }}>
               {(
                 [
@@ -569,64 +602,84 @@ export default function RibbonToolbar({
 
           {/* 도형 속성 (선택된 도형이 있을 때) */}
           {selectedShape && (
-            <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col justify-center gap-0.5">
+            <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col justify-center gap-1">
               {/* 채우기 */}
-              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+              <div className="flex items-center gap-1.5 px-1">
                 <label className="relative cursor-pointer flex-shrink-0" title="채우기 색상">
                   <div style={{
-                    width: 18, height: 18, borderRadius: 3,
+                    width: 16, height: 16, borderRadius: 2,
                     background: selectedShape.fillEnabled ? selectedShape.fillColor : "transparent",
                     border: "1.5px solid rgba(255,255,255,0.25)",
-                    opacity: selectedShape.fillEnabled ? 1 : 0.35,
+                    opacity: selectedShape.fillEnabled ? 1 : 0.4,
                   }} />
                   <input type="color" value={selectedShape.fillColor}
                     onChange={e => onUpdateShape({ fillColor: e.target.value })}
                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
                 </label>
                 <span onClick={() => onUpdateShape({ fillEnabled: !selectedShape.fillEnabled })}
-                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.fillEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
-                  도형 채우기
+                  className={`text-xs w-11 cursor-pointer select-none ${selectedShape.fillEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  채우기
                 </span>
-                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+                <input type="range" min={0} max={100} value={selectedShape.fillOpacity}
+                  disabled={!selectedShape.fillEnabled}
+                  onChange={e => onUpdateShape({ fillOpacity: Number(e.target.value) })}
+                  className="w-16 accent-blue-400 disabled:opacity-30 cursor-pointer" />
+                <span className="text-[10px] text-zinc-500 w-6 text-right tabular-nums">{selectedShape.fillOpacity}%</span>
               </div>
               {/* 윤곽선 */}
-              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+              <div className="flex items-center gap-1.5 px-1">
                 <label className="relative cursor-pointer flex-shrink-0" title="윤곽선 색상">
                   <div style={{
-                    width: 18, height: 18, borderRadius: 3,
+                    width: 16, height: 16, borderRadius: 2,
                     background: "transparent",
                     border: `2px solid ${selectedShape.strokeEnabled ? selectedShape.strokeColor : "rgba(255,255,255,0.2)"}`,
-                    opacity: selectedShape.strokeEnabled ? 1 : 0.35,
+                    opacity: selectedShape.strokeEnabled ? 1 : 0.4,
                   }} />
                   <input type="color" value={selectedShape.strokeColor}
                     onChange={e => onUpdateShape({ strokeColor: e.target.value })}
                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
                 </label>
                 <span onClick={() => onUpdateShape({ strokeEnabled: !selectedShape.strokeEnabled })}
-                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.strokeEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
-                  도형 윤곽선
+                  className={`text-xs w-11 cursor-pointer select-none ${selectedShape.strokeEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  윤곽선
                 </span>
-                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+                <input type="range" min={1} max={30} value={selectedShape.strokeWidth}
+                  disabled={!selectedShape.strokeEnabled}
+                  onChange={e => onUpdateShape({ strokeWidth: Number(e.target.value) })}
+                  className="w-16 accent-blue-400 disabled:opacity-30 cursor-pointer" />
+                <span className="text-[10px] text-zinc-500 w-6 text-right tabular-nums">{selectedShape.strokeWidth}px</span>
               </div>
-              {/* 효과 */}
-              <div className="flex items-center gap-1.5 px-1.5 py-1 rounded hover:bg-zinc-700 cursor-default" style={{ minWidth: 140 }}>
+              {/* 그림자 */}
+              <div className="flex items-center gap-1.5 px-1">
                 <label className="relative cursor-pointer flex-shrink-0" title="그림자 색상">
                   <div style={{
-                    width: 18, height: 18, borderRadius: 3,
-                    background: "rgba(60,60,80,1)",
-                    boxShadow: selectedShape.shadowEnabled ? `2px 2px 5px ${selectedShape.shadowColor}` : "none",
+                    width: 16, height: 16, borderRadius: 2,
+                    background: "rgba(40,40,60,1)",
+                    boxShadow: selectedShape.shadowEnabled ? `2px 2px 4px ${selectedShape.shadowColor}` : "none",
                     border: "1.5px solid rgba(255,255,255,0.15)",
-                    opacity: selectedShape.shadowEnabled ? 1 : 0.35,
+                    opacity: selectedShape.shadowEnabled ? 1 : 0.4,
                   }} />
                   <input type="color" value={selectedShape.shadowColor}
                     onChange={e => onUpdateShape({ shadowColor: e.target.value })}
                     className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
                 </label>
                 <span onClick={() => onUpdateShape({ shadowEnabled: !selectedShape.shadowEnabled })}
-                  className={`text-xs flex-1 cursor-pointer select-none ${selectedShape.shadowEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
-                  도형 효과
+                  className={`text-xs w-11 cursor-pointer select-none ${selectedShape.shadowEnabled ? "text-zinc-200" : "text-zinc-500"}`}>
+                  그림자
                 </span>
-                <ChevronDown size={10} className="text-zinc-500 flex-shrink-0" />
+                <input type="range" min={0} max={60} value={selectedShape.shadowBlur}
+                  disabled={!selectedShape.shadowEnabled}
+                  onChange={e => onUpdateShape({ shadowBlur: Number(e.target.value) })}
+                  className="w-16 accent-blue-400 disabled:opacity-30 cursor-pointer" />
+                <span className="text-[10px] text-zinc-500 w-6 text-right tabular-nums">{selectedShape.shadowBlur}px</span>
+              </div>
+              {/* 불투명도 */}
+              <div className="flex items-center gap-1.5 px-1">
+                <span className="text-xs w-11 select-none text-zinc-200">불투명도</span>
+                <input type="range" min={0} max={100} value={selectedShape.opacity ?? 100}
+                  onChange={e => onUpdateShape({ opacity: Number(e.target.value) })}
+                  className="w-16 accent-blue-400 cursor-pointer" />
+                <span className="text-[10px] text-zinc-500 w-6 text-right tabular-nums">{selectedShape.opacity ?? 100}%</span>
               </div>
             </div>
           )}
