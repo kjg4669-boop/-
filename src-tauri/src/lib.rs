@@ -3,6 +3,27 @@ mod display;
 mod remote;
 mod ndi_output;
 
+#[tauri::command]
+fn open_system_camera_settings() -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Calls AVCaptureDevice.requestAccessForMediaType: via compiled ObjC shim.
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn request_camera_access();
+}
+
+#[tauri::command]
+fn request_camera_permission_native() {
+    #[cfg(target_os = "macos")]
+    unsafe { request_camera_access(); }
+}
+
 fn validate_db_path(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
     if p.components().any(|c| c == std::path::Component::ParentDir) {
@@ -190,6 +211,8 @@ pub fn run() {
             commands::close_preview_window,
             commands::set_preview_config,
             commands::get_preview_config,
+            open_system_camera_settings,
+            request_camera_permission_native,
         ])
         .setup(|app| {
             app.manage(commands::PreviewConfigState::new());
@@ -212,6 +235,20 @@ pub fn run() {
             let file_menu = Submenu::with_items(app, "파일", true, &[
                 &f_new, &f_open, &f_sep1, &f_save, &f_saveas,
                 &f_sep2, &f_out_on, &f_out_off, &f_stage, &f_sep3, &f_quit,
+            ])?;
+
+            // ── 편집 메뉴 (macOS Cmd+C/V/X/A, Windows Ctrl+C/V/X/A 활성화) ──
+            let e_undo    = PredefinedMenuItem::undo(app, None)?;
+            let e_redo    = PredefinedMenuItem::redo(app, None)?;
+            let e_sep1    = PredefinedMenuItem::separator(app)?;
+            let e_cut     = PredefinedMenuItem::cut(app, None)?;
+            let e_copy    = PredefinedMenuItem::copy(app, None)?;
+            let e_paste   = PredefinedMenuItem::paste(app, None)?;
+            let e_sep2    = PredefinedMenuItem::separator(app)?;
+            let e_selall  = PredefinedMenuItem::select_all(app, None)?;
+
+            let edit_menu = Submenu::with_items(app, "편집", true, &[
+                &e_undo, &e_redo, &e_sep1, &e_cut, &e_copy, &e_paste, &e_sep2, &e_selall,
             ])?;
 
             // ── 삽입 메뉴 ──────────────────────────────────────────────────
@@ -271,7 +308,7 @@ pub fn run() {
             ])?;
 
             // ── 메뉴 등록 ──────────────────────────────────────────────────
-            let menu = Menu::with_items(app, &[&file_menu, &insert_menu, &slideshow_menu, &view_menu, &data_menu, &settings_menu, &help_menu])?;
+            let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &insert_menu, &slideshow_menu, &view_menu, &data_menu, &settings_menu, &help_menu])?;
             app.set_menu(menu)?;
 
             // ── 메뉴 이벤트 핸들러 ─────────────────────────────────────────

@@ -62,8 +62,11 @@ export function useKeyboardShortcuts(options: KeyboardShortcutsOptions): void {
         o.handleUndoRef.current();
         return;
       }
-      // ⌘+Shift+Z: 다시 실행 (텍스트 입력 필드 밖에서만)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "z") {
+      // ⌘+Shift+Z / Ctrl+Shift+Z / Ctrl+Y: 다시 실행 (텍스트 입력 필드 밖에서만)
+      if (
+        ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "z") ||
+        (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === "y")
+      ) {
         e.preventDefault();
         o.handleRedoRef.current();
         return;

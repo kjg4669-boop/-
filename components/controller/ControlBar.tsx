@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Tv, Monitor, Mic, ChevronDown } from "lucide-react";
+import { Tv, Monitor, Mic, ChevronDown, Camera } from "lucide-react";
 import type { DisplayInfo } from "@/lib/types";
-import type { OutputScaleMode } from "@/stores/settingsStore";
+import type { OutputScaleMode, VideoFit } from "@/stores/settingsStore";
+import { ipc } from "@/lib/ipc";
 
 interface Props {
   serviceName: string | null;
@@ -45,8 +46,19 @@ interface Props {
   selectedDisplayIdx: number;
   onSelectDisplay: (idx: number) => void;
   onOpenPreviewOnly: () => void;
+  cameraDevices: MediaDeviceInfo[];
+  cameraError: string | null;
+  onSelectCamera: (deviceId: string) => void;
+  onToggleCameraOutput: (deviceId: string | null) => void;
+  onRefreshOutputMenu: () => void;
+  onRequestCameraPermission: () => void;
   outputScaleMode: OutputScaleMode;
   onSetScaleMode: (mode: OutputScaleMode) => void;
+  isCameraBackground: boolean;
+  videoFit: VideoFit;
+  onSetVideoFit: (fit: VideoFit) => void;
+  cameraMirror: boolean;
+  onSetCameraMirror: (v: boolean) => void;
   outputConnected: boolean;
   onOpenOutput: () => void;
   isStageOpen: boolean;
@@ -79,7 +91,9 @@ export default function ControlBar({
   isVideoBackground, videoSrc, videoPlaying, onToggleVideoPlay,
   alertInput, onSetAlertInput, alertActive, onSendAlert, onClearAlert,
   displays, selectedDisplayIdx, onSelectDisplay, onOpenPreviewOnly,
+  cameraDevices, cameraError, onSelectCamera, onToggleCameraOutput, onRefreshOutputMenu, onRequestCameraPermission,
   outputScaleMode, onSetScaleMode,
+  isCameraBackground, videoFit, onSetVideoFit, cameraMirror, onSetCameraMirror,
   outputConnected, onOpenOutput,
   isStageOpen, onToggleStage,
   stageMsgText, onSetStageMsgText, stageMsgActive, onSendStageMsg, onClearStageMsg,
@@ -90,6 +104,44 @@ export default function ControlBar({
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const outputBtnRef = useRef<HTMLButtonElement>(null);
   const outputMenuRef = useRef<HTMLDivElement>(null);
+
+  const [previewCameraId, setPreviewCameraId] = useState<string | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Local getUserMedia preview — only when dropdown is open + camera selected + NOT broadcasting
+  useEffect(() => {
+    if (!showOutputMenu || !previewCameraId || isCameraBackground) {
+      if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+      return;
+    }
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+    navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: previewCameraId } } })
+      .catch(() => navigator.mediaDevices.getUserMedia({ video: true }))
+      .then((s) => {
+        if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+        stream = s;
+        const vid = previewVideoRef.current;
+        if (vid) { vid.srcObject = s; void vid.play(); }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      stream?.getTracks().forEach((t) => t.stop());
+      if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+    };
+  }, [showOutputMenu, previewCameraId, isCameraBackground]);
+
+  // IPC frame preview — only when dropdown is open + broadcasting
+  const [previewFrame, setPreviewFrame] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showOutputMenu || !isCameraBackground) { setPreviewFrame(null); return; }
+    let unlisten: (() => void) | null = null;
+    ipc.onCameraFrame((dataUrl) => setPreviewFrame(dataUrl))
+      .then((fn) => { unlisten = fn; })
+      .catch(() => {});
+    return () => { unlisten?.(); setPreviewFrame(null); };
+  }, [showOutputMenu, isCameraBackground]);
   useEffect(() => {
     if (!showOutputMenu) return;
     const handler = (e: MouseEvent) => {
@@ -137,6 +189,18 @@ export default function ControlBar({
         </span>
       )}
       <div className="flex-1" />
+
+      <button
+        onClick={() => {
+          const targetId = isCameraBackground ? null : (previewCameraId || cameraDevices[0]?.deviceId || null);
+          onToggleCameraOutput(targetId);
+        }}
+        title={isCameraBackground ? "카메라 송출 중 — 클릭하여 해제" : "카메라 송출 — 설정된 카메라를 출력에 표시"}
+        className={`flex items-center gap-1 px-2 py-1 rounded font-semibold ${isCameraBackground ? "bg-teal-700 hover:bg-teal-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-300"}`}
+      >
+        <Camera size={13} />
+        {isCameraBackground ? "카메라 송출 중" : "카메라 송출"}
+      </button>
 
       <button onClick={onToggleLive} title="송출 (F5) — 켜면 슬라이드 선택이 즉시 출력 화면에 반영됩니다. 끄면 화면이 고정됩니다."
         className={`flex items-center gap-1 px-2 py-1 rounded font-semibold ${isLive ? "bg-red-700 hover:bg-red-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}>
@@ -195,6 +259,7 @@ export default function ControlBar({
           onClick={() => {
             const rect = outputBtnRef.current?.getBoundingClientRect();
             if (rect) setMenuPos({ top: rect.bottom + 4, left: rect.left });
+            if (!showOutputMenu) onRefreshOutputMenu();
             setShowOutputMenu((v) => !v);
           }}
           className={`px-2 py-1 rounded text-white font-medium flex items-center gap-1 ${isLive && !outputConnected ? "bg-orange-600 hover:bg-orange-500 animate-pulse" : "bg-blue-700 hover:bg-blue-600"}`}
@@ -205,8 +270,9 @@ export default function ControlBar({
         </button>
         {showOutputMenu && (
           <div ref={outputMenuRef} style={{ position: "fixed", top: menuPos.top, left: menuPos.left, zIndex: 9999 }} className="bg-zinc-800 border border-zinc-600 rounded shadow-xl min-w-[200px]">
+            <div className="px-3 pt-2 pb-1 text-zinc-500 text-xs">모니터</div>
             {displays.length === 0 && (
-              <div className="px-3 py-2 text-xs text-zinc-400">모니터 정보 로딩 중...</div>
+              <div className="px-3 py-2 text-xs text-zinc-600">모니터 정보 없음</div>
             )}
             {displays.map((d, i) => (
               <button key={i}
@@ -218,6 +284,110 @@ export default function ControlBar({
                 <span className="text-zinc-500 ml-auto">{d.width}×{d.height}</span>
               </button>
             ))}
+            <div className="border-t border-zinc-600 px-3 py-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-zinc-500 text-xs">카메라 입출력</div>
+                <button onClick={onRefreshOutputMenu} className="text-zinc-600 hover:text-zinc-300 text-xs px-1">↺</button>
+              </div>
+              {cameraError && (
+                <div className="mb-1.5">
+                  <div className="text-red-400 text-xs mb-1">{cameraError}</div>
+                  <button onClick={onRequestCameraPermission} className="w-full py-1 rounded text-xs bg-amber-700 hover:bg-amber-600 text-white font-medium">
+                    카메라 권한 허용
+                  </button>
+                </div>
+              )}
+              {cameraDevices.length === 0 && !cameraError ? (
+                <div className="flex flex-col gap-1 py-0.5">
+                  <div className="text-zinc-600 text-xs">카메라 없음 — 권한 허용 후 검색</div>
+                  <button onClick={onRequestCameraPermission} className="w-full py-1 rounded text-xs bg-amber-700 hover:bg-amber-600 text-white font-medium">
+                    카메라 권한 허용
+                  </button>
+                </div>
+              ) : cameraDevices.length > 0 ? (
+                <div className="flex flex-col gap-0.5 mb-2">
+                  {/* 없음 */}
+                  <button
+                    onClick={() => { setPreviewCameraId(null); if (isCameraBackground) onToggleCameraOutput(null); }}
+                    className={`w-full text-left px-2 py-1.5 rounded text-xs hover:bg-zinc-700 flex items-center gap-1.5 ${
+                      !previewCameraId && !isCameraBackground ? "bg-zinc-600 text-white font-medium" : "text-zinc-400"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${!previewCameraId && !isCameraBackground ? "bg-white" : "bg-zinc-600"}`} />
+                    없음
+                  </button>
+                  {cameraDevices.slice(0, 3).map((d, i) => (
+                    <button key={d.deviceId}
+                      onClick={() => setPreviewCameraId(d.deviceId)}
+                      className={`w-full text-left px-2 py-1.5 rounded text-xs hover:bg-zinc-700 truncate flex items-center gap-1.5 ${
+                        previewCameraId === d.deviceId ? "bg-zinc-600 text-white font-medium" :
+                        isCameraBackground && videoSrc === d.deviceId ? "bg-zinc-700 text-blue-400 font-medium" : "text-zinc-300"
+                      }`}
+                      title={d.label}
+                    >
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        previewCameraId === d.deviceId ? "bg-white" :
+                        isCameraBackground && videoSrc === d.deviceId ? "bg-blue-400" : "bg-zinc-600"
+                      }`} />
+                      {d.label || `카메라 ${i + 1}`}
+                    </button>
+                  ))}
+                  {/* 미리보기: 카메라 선택 시 표시 */}
+                  {previewCameraId && (
+                    <div className="mt-1.5">
+                      {isCameraBackground ? (
+                        // 송출 중: IPC 프레임
+                        previewFrame ? (
+                          <img src={previewFrame} alt="" style={{ width: "100%", aspectRatio: "16/9", borderRadius: 6, objectFit: "cover", display: "block" }} />
+                        ) : (
+                          <div style={{ width: "100%", aspectRatio: "16/9", borderRadius: 6, backgroundColor: "#111", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <span className="text-zinc-500 text-xs">연결 중...</span>
+                          </div>
+                        )
+                      ) : (
+                        // 미송출: getUserMedia 로컬 미리보기
+                        <>
+                          <video
+                            ref={previewVideoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            style={{ width: "100%", aspectRatio: "16/9", borderRadius: 6, backgroundColor: "#000", objectFit: "cover", display: "block" }}
+                          />
+                          <button
+                            onClick={() => { onToggleCameraOutput(previewCameraId); }}
+                            className="w-full mt-1 py-1 rounded text-xs font-medium bg-teal-700 hover:bg-teal-600 text-white"
+                          >
+                            카메라 송출 적용
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {isCameraBackground && (
+                <>
+                  <div className="text-zinc-600 text-[10px] mb-1">화면 맞춤</div>
+                  <div className="flex gap-1 mb-2">
+                    {(["cover", "contain"] as const).map((f) => (
+                      <button key={f}
+                        onClick={() => onSetVideoFit(f)}
+                        className={`flex-1 py-1 rounded text-xs font-medium ${videoFit === f ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+                      >
+                        {f === "cover" ? "채우기" : "맞춤"}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => onSetCameraMirror(!cameraMirror)}
+                    className={`w-full py-1 rounded text-xs font-medium ${cameraMirror ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}
+                  >
+                    좌우 반전 {cameraMirror ? "켜짐" : "꺼짐"}
+                  </button>
+                </>
+              )}
+            </div>
             <div className="border-t border-zinc-600 px-3 py-2">
               <div className="text-zinc-500 text-xs mb-1.5">출력 스케일</div>
               <div className="flex gap-1">

@@ -191,12 +191,12 @@ export default function RibbonToolbar({
 
           {/* 실행 취소 / 다시 실행 */}
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
-            <button onClick={onUndo} disabled={!canUndo} title="실행 취소 (⌘Z)"
+            <button onClick={onUndo} disabled={!canUndo} title="실행 취소 (⌘Z / Ctrl+Z)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
               <Undo2 size={15} />
               <span className="text-[10px] mt-0.5 whitespace-nowrap">취소</span>
             </button>
-            <button onClick={onRedo} disabled={!canRedo} title="다시 실행 (⌘⇧Z)"
+            <button onClick={onRedo} disabled={!canRedo} title="다시 실행 (⌘⇧Z / Ctrl+Y)"
               className="flex flex-col items-center px-1.5 py-0.5 rounded hover:bg-zinc-700 text-zinc-300 disabled:opacity-30 disabled:cursor-not-allowed">
               <Redo2 size={15} />
               <span className="text-[10px] mt-0.5 whitespace-nowrap">복원</span>

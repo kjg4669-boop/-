@@ -6597,6 +6597,7 @@ name = "worship-projector"
 version = "1.0.0"
 dependencies = [
  "axum",
+ "cc",
  "local-ip-address",
  "ndi-sdk",
  "rand",

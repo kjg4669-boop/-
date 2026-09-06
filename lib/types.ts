@@ -1,5 +1,5 @@
 // Media types
-export type MediaType = "video" | "image" | "color";
+export type MediaType = "video" | "image" | "color" | "camera";
 
 export interface MediaItem {
   id: number;

@@ -9,7 +9,7 @@ import LayerSidebar from "@/components/controller/LayerSidebar";
 import { useQueueStore } from "@/stores/queueStore";
 import { useOutputStore } from "@/stores/outputStore";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { serviceDb, songDb, templateDb } from "@/lib/db";
+import { serviceDb, songDb, templateDb, mediaDb } from "@/lib/db";
 import { backingTrackDb } from "@/lib/backingTrackDb";
 import { looksDb } from "@/lib/looksDb";
 import { importMediaFile } from "@/lib/media";
@@ -51,6 +51,7 @@ import { useMenuEvents } from "@/hooks/useMenuEvents";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useGlobalErrorCapture } from "@/hooks/useGlobalErrorCapture";
 import { useAutoSave } from "@/hooks/useAutoSave";
+import { useCameraFrameStream } from "@/hooks/useCameraFrameStream";
 import ErrorToast from "@/components/ErrorToast";
 import ControlBar from "@/components/controller/ControlBar";
 import RibbonToolbar from "@/components/controller/RibbonToolbar";
@@ -63,7 +64,7 @@ import RemotePanel from "@/components/controller/RemotePanel";
 import NdiPanel from "@/components/controller/NdiPanel";
 import VideoPanel from "@/components/controller/VideoPanel";
 import { useVideoStore } from "@/stores/videoStore";
-import type { RemoteCommand, ServiceItemSettings } from "@/lib/types";
+import type { RemoteCommand, ServiceItemSettings, MediaItem } from "@/lib/types";
 
 type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
@@ -160,6 +161,9 @@ export default function ControllerPage() {
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSaveItemRef = useRef<(itemId: number, config: LayerConfig, capturedSlideId?: string | null) => Promise<void>>(async () => {});
+  // Camera output state: maintained independently of layerConfig so slide navigation never resets it
+  const cameraDeviceIdRef = useRef<string | null>(null);
+  const [isCameraOutputActive, setIsCameraOutputActive] = useState(false);
   // Slide transition nonce: increments on every slide navigation so animation always fires
   const slideNonceRef = useRef(0);
   // Track previous item to detect item switches vs. same-item slide navigation
@@ -170,6 +174,12 @@ export default function ControllerPage() {
   const [soundPlaying, setSoundPlaying] = useState(false);
   const isSavingRef = useRef(false);
   const pendingAddBlockRef = useRef(false);
+  // Undo/redo: tracks current in-progress flag (prevents re-entry and suppresses history pushes)
+  const isUndoRedoInProgressRef = useRef(false);
+  // Per-slide push-once flags: push history only before the FIRST canvas or layer edit per slide visit
+  const canvasHistoryPushedRef = useRef<string | null>(null); // key: "songId:slideId"
+  const layerHistoryPushedRef = useRef<string | null>(null);  // key: slideId | "__global__"
+  const shapeHistoryPushedRef = useRef<string | null>(null);  // key: shapeId (last shape mutated)
   const [showServiceList, setShowServiceList] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
@@ -190,6 +200,12 @@ export default function ControllerPage() {
     if (ctrlNoticeTimer.current) clearTimeout(ctrlNoticeTimer.current);
     ctrlNoticeTimer.current = setTimeout(() => setCtrlNotice(null), 2000);
   });
+
+  // Stream camera frames to output window via IPC (WKWebView getUserMedia workaround)
+  useCameraFrameStream(
+    isCameraOutputActive,
+    isCameraOutputActive ? (cameraDeviceIdRef.current ?? undefined) : undefined,
+  );
 
   // deep-link: .wpjson 파일 연결로 앱 열릴 때 자동 로드
   useEffect(() => {
@@ -300,7 +316,7 @@ export default function ControllerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentService?.id]);
 
-  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId, outputScaleMode, setOutputScaleMode, uiFontScale } = useSettingsStore();
+  const { outputDisplayId, setOutputDisplayId, currentLookId, setCurrentLookId, outputScaleMode, setOutputScaleMode, uiFontScale, videoFit, setVideoFit, fpsLimit, cameraMirror, setCameraMirror } = useSettingsStore();
 
   // Apply UI font scale to root element so all rem-based sizes scale proportionally
   useEffect(() => {
@@ -310,6 +326,8 @@ export default function ControllerPage() {
   const [looks, setLooks] = useState<Look[]>([]);
   const looksRef = useRef<Look[]>([]);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const selectedDisplayIdx = outputDisplayId >= 0 ? outputDisplayId : 0;
 
   // Load looks from DB
@@ -332,6 +350,43 @@ export default function ControllerPage() {
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleRefreshOutputMenu = useCallback(async () => {
+    try {
+      const list = await ipc.getDisplays() as DisplayInfo[];
+      if (list && list.length > 0) setDisplays(list);
+    } catch {}
+    setCameraError(null);
+    try {
+      if (!navigator.mediaDevices?.enumerateDevices) {
+        setCameraError("이 환경에서는 카메라를 사용할 수 없습니다.");
+        return;
+      }
+      // Request permission first so labels are populated
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (permErr: unknown) {
+        const name = permErr instanceof Error ? permErr.name : "";
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          setCameraError("카메라 권한이 거부되었습니다. 시스템 설정에서 허용해 주세요.");
+        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+          setCameraError("카메라를 찾을 수 없습니다.");
+        }
+      } finally {
+        stream?.getTracks().forEach((t) => t.stop());
+      }
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((d) => d.kind === "videoinput");
+      console.log("[camera] found:", cameras.map((c) => `${c.label || "(unnamed)"} (${c.deviceId.slice(0, 8)})`));
+      setCameraDevices(cameras);
+    } catch (err) {
+      console.error("[camera] enumerateDevices failed:", err);
+      setCameraError("카메라 목록을 불러오지 못했습니다.");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   useEffect(() => {
     const defaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
@@ -380,6 +435,7 @@ export default function ControllerPage() {
       void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
       void ipc.sendScaleMode(useSettingsStore.getState().outputScaleMode);
+      void ipc.sendVideoSettings(useSettingsStore.getState().videoFit, useSettingsStore.getState().fpsLimit, useSettingsStore.getState().cameraMirror);
       // Re-send current look if one is active
       const currentLookIdNow = useSettingsStore.getState().currentLookId;
       if (currentLookIdNow !== null) {
@@ -463,14 +519,25 @@ export default function ControllerPage() {
       return (deepMerge(deepMerge(DEFAULT_LAYER_CONFIG, globalDefaults), itemOverrides as Partial<LayerConfig>) as LayerConfig).background;
     })();
     // Each slide uses its own per-slide override if set, otherwise the item-level default.
-    const resolvedBg: LayerConfig["background"] = slideBg
+    const rawResolvedBg: LayerConfig["background"] = slideBg
       ? { ...itemLevelBg, ...slideBg } as LayerConfig["background"]
       : itemLevelBg;
-    const baseWithSlideBg: LayerConfig = { ...base, background: resolvedBg };
+    // Camera is ephemeral — never restore it from saved settings (user must activate manually each session).
+    const resolvedBg: LayerConfig["background"] = rawResolvedBg.type === "camera"
+      ? { type: "color", color: "#000000", loop: true, opacity: 1 }
+      : rawResolvedBg;
+    // Preserve camera background when broadcasting — slide navigation must not reset it.
+    // Use cameraDeviceIdRef (updated only on explicit user toggle) instead of layerConfig
+    // to avoid any timing or batching issues with the Zustand store.
+    const effectiveBg: LayerConfig["background"] = cameraDeviceIdRef.current
+      ? { type: "camera", src: cameraDeviceIdRef.current, opacity: 1 }
+      : resolvedBg;
+    const baseWithSlideBg: LayerConfig = { ...base, background: effectiveBg };
 
     // Auto-apply video phase if this slide has one assigned (only when the phase has an actual video background)
+    // Camera takes priority: do not override camera broadcast with video phase
     const videoPhase = slide ? useVideoStore.getState().getPhaseForSlide(slide.id) : null;
-    const effectiveBase: LayerConfig = (videoPhase && videoPhase.background.type === "video")
+    const effectiveBase: LayerConfig = (!cameraDeviceIdRef.current && videoPhase && videoPhase.background.type === "video")
       ? { ...baseWithSlideBg, background: videoPhase.background }
       : baseWithSlideBg;
 
@@ -531,6 +598,14 @@ export default function ControllerPage() {
     void ipc.sendRemoteState(slideText, songTitle, activeLyricSlideIndex, item.song?.lyrics_json.length ?? 1).catch(() => {});
   // notesVersion excluded intentionally: Stage Display notes refresh on slide navigation (avoids IPC per keystroke)
   }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, isFrozen, setLayerConfig]);
+
+  // Reset per-slide history push flags on every slide navigation so the first edit after
+  // navigating to a slide correctly pushes a pre-edit snapshot to the undo stack.
+  useEffect(() => {
+    canvasHistoryPushedRef.current = null;
+    layerHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
+  }, [activeItemIndex, activeLyricSlideIndex]);
 
   // ── Web Remote Control command listener ──────────────────────────────
   useEffect(() => {
@@ -897,6 +972,14 @@ export default function ControllerPage() {
 
   const handleCanvasChange = useCallback(
     (songId: number, slideId: string, canvas: { textBlocks: TextBlock[]; shapeBlocks?: ShapeBlock[] }) => {
+      // Push history before the first canvas edit for this slide (captures pre-edit state)
+      if (!isUndoRedoInProgressRef.current) {
+        const historyKey = `${songId}:${slideId}`;
+        if (canvasHistoryPushedRef.current !== historyKey) {
+          canvasHistoryPushedRef.current = historyKey;
+          useQueueStore.getState().pushHistory();
+        }
+      }
       updateSlideCanvas(songId, slideId, canvas);
       const lc = useOutputStore.getState().layerConfig;
       const slide = useQueueStore.getState().getActiveLyricSlide();
@@ -937,6 +1020,14 @@ export default function ControllerPage() {
     (config: LayerConfig) => {
       const { getActiveLyricSlide } = useQueueStore.getState();
       const slide = getActiveLyricSlide();
+      // Push history before the first layer config edit for this slide
+      if (!isUndoRedoInProgressRef.current) {
+        const historyKey = slide?.id ?? "__global__";
+        if (layerHistoryPushedRef.current !== historyKey) {
+          layerHistoryPushedRef.current = historyKey;
+          useQueueStore.getState().pushHistory();
+        }
+      }
       const canvasBlocks = slide?.canvas?.textBlocks ?? [];
       const shapeBlocks = slide?.canvas?.shapeBlocks ?? [];
       const withContent: LayerConfig = {
@@ -966,8 +1057,11 @@ export default function ControllerPage() {
         const activeItem = qs.currentService?.items[qs.activeItemIndex];
         if (activeItem) {
           const ex = activeItem.settings_json ?? {};
-          const updatedSlideBgs = { ...(ex.slideBackgrounds ?? {}), [capturedSlideId]: { ...config.background } };
-          qs.updateItemSettingsJson(activeItem.id, { ...ex, slideBackgrounds: updatedSlideBgs });
+          // Don't persist camera background — it must be manually activated each session.
+          if (config.background.type !== "camera") {
+            const updatedSlideBgs = { ...(ex.slideBackgrounds ?? {}), [capturedSlideId]: { ...config.background } };
+            qs.updateItemSettingsJson(activeItem.id, { ...ex, slideBackgrounds: updatedSlideBgs });
+          }
         }
       }
 
@@ -985,6 +1079,30 @@ export default function ControllerPage() {
     },
     [isLive, isClear, setLayerConfig]
   );
+
+  const handleSelectCamera = useCallback((deviceId: string) => {
+    const lc = useOutputStore.getState().layerConfig;
+    handleLayerChange({ ...lc, background: { ...lc.background, type: "camera", src: deviceId, opacity: 1 } });
+  }, [handleLayerChange]);
+
+  const handleToggleCameraOutput = useCallback((deviceId: string | null) => {
+    // Update the ref FIRST so slide nav effect always sees the latest camera state
+    cameraDeviceIdRef.current = deviceId;
+    setIsCameraOutputActive(deviceId !== null);
+    const lc = useOutputStore.getState().layerConfig;
+    if (deviceId === null) {
+      handleLayerChange({ ...lc, background: { ...lc.background, type: "color", color: "#000000", opacity: 1 } });
+    } else {
+      handleLayerChange({ ...lc, background: { ...lc.background, type: "camera", src: deviceId, opacity: 1 } });
+    }
+  }, [handleLayerChange]);
+
+  const handleRequestCameraPermission = useCallback(async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("request_camera_permission_native");
+    } catch { /* not Tauri */ }
+  }, []);
 
   const handleRemoveTab = useCallback((tab: RightTab) => {
     setTabOrder((prev) => {
@@ -1058,6 +1176,10 @@ export default function ControllerPage() {
     const item = state.getActiveItem();
     const slide = state.getActiveLyricSlide();
     if (!item?.song?.id || !slide) return;
+    // Push history before structural change; reset so next canvas edit also pushes
+    state.pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
     const newShape: ShapeBlock = {
       id: crypto.randomUUID(),
       x: 660, y: 340, width: 600, height: 400,
@@ -1082,12 +1204,22 @@ export default function ControllerPage() {
 
   const handleUpdateShape = useCallback((patch: Partial<ShapeBlock>) => {
     if (!selectedShapeId) return;
+    // Push history before first mutation of this shape (covers property panel & text edits)
+    if (!isUndoRedoInProgressRef.current && shapeHistoryPushedRef.current !== selectedShapeId) {
+      shapeHistoryPushedRef.current = selectedShapeId;
+      useQueueStore.getState().pushHistory();
+    }
     const shapes = useOutputStore.getState().layerConfig.canvas?.shapeBlocks ?? [];
     const newShapes = shapes.map(s => s.id === selectedShapeId ? { ...s, ...patch } : s);
     applyShapeUpdate(newShapes);
   }, [selectedShapeId, applyShapeUpdate]);
 
   const handleUpdateShapeById = useCallback((id: string, patch: Partial<ShapeBlock>) => {
+    // Push history before first mutation of this shape (covers drag/resize & inline text)
+    if (!isUndoRedoInProgressRef.current && shapeHistoryPushedRef.current !== id) {
+      shapeHistoryPushedRef.current = id;
+      useQueueStore.getState().pushHistory();
+    }
     const shapes = useOutputStore.getState().layerConfig.canvas?.shapeBlocks ?? [];
     const newShapes = shapes.map(s => s.id === id ? { ...s, ...patch } : s);
     applyShapeUpdate(newShapes);
@@ -1098,7 +1230,12 @@ export default function ControllerPage() {
       handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, visible: !layerConfig.subtitle.visible } });
     } else if (layerId === "overlay") {
       handleLayerChange({ ...layerConfig, overlay: { ...layerConfig.overlay, visible: !layerConfig.overlay.visible } });
-    } else if (layerId.startsWith("canvas:")) {
+    } else if (layerId.startsWith("canvas:") || layerId.startsWith("shape:")) {
+      // Structural toggle: push history and reset per-slide tracking
+      useQueueStore.getState().pushHistory();
+      canvasHistoryPushedRef.current = null;
+    }
+    if (layerId.startsWith("canvas:")) {
       const blockId = layerId.slice("canvas:".length);
       const blocks = layerConfig.canvas?.textBlocks ?? [];
       const newBlocks = blocks.map(b => b.id === blockId ? { ...b, visible: b.visible === false } : b);
@@ -1117,6 +1254,9 @@ export default function ControllerPage() {
     const blocks = layerConfig.canvas?.textBlocks ?? [];
     const idx = blocks.findIndex(b => b.id === blockId);
     if (idx < 0 || idx >= blocks.length - 1) return;
+    useQueueStore.getState().pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
     const newBlocks = [...blocks];
     [newBlocks[idx], newBlocks[idx + 1]] = [newBlocks[idx + 1], newBlocks[idx]];
     applyCanvasBlocksUpdate(newBlocks);
@@ -1128,6 +1268,9 @@ export default function ControllerPage() {
     const blocks = layerConfig.canvas?.textBlocks ?? [];
     const idx = blocks.findIndex(b => b.id === blockId);
     if (idx <= 0) return;
+    useQueueStore.getState().pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
     const newBlocks = [...blocks];
     [newBlocks[idx], newBlocks[idx - 1]] = [newBlocks[idx - 1], newBlocks[idx]];
     applyCanvasBlocksUpdate(newBlocks);
@@ -1138,6 +1281,10 @@ export default function ControllerPage() {
     const qState = useQueueStore.getState();
     const item = qState.getActiveItem();
     const slide = qState.getActiveLyricSlide();
+
+    qState.pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
 
     const stripPrefix = (id: string) =>
       id.startsWith("canvas:") ? id.slice("canvas:".length)
@@ -1188,6 +1335,9 @@ export default function ControllerPage() {
   }, [handleAddBlock]);
 
   const handleLayerDuplicateBlock = useCallback((layerId: string) => {
+    useQueueStore.getState().pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
     if (layerId.startsWith("canvas:")) {
       const blockId = layerId.slice("canvas:".length);
       const blocks = layerConfig.canvas?.textBlocks ?? [];
@@ -1217,6 +1367,9 @@ export default function ControllerPage() {
   }, [layerConfig, applyCanvasBlocksUpdate, applyShapeUpdate]);
 
   const handleLayerDeleteBlock = useCallback((layerId: string) => {
+    useQueueStore.getState().pushHistory();
+    canvasHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
     if (layerId.startsWith("canvas:")) {
       const blockId = layerId.slice("canvas:".length);
       const blocks = layerConfig.canvas?.textBlocks ?? [];
@@ -1462,8 +1615,9 @@ export default function ControllerPage() {
       if (capturedSlideId === undefined) {
         settings.background = { ...config.background };
       }
-      if (slideId) {
+      if (slideId && config.background.type !== "camera") {
         // 현재 슬라이드만 per-slide 배경 저장 (다른 슬라이드는 각자의 색상 유지)
+        // Camera is ephemeral — never saved to DB
         settings.slideBackgrounds = {
           ...(existingSettings.slideBackgrounds ?? {}),
           [slideId]: { ...config.background },
@@ -1721,53 +1875,85 @@ export default function ControllerPage() {
     }
   }, []);
 
-  const isUndoRedoInProgressRef = useRef(false);
-
   const handleUndo = useCallback(async () => {
     if (isUndoRedoInProgressRef.current) return;
     const store = useQueueStore.getState();
     if (!store.canUndo()) return;
     const svc = store.currentService;
-    if (!svc || svc.id <= 0) return;
-    const snapshot = store.popUndo();
-    if (!snapshot) return;
+    if (!svc) return;
+    // Set flag BEFORE popUndo so navigation effect fired during await is suppressed
     isUndoRedoInProgressRef.current = true;
+    canvasHistoryPushedRef.current = null;
+    layerHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
+    const snapshot = store.popUndo();
+    if (!snapshot) { isUndoRedoInProgressRef.current = false; return; }
     try {
-      await serviceDb.saveItems(svc.id, snapshot.items);
-      const reloaded = await serviceDb.get(svc.id);
-      if (reloaded) {
-        store.updateServiceData(reloaded);
-        store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+      if (svc.id > 0) {
+        // 저장된 서비스: DB에도 반영
+        await serviceDb.saveItems(svc.id, snapshot.items);
+        const reloaded = await serviceDb.get(svc.id);
+        if (reloaded) {
+          store.updateServiceData(reloaded);
+          store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+        }
+      } else {
+        // 미저장 서비스: 메모리만 복원
+        store.updateServiceItems(snapshot.items);
+        store.setActiveItem(Math.min(snapshot.activeItemIndex, snapshot.items.length - 1));
       }
+      // Restore visual state from snapshot (canvas textBlocks, shapes, layer config)
+      setLayerConfig(snapshot.layerConfig);
+      ipc.sendPreviewUpdate(snapshot.layerConfig);
+      if (isLive) ipc.sendSlideUpdate(snapshot.layerConfig);
+      // Sync SlideCanvas internal text-block state with the restored canvas
+      canvasRef.current?.syncTextBlocks(snapshot.layerConfig.canvas?.textBlocks ?? []);
     } catch (e) {
       console.error("[undo]", e);
     } finally {
       isUndoRedoInProgressRef.current = false;
     }
-  }, []);
+  }, [isLive, setLayerConfig]);
 
   const handleRedo = useCallback(async () => {
     if (isUndoRedoInProgressRef.current) return;
     const store = useQueueStore.getState();
     if (!store.canRedo()) return;
     const svc = store.currentService;
-    if (!svc || svc.id <= 0) return;
-    const snapshot = store.popRedo();
-    if (!snapshot) return;
+    if (!svc) return;
+    // Set flag BEFORE popRedo so navigation effect fired during await is suppressed
     isUndoRedoInProgressRef.current = true;
+    canvasHistoryPushedRef.current = null;
+    layerHistoryPushedRef.current = null;
+    shapeHistoryPushedRef.current = null;
+    const snapshot = store.popRedo();
+    if (!snapshot) { isUndoRedoInProgressRef.current = false; return; }
     try {
-      await serviceDb.saveItems(svc.id, snapshot.items);
-      const reloaded = await serviceDb.get(svc.id);
-      if (reloaded) {
-        store.updateServiceData(reloaded);
-        store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+      if (svc.id > 0) {
+        // 저장된 서비스: DB에도 반영
+        await serviceDb.saveItems(svc.id, snapshot.items);
+        const reloaded = await serviceDb.get(svc.id);
+        if (reloaded) {
+          store.updateServiceData(reloaded);
+          store.setActiveItem(Math.min(snapshot.activeItemIndex, reloaded.items.length - 1));
+        }
+      } else {
+        // 미저장 서비스: 메모리만 복원
+        store.updateServiceItems(snapshot.items);
+        store.setActiveItem(Math.min(snapshot.activeItemIndex, snapshot.items.length - 1));
       }
+      // Restore visual state from snapshot (canvas textBlocks, shapes, layer config)
+      setLayerConfig(snapshot.layerConfig);
+      ipc.sendPreviewUpdate(snapshot.layerConfig);
+      if (isLive) ipc.sendSlideUpdate(snapshot.layerConfig);
+      // Sync SlideCanvas internal text-block state with the restored canvas
+      canvasRef.current?.syncTextBlocks(snapshot.layerConfig.canvas?.textBlocks ?? []);
     } catch (e) {
       console.error("[redo]", e);
     } finally {
       isUndoRedoInProgressRef.current = false;
     }
-  }, []);
+  }, [isLive, setLayerConfig]);
 
   const handleSaveAs = useCallback(async (name: string) => {
     const store = useQueueStore.getState();
@@ -1976,6 +2162,11 @@ export default function ControllerPage() {
         onSendAlert={handleSendAlert}
         onClearAlert={handleClearAlert}
         displays={displays}
+        cameraDevices={cameraDevices}
+        cameraError={cameraError}
+        onSelectCamera={handleSelectCamera}
+        onToggleCameraOutput={handleToggleCameraOutput}
+        onRefreshOutputMenu={handleRefreshOutputMenu}
         selectedDisplayIdx={selectedDisplayIdx}
         onSelectDisplay={(idx) => {
           setOutputDisplayId(idx);
@@ -1985,6 +2176,12 @@ export default function ControllerPage() {
         onOpenPreviewOnly={() => { setPreviewDocked(true); setShowPanel(true); ipc.sendPreviewUpdate(useOutputStore.getState().layerConfig); void ipc.openPreviewWindow(); }}
         outputScaleMode={outputScaleMode}
         onSetScaleMode={(mode) => { setOutputScaleMode(mode); void ipc.sendScaleMode(mode); }}
+        isCameraBackground={isCameraOutputActive}
+        videoFit={videoFit}
+        onSetVideoFit={(fit) => { setVideoFit(fit); void ipc.sendVideoSettings(fit, useSettingsStore.getState().fpsLimit, useSettingsStore.getState().cameraMirror); }}
+        cameraMirror={cameraMirror}
+        onSetCameraMirror={(v) => { setCameraMirror(v); void ipc.sendVideoSettings(useSettingsStore.getState().videoFit, useSettingsStore.getState().fpsLimit, v); }}
+        onRequestCameraPermission={handleRequestCameraPermission}
         outputConnected={outputConnected}
         onOpenOutput={openOutput}
         isStageOpen={isStageOpen}

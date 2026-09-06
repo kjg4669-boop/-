@@ -10,11 +10,15 @@ interface Props {
   skipPlaybackEmit?: boolean;
   /** When true, keep video paused (e.g. preview window during standby) */
   paused?: boolean;
+  /** CSS objectFit for video/camera background (default: "cover") */
+  videoFit?: "cover" | "contain";
+  /** Horizontally flip camera output */
+  cameraMirror?: boolean;
 }
 
 const VIDEO_CROSSFADE_MS = 600;
 
-export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Props) {
+export default function BackgroundLayer({ config, skipPlaybackEmit, paused, videoFit = "cover", cameraMirror = false }: Props) {
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
@@ -124,6 +128,26 @@ export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Pr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.type, config.src, skipPlaybackEmit]);
 
+  // ── Camera input ──────────────────────────────────────────────────────────
+  // Frames are streamed from controller via IPC (camera:frame).
+  // Camera access only happens in: (1) controller's useCameraFrameStream hook when broadcasting,
+  // (2) ControlBar dropdown preview. BackgroundLayer is a pure frame consumer.
+  const [cameraFrameUrl, setCameraFrameUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (config.type !== "camera") return;
+    let unlisten: (() => void) | null = null;
+
+    ipc.onCameraFrame((dataUrl) => setCameraFrameUrl(dataUrl))
+      .then((fn) => { unlisten = fn; })
+      .catch(() => {});
+
+    return () => {
+      unlisten?.();
+      setCameraFrameUrl(null);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.type, config.src]);
+
   // ── Styles ────────────────────────────────────────────────────────────────
   const baseStyle: React.CSSProperties = {
     position: "absolute",
@@ -184,7 +208,7 @@ export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Pr
                 muted
                 playsInline
                 src={videoSlots[idx]!}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                style={{ width: "100%", height: "100%", objectFit: videoFit }}
                 onCanPlay={(e) => {
                   const video = e.target as HTMLVideoElement;
                   if (pausedRef.current) {
@@ -197,6 +221,20 @@ export default function BackgroundLayer({ config, skipPlaybackEmit, paused }: Pr
             )}
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (config.type === "camera") {
+    return (
+      <div style={{ ...baseStyle, overflow: "hidden", backgroundColor: "#000" }}>
+        {cameraFrameUrl && (
+          <img
+            src={cameraFrameUrl}
+            alt=""
+            style={{ width: "100%", height: "100%", objectFit: videoFit, transform: cameraMirror ? "scaleX(-1)" : undefined, display: "block" }}
+          />
+        )}
       </div>
     );
   }

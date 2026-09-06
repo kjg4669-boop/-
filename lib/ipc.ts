@@ -266,9 +266,21 @@ export const ipc = {
   onScaleMode: (cb: (mode: "fit" | "fill" | "native") => void) =>
     listenEvent<{ mode: "fit" | "fill" | "native" }>("output:scale-mode", (p) => cb(p.mode)),
 
+  // Camera/video output settings
+  sendVideoSettings: (videoFit: "cover" | "contain", fpsLimit: 30 | 60, cameraMirror: boolean) =>
+    emitEvent<{ videoFit: "cover" | "contain"; fpsLimit: 30 | 60; cameraMirror: boolean }>("output:video-settings", { videoFit, fpsLimit, cameraMirror }),
+  onVideoSettings: (cb: (videoFit: "cover" | "contain", fpsLimit: 30 | 60, cameraMirror: boolean) => void) =>
+    listenEvent<{ videoFit: "cover" | "contain"; fpsLimit: 30 | 60; cameraMirror: boolean }>("output:video-settings", (p) => cb(p.videoFit, p.fpsLimit, p.cameraMirror)),
+
   // Stage private messages (visible only on stage display)
   sendStageMessage: (payload: StageMessagePayload) =>
     emitEvent<StageMessagePayload>("stage:message", payload),
   onStageMessage: (cb: (payload: StageMessagePayload) => void) =>
     listenEvent<StageMessagePayload>("stage:message", cb),
+
+  // Camera frame streaming (controller → output window)
+  // Controller captures frames via canvas and emits; output window listens as fallback
+  // when getUserMedia() is unavailable in a secondary WKWebView.
+  onCameraFrame: (cb: (dataUrl: string) => void) =>
+    listenEvent<{ data: string }>("camera:frame", (p) => cb(p.data)),
 };

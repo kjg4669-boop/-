@@ -36,6 +36,8 @@ export default function OutputPage() {
   const [showControls, setShowControls] = useState(false);
   const [windowSize, setWindowSize] = useState({ w: CANVAS_W, h: CANVAS_H });
   const [scaleMode, setScaleMode] = useState<"fit" | "fill" | "native">("fit");
+  const [videoFit, setVideoFit] = useState<"cover" | "contain">("cover");
+  const [cameraMirror, setCameraMirror] = useState(false);
   const [lookVis, setLookVis] = useState({
     background: true, subtitle: true, overlay: true, canvas: true, countdown: true,
   });
@@ -128,7 +130,11 @@ export default function OutputPage() {
         if (mounted) setScaleMode(mode);
       });
 
-      unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown, unlistenAudioPlay, unlistenAudioStop, unlistenLook, unlistenAnnouncement, unlistenScaleMode);
+      const unlistenVideoSettings = await ipc.onVideoSettings((fit, _fps, mirror) => {
+        if (mounted) { setVideoFit(fit); setCameraMirror(mirror); }
+      });
+
+      unlistenRefs.current.push(unlistenSlide, unlistenBlackout, unlistenAlert, unlistenCountdown, unlistenAudioPlay, unlistenAudioStop, unlistenLook, unlistenAnnouncement, unlistenScaleMode, unlistenVideoSettings);
 
       await ipc.sendOutputReady();
       if (mounted) setOutputReady(true);
@@ -248,7 +254,7 @@ export default function OutputPage() {
           }}
         >
           {/* Layer 1: Background */}
-          {lookVis.background && <BackgroundLayer config={layerConfig.background} />}
+          {lookVis.background && <BackgroundLayer config={layerConfig.background} videoFit={videoFit} cameraMirror={cameraMirror} />}
 
           {/* Layer 2: Subtitle */}
           {lookVis.subtitle && <SubtitleLayer config={layerConfig.subtitle} transitionMs={layerConfig.transitionMs} copyright={copyright} />}

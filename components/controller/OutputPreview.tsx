@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { LayerConfig, TextBlock, ShapeBlock } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
+import { ipc } from "@/lib/ipc";
 
 type BgConfig = LayerConfig["background"];
 interface SubContent { lines: string[]; lines2: string[] }
@@ -38,7 +39,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const activeLines = sub.visible && sub.lines.length > 0 ? sub.lines : [];
   // Include nonce so animation fires even when content is identical across slides
   const activeLinesKey = `${sub.nonce ?? 0}:${activeLines.join("\0")}`;
-  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}`).join("\0")}:${shapeBlocks.map(s => `${s.id}:${s.text ?? ""}`).join("\0")}`;
+  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}:${b.x}:${b.y ?? 0}:${b.width}`).join("\0")}:${shapeBlocks.map(s => `${s.id}:${s.text ?? ""}:${s.x}:${s.y}:${s.width}:${s.height}`).join("\0")}`;
 
   // ── 배경 두 슬롯 크로스페이드 ──────────────────────────────────────
   const bgIdentity = `${bg.type}:${bg.src ?? ""}:${bg.color ?? ""}`;
@@ -78,6 +79,18 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
       if (isLive) v.play().catch(() => {}); else v.pause();
     });
   }, [isLive]);
+
+  // Camera frame IPC (receives frames from useCameraFrameStream in controller)
+  const [cameraFrameUrl, setCameraFrameUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (bg.type !== "camera") { setCameraFrameUrl(null); return; }
+    let unlisten: (() => void) | null = null;
+    ipc.onCameraFrame((dataUrl) => setCameraFrameUrl(dataUrl))
+      .then((fn) => { unlisten = fn; })
+      .catch(() => {});
+    return () => { unlisten?.(); setCameraFrameUrl(null); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bg.type]);
 
   const [showDebug, setShowDebug] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -193,7 +206,13 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
           transition: `opacity ${fadeMsRef.current}ms ease-in-out`,
         }}
       >
-        {bgCfg.type !== "video" && <div style={{ position: "absolute", inset: 0, ...bgStyleFor(bgCfg) }} />}
+        {bgCfg.type !== "video" && bgCfg.type !== "camera" && <div style={{ position: "absolute", inset: 0, ...bgStyleFor(bgCfg) }} />}
+        {bgCfg.type === "camera" && cameraFrameUrl && (
+          <img src={cameraFrameUrl} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", opacity: bgCfg.opacity ?? 1 }} />
+        )}
+        {bgCfg.type === "camera" && !cameraFrameUrl && (
+          <div style={{ position: "absolute", inset: 0, backgroundColor: "#111" }} />
+        )}
         {bgCfg.type === "video" && (
           videoUrl
             ? <div style={{ position: "absolute", inset: 0, overflow: "hidden", zIndex: 10 }}>

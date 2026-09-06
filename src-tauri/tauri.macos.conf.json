@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "macOS": {
+      "entitlements": "./entitlements.plist",
+      "infoPlist": "./extra-info.plist"
+    }
+  }
+}

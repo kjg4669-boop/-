@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import type { Service, ServiceItem, ServiceItemSettings, Song, LyricSlide, ScriptureSlide } from "@/lib/types";
+import type { Service, ServiceItem, ServiceItemSettings, Song, LyricSlide, ScriptureSlide, LayerConfig } from "@/lib/types";
 import { getSlidesInOrder } from "@/lib/utils";
+import { useOutputStore } from "@/stores/outputStore";
 
 // Module-level cache: invalidates automatically when currentService reference changes (Zustand immutable updates)
 let _flatListCache: { serviceRef: import("@/lib/types").Service | null; list: import("@/lib/types").FlatSlide[] } = { serviceRef: null, list: [] };
@@ -18,6 +19,7 @@ function getItemSlideCount(item: ServiceItem): number {
 interface HistoryEntry {
   items: ServiceItem[];
   activeItemIndex: number;
+  layerConfig: LayerConfig;
 }
 
 const MAX_HISTORY = 50;
@@ -82,7 +84,12 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   pushHistory: () => {
     const { currentService, activeItemIndex, undoStack } = get();
     if (!currentService) return;
-    const entry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    const layerConfig = useOutputStore.getState().layerConfig;
+    const entry: HistoryEntry = {
+      items: structuredClone(currentService.items),
+      activeItemIndex,
+      layerConfig: structuredClone(layerConfig),
+    };
     const next = [...undoStack, entry];
     if (next.length > MAX_HISTORY) next.shift();
     set({ undoStack: next, redoStack: [] });
@@ -92,7 +99,12 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const { undoStack, currentService, activeItemIndex, redoStack } = get();
     if (undoStack.length === 0 || !currentService) return null;
     const snapshot = undoStack[undoStack.length - 1];
-    const currentEntry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    const layerConfig = useOutputStore.getState().layerConfig;
+    const currentEntry: HistoryEntry = {
+      items: structuredClone(currentService.items),
+      activeItemIndex,
+      layerConfig: structuredClone(layerConfig),
+    };
     set({ undoStack: undoStack.slice(0, -1), redoStack: [...redoStack, currentEntry] });
     return snapshot;
   },
@@ -101,7 +113,12 @@ export const useQueueStore = create<QueueState>((set, get) => ({
     const { redoStack, currentService, activeItemIndex, undoStack } = get();
     if (redoStack.length === 0 || !currentService) return null;
     const snapshot = redoStack[redoStack.length - 1];
-    const currentEntry: HistoryEntry = { items: structuredClone(currentService.items), activeItemIndex };
+    const layerConfig = useOutputStore.getState().layerConfig;
+    const currentEntry: HistoryEntry = {
+      items: structuredClone(currentService.items),
+      activeItemIndex,
+      layerConfig: structuredClone(layerConfig),
+    };
     set({ redoStack: redoStack.slice(0, -1), undoStack: [...undoStack, currentEntry] });
     return snapshot;
   },
