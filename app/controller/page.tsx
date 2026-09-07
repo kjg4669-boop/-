@@ -1726,7 +1726,7 @@ export default function ControllerPage() {
     fontSize: layerConfig.subtitle.fontSize,
     fontWeight: layerConfig.subtitle.fontWeight ?? "normal",
     fontStyle: layerConfig.subtitle.fontStyle ?? "normal",
-    textDecoration: "none",
+    textDecoration: layerConfig.subtitle.textDecoration ?? "none",
     color: layerConfig.subtitle.color,
     textAlign: layerConfig.subtitle.textAlign ?? "center",
   };

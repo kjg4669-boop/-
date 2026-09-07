@@ -95,9 +95,9 @@ export default function SubtitleSection({ layerConfig, onChange, imageItems }: P
         </select>
         <input
           type="number"
-          min={12} max={120}
+          min={12} max={150}
           value={sub.fontSize}
-          onChange={(e) => setSubtitle({ fontSize: Math.max(12, Math.min(120, Number(e.target.value))) })}
+          onChange={(e) => setSubtitle({ fontSize: Math.max(12, Math.min(150, Number(e.target.value))) })}
           className="w-14 bg-zinc-800 text-white rounded px-2 py-1 border border-zinc-600 text-xs text-center"
         />
         <span className="text-zinc-500">px</span>

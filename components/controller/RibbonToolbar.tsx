@@ -254,8 +254,8 @@ export default function RibbonToolbar({
             className="bg-[#3c3c3c] border border-zinc-600 rounded px-1.5 py-0.5 text-white outline-none hover:border-zinc-400 w-28">
             {FONT_OPTIONS.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
-          <input type="number" min={12} max={200} value={fmt.fontSize}
-            onChange={(e) => onFormat({ fontSize: Math.max(12, Math.min(200, Number(e.target.value))) })}
+          <input type="number" min={12} max={150} value={fmt.fontSize}
+            onChange={(e) => onFormat({ fontSize: Math.max(12, Math.min(150, Number(e.target.value))) })}
             className="w-11 bg-[#3c3c3c] border border-zinc-600 rounded px-1 py-0.5 text-white outline-none text-center hover:border-zinc-400" />
 
           <div className="w-px h-5 bg-zinc-600 mx-0.5" />
@@ -295,15 +295,13 @@ export default function RibbonToolbar({
             </button>
           ))}
 
-          {!hasSelectedBlock && (<>
-            <div className="w-px h-5 bg-zinc-600 mx-0.5" />
-            {(["top", "center", "bottom"] as const).map((pos) => (
-              <button key={pos} onClick={() => setSubtitle({ position: pos })}
-                className={`px-1.5 h-6 rounded ${layerConfig.subtitle.position === pos ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
-                {pos === "top" ? "상▲" : pos === "center" ? "중" : "하▼"}
-              </button>
-            ))}
-          </>)}
+          <div className="w-px h-5 bg-zinc-600 mx-0.5" />
+          {(["top", "center", "bottom"] as const).map((pos) => (
+            <button key={pos} onClick={() => setSubtitle({ position: pos })}
+              className={`px-1.5 h-6 rounded ${layerConfig.subtitle.position === pos ? "bg-blue-600 text-white" : "bg-[#3c3c3c] hover:bg-zinc-600 text-zinc-300"}`}>
+              {pos === "top" ? "상▲" : pos === "center" ? "중" : "하▼"}
+            </button>
+          ))}
 
           {/* Looks 프리셋 */}
           <div className="flex items-center gap-0.5 border-r border-zinc-600 pr-2 mr-1">
@@ -521,31 +519,6 @@ export default function RibbonToolbar({
           </div>
           {/* 도형 */}
           <div className="border-r border-zinc-600 pr-2 mr-1 flex flex-col gap-0.5">
-            {/* 기본 색상 설정 */}
-            <div className="flex items-center gap-1.5 px-0.5">
-              <label className="relative cursor-pointer flex-shrink-0" title="채우기 색상">
-                <div style={{
-                  width: 16, height: 16, borderRadius: 2,
-                  background: defaultShapeFill,
-                  border: "1.5px solid rgba(255,255,255,0.3)",
-                }} />
-                <input type="color" value={defaultShapeFill}
-                  onChange={e => onSetDefaultShapeFill(e.target.value)}
-                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
-              </label>
-              <span className="text-[10px] text-zinc-400 select-none">채우기</span>
-              <label className="relative cursor-pointer flex-shrink-0" title="윤곽선 색상">
-                <div style={{
-                  width: 16, height: 16, borderRadius: 2,
-                  background: "transparent",
-                  border: `2px solid ${defaultShapeStroke}`,
-                }} />
-                <input type="color" value={defaultShapeStroke}
-                  onChange={e => onSetDefaultShapeStroke(e.target.value)}
-                  className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
-              </label>
-              <span className="text-[10px] text-zinc-400 select-none">윤곽선</span>
-            </div>
             <div className="flex flex-wrap gap-0.5" style={{ maxWidth: 180 }}>
               {(
                 [

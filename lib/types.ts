@@ -145,6 +145,7 @@ export interface LayerConfig {
     fontWeight: "normal" | "bold";
     fontStyle: "normal" | "italic";
     textAlign: "left" | "center" | "right";
+    textDecoration?: "none" | "underline" | "line-through";
     bilingualEnabled?: boolean;
     lines2?: string[];
     fontSize2?: number;

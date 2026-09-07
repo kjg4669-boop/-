@@ -115,6 +115,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editingShapeId, setEditingShapeId] = useState<string | null>(null);
+    const [smartGuides, setSmartGuides] = useState<{ h: boolean; v: boolean }>({ h: false, v: false });
     const editingShapeTextRef = useRef<string>("");
     const slideChangedRef = useRef(false);
     const externalBlockSyncRef = useRef(false);
@@ -362,6 +363,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
     const onUpdateShapeByIdRef = useRef(onUpdateShapeById);
     onUpdateShapeByIdRef.current = onUpdateShapeById;
 
+    const SNAP_PX = 8;
     const handlePointerMove = useCallback((e: React.PointerEvent) => {
       if (moveRef.current) {
         const d = moveRef.current;
@@ -369,14 +371,32 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         const dy = (e.clientY - d.startCY) / scale;
         if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
           didDragRef.current = true;
+          const CX = OUTPUT_W / 2, CY = OUTPUT_H / 2;
+          let finalDx = dx, finalDy = dy;
+          let showH = false, showV = false;
+          const primary = blocksRef.current.find(b => b.id === d.blockId);
+          if (primary) {
+            const orig = d.origPositions[d.blockId];
+            const nx = orig.x + dx, ny = orig.y + dy;
+            const bW = primary.width, bH = primary.height ?? DEFAULT_H;
+            // vertical guide (x=960)
+            if (Math.abs(nx + bW / 2 - CX) < SNAP_PX) { finalDx = CX - bW / 2 - orig.x; showV = true; }
+            else if (Math.abs(nx - CX) < SNAP_PX) { finalDx = CX - orig.x; showV = true; }
+            else if (Math.abs(nx + bW - CX) < SNAP_PX) { finalDx = CX - bW - orig.x; showV = true; }
+            // horizontal guide (y=540)
+            if (Math.abs(ny + bH / 2 - CY) < SNAP_PX) { finalDy = CY - bH / 2 - orig.y; showH = true; }
+            else if (Math.abs(ny - CY) < SNAP_PX) { finalDy = CY - orig.y; showH = true; }
+            else if (Math.abs(ny + bH - CY) < SNAP_PX) { finalDy = CY - bH - orig.y; showH = true; }
+          }
+          setSmartGuides({ h: showH, v: showV });
           setBlocks((prev) =>
             prev.map((b) => {
               const orig = d.origPositions[b.id];
               if (!orig) return b;
               return {
                 ...b,
-                x: Math.round(Math.max(0, Math.min(orig.x + dx, OUTPUT_W - b.width))),
-                y: Math.round(Math.max(0, Math.min(orig.y + dy, OUTPUT_H - (b.height ?? DEFAULT_H)))),
+                x: Math.round(Math.max(0, Math.min(orig.x + finalDx, OUTPUT_W - b.width))),
+                y: Math.round(Math.max(0, Math.min(orig.y + finalDy, OUTPUT_H - (b.height ?? DEFAULT_H)))),
               };
             })
           );
@@ -411,9 +431,24 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         const dy = (e.clientY - d.startCY) / scale;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
           didDragRef.current = true;
+          const CX = OUTPUT_W / 2, CY = OUTPUT_H / 2;
+          let finalDx = dx, finalDy = dy;
+          let showH = false, showV = false;
+          const shape = useOutputStore.getState().layerConfig.canvas?.shapeBlocks?.find(s => s.id === d.shapeId);
+          if (shape) {
+            const nx = d.origX + dx, ny = d.origY + dy;
+            const bW = shape.width, bH = shape.height;
+            if (Math.abs(nx + bW / 2 - CX) < SNAP_PX) { finalDx = CX - bW / 2 - d.origX; showV = true; }
+            else if (Math.abs(nx - CX) < SNAP_PX) { finalDx = CX - d.origX; showV = true; }
+            else if (Math.abs(nx + bW - CX) < SNAP_PX) { finalDx = CX - bW - d.origX; showV = true; }
+            if (Math.abs(ny + bH / 2 - CY) < SNAP_PX) { finalDy = CY - bH / 2 - d.origY; showH = true; }
+            else if (Math.abs(ny - CY) < SNAP_PX) { finalDy = CY - d.origY; showH = true; }
+            else if (Math.abs(ny + bH - CY) < SNAP_PX) { finalDy = CY - bH - d.origY; showH = true; }
+          }
+          setSmartGuides({ h: showH, v: showV });
           onUpdateShapeByIdRef.current?.(d.shapeId, {
-            x: Math.round(Math.max(0, d.origX + dx)),
-            y: Math.round(Math.max(0, d.origY + dy)),
+            x: Math.round(Math.max(0, d.origX + finalDx)),
+            y: Math.round(Math.max(0, d.origY + finalDy)),
           });
         }
       } else if (shapeResizeRef.current) {
@@ -454,6 +489,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
       rotateRef.current = null;
       shapeMoveRef.current = null;
       shapeResizeRef.current = null;
+      setSmartGuides({ h: false, v: false });
       if (drawRef.current) {
         const r = drawRef.current.rect;
         drawRef.current = null;
@@ -781,12 +817,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
                       }}
                       onPointerDown={(e) => handleBlockPointerDown(e, block)}
                       onDoubleClick={(e) => handleBlockDblClick(e, block.id)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (selectedIds.includes(block.id) && selectedIds.length === 1 && !didDragRef.current) {
-                          setEditingId(block.id);
-                        }
-                      }}
+                      onClick={(e) => { e.stopPropagation(); }}
                     >
                       {editingId === block.id ? (
                         <div
@@ -1134,6 +1165,14 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
             </div>
           )}
         </div>
+
+        {/* ── Smart guidelines ──────────────────────────────────────── */}
+        {smartGuides.h && (
+          <div style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 1, background: "#3b82f6", opacity: 0.85, pointerEvents: "none", zIndex: 200 }} />
+        )}
+        {smartGuides.v && (
+          <div style={{ position: "absolute", top: 0, bottom: 0, left: "50%", width: 1, background: "#3b82f6", opacity: 0.85, pointerEvents: "none", zIndex: 200 }} />
+        )}
 
         {/* ── Draw rect overlay ─────────────────────────────────────── */}
         {drawRect && drawRect.w > 5 && drawRect.h > 5 && (
