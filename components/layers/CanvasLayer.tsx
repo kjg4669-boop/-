@@ -117,43 +117,57 @@ function SingleShape({ shape, scale, zIdx }: { shape: ShapeBlock; scale: number;
   }
 
   const fs = shape.textFontSize ?? 60;
-  const hasSpans = shape.textSpans && shape.textSpans.length > 0;
   let textEl: React.ReactNode = null;
   if (shape.text) {
-    if (hasSpans) {
+    const lines = shape.text.split("\n");
+    const lh = fs * 1.3;
+    const startY = cy - (lh * lines.length) / 2 + lh / 2;
+    const anchor = shape.textAlign === "left" ? "start" : shape.textAlign === "right" ? "end" : "middle";
+    const textX = shape.textAlign === "left" ? x + 8 : shape.textAlign === "right" ? x + w - 8 : cx;
+    const spans = shape.textSpans;
+    if (spans && spans.length > 0) {
+      // Split spans across line boundaries for per-span SVG tspan rendering
+      type Seg = { text: string; color?: string; fontWeight?: string; fontStyle?: string; textDecoration?: string; fontSize?: number };
+      const lineSegs: Seg[][] = lines.map(() => []);
+      let lineIdx = 0;
+      for (const span of spans) {
+        let rem = span.text;
+        while (rem.length > 0) {
+          const nl = rem.indexOf("\n");
+          const chunk = nl === -1 ? rem : rem.slice(0, nl);
+          if (chunk.length > 0 && lineIdx < lineSegs.length)
+            lineSegs[lineIdx].push({ text: chunk, color: span.color, fontWeight: span.fontWeight, fontStyle: span.fontStyle, textDecoration: span.textDecoration, fontSize: span.fontSize });
+          if (nl === -1) { rem = ""; } else { lineIdx++; rem = rem.slice(nl + 1); }
+        }
+      }
       textEl = (
-        <foreignObject key="t" x={x} y={y} width={w} height={h}>
-          <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center",
-            justifyContent: shape.textAlign==="left"?"flex-start": shape.textAlign==="right"?"flex-end":"center",
-            fontSize:fs, fontFamily:shape.textFontFamily??"sans-serif",
-            fontWeight:shape.textFontWeight??"normal", fontStyle:shape.textFontStyle??"normal",
-            textDecoration:shape.textDecoration??"none", color:shape.textColor??"#ffffff",
-            textAlign:shape.textAlign??"center", padding:8, boxSizing:"border-box",
-            whiteSpace:"pre-wrap", wordBreak:"break-word", overflow:"hidden" }}>
-            {shape.textSpans!.map((span,i) => (
-              <span key={i} style={{ fontFamily:span.fontFamily,
-                fontWeight:span.fontWeight??(shape.textFontWeight??"normal"),
-                fontStyle:span.fontStyle??(shape.textFontStyle??"normal"),
-                textDecoration:span.textDecoration??(shape.textDecoration??"none"),
-                color:span.color??shape.textColor??"#ffffff",
-                fontSize:span.fontSize!==undefined?span.fontSize:undefined }}>
-                {span.text}
-              </span>
-            ))}
-          </div>
-        </foreignObject>
+        <text key="t" textAnchor={anchor} fontSize={fs}
+          fontFamily={shape.textFontFamily ?? "sans-serif"} fontWeight={shape.textFontWeight ?? "normal"}
+          fontStyle={shape.textFontStyle ?? "normal"} dominantBaseline="middle">
+          {lines.map((_, i) => (
+            <tspan key={i} x={textX} y={startY + lh * i}>
+              {lineSegs[i]?.length > 0
+                ? lineSegs[i].map((seg, j) => (
+                    <tspan key={j}
+                      fill={seg.color ?? shape.textColor ?? "#ffffff"}
+                      fontWeight={seg.fontWeight ?? shape.textFontWeight ?? "normal"}
+                      fontStyle={seg.fontStyle ?? shape.textFontStyle ?? "normal"}
+                      textDecoration={seg.textDecoration ?? shape.textDecoration ?? "none"}
+                      fontSize={seg.fontSize !== undefined ? seg.fontSize : fs}>
+                      {seg.text}
+                    </tspan>
+                  ))
+                : <tspan fill={shape.textColor ?? "#ffffff"}>{""}</tspan>}
+            </tspan>
+          ))}
+        </text>
       );
     } else {
-      const lines = shape.text.split("\n");
-      const lh = fs*1.3;
-      const startY = cy-(lh*lines.length)/2+lh/2;
-      const anchor = shape.textAlign==="left"?"start": shape.textAlign==="right"?"end":"middle";
-      const textX = shape.textAlign==="left"?x+8: shape.textAlign==="right"?x+w-8:cx;
       textEl = (
-        <text key="t" textAnchor={anchor} fill={shape.textColor??"#ffffff"} fontSize={fs}
-          fontFamily={shape.textFontFamily??"sans-serif"} fontWeight={shape.textFontWeight??"normal"}
-          fontStyle={shape.textFontStyle??"normal"} textDecoration={shape.textDecoration??"none"} dominantBaseline="middle">
-          {lines.map((line,i) => <tspan key={i} x={textX} y={startY+lh*i}>{line}</tspan>)}
+        <text key="t" textAnchor={anchor} fill={shape.textColor ?? "#ffffff"} fontSize={fs}
+          fontFamily={shape.textFontFamily ?? "sans-serif"} fontWeight={shape.textFontWeight ?? "normal"}
+          fontStyle={shape.textFontStyle ?? "normal"} textDecoration={shape.textDecoration ?? "none"} dominantBaseline="middle">
+          {lines.map((line, i) => <tspan key={i} x={textX} y={startY + lh * i}>{line}</tspan>)}
         </text>
       );
     }
@@ -192,7 +206,7 @@ export default function CanvasLayer({ blocks, shapeBlocks, nonce, transitionMs, 
   // ── Two-slot crossfade ────────────────────────────────────────────────
   const visibleBlocks = blocks.filter(b => b.visible !== false);
   const visibleShapes = (shapeBlocks ?? []).filter(s => s.visible !== false);
-  const blocksKey = `${nonce ?? 0}:${visibleBlocks.map(b => `${b.id}:${b.text}`).join("\0")}:${visibleShapes.map(s => `${s.id}:${s.text ?? ""}`).join("\0")}`;
+  const blocksKey = `${nonce ?? 0}:${visibleBlocks.map(b => `${b.id}:${b.text}:${b.color}:${b.fontSize}:${b.fontWeight}:${b.fontStyle}:${b.spans?.map(s => `${s.color ?? ""}${s.fontWeight ?? ""}${s.fontStyle ?? ""}${s.textDecoration ?? ""}`).join("|") ?? ""}`).join("\0")}:${visibleShapes.map(s => `${s.id}:${s.text ?? ""}:${s.textColor ?? ""}:${s.fillColor}:${s.strokeColor}:${s.textSpans?.map(sp => `${sp.color ?? ""}${sp.fontWeight ?? ""}${sp.fontStyle ?? ""}${sp.textDecoration ?? ""}`).join("|") ?? ""}`).join("\0")}`;
   const [slots, setSlots] = useState<[SlotData, SlotData]>([
     { blocks: visibleBlocks, shapes: visibleShapes, layerOrder },
     { blocks: [], shapes: [], layerOrder: undefined },

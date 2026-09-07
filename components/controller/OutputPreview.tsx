@@ -39,7 +39,7 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
   const activeLines = sub.visible && sub.lines.length > 0 ? sub.lines : [];
   // Include nonce so animation fires even when content is identical across slides
   const activeLinesKey = `${sub.nonce ?? 0}:${activeLines.join("\0")}`;
-  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}:${b.x}:${b.y ?? 0}:${b.width}`).join("\0")}:${shapeBlocks.map(s => `${s.id}:${s.text ?? ""}:${s.x}:${s.y}:${s.width}:${s.height}`).join("\0")}`;
+  const canvasBlocksKey = `${layerConfig.canvas?.nonce ?? 0}:${canvasBlocks.map(b => `${b.id}:${b.text}:${b.color}:${b.x}:${b.y ?? 0}:${b.width}:${b.spans?.map(s => `${s.color ?? ""}${s.fontWeight ?? ""}${s.fontStyle ?? ""}${s.textDecoration ?? ""}`).join("|") ?? ""}`).join("\0")}:${shapeBlocks.map(s => `${s.id}:${s.text ?? ""}:${s.textColor ?? ""}:${s.fillColor}:${s.strokeColor}:${s.x}:${s.y}:${s.width}:${s.height}:${s.textSpans?.map(sp => `${sp.color ?? ""}${sp.fontWeight ?? ""}${sp.fontStyle ?? ""}${sp.textDecoration ?? ""}`).join("|") ?? ""}`).join("\0")}`;
 
   // ── 배경 두 슬롯 크로스페이드 ──────────────────────────────────────
   const bgIdentity = `${bg.type}:${bg.src ?? ""}:${bg.color ?? ""}`;
@@ -396,7 +396,18 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
                         zIndex: zOrd + 1,
                       }}
                     >
-                      {block.text}
+                      {block.spans && block.spans.length > 0
+                        ? block.spans.map((span, i) => (
+                            <span key={i} style={{
+                              fontFamily: span.fontFamily,
+                              fontWeight: span.fontWeight ?? (block.fontWeight ?? "normal"),
+                              fontStyle: span.fontStyle ?? (block.fontStyle ?? "normal"),
+                              textDecoration: span.textDecoration ?? (block.textDecoration ?? "none"),
+                              color: span.color ?? block.color,
+                              fontSize: span.fontSize !== undefined ? `${Math.max(6, span.fontSize * SCALE)}px` : undefined,
+                            }}>{span.text}</span>
+                          ))
+                        : block.text}
                     </div>
                   );
                 }
@@ -425,18 +436,60 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
                     case "pentagon": { const r=Math.min(w,h)/2; shapeEl = <polygon points={Array.from({length:5}).map((_,i)=>{const a=(Math.PI*2/5)*i-Math.PI/2;return `${cx+r*Math.cos(a)},${cy+r*Math.sin(a)}`;}).join(" ")} {...cp} />; break; }
                   }
                   const fs = s.textFontSize ?? 60;
-                  const lines = (s.text ?? "").split("\n");
-                  const lh = fs * 1.3;
-                  const startY = cy - (lh * lines.length) / 2 + lh / 2;
-                  const anchor = s.textAlign === "left" ? "start" : s.textAlign === "right" ? "end" : "middle";
-                  const textX = s.textAlign === "left" ? x+8 : s.textAlign === "right" ? x+w-8 : cx;
-                  const textEl = s.text ? (
-                    <text textAnchor={anchor} fill={s.textColor ?? "#ffffff"} fontSize={fs}
-                      fontFamily={s.textFontFamily ?? "sans-serif"} fontWeight={s.textFontWeight ?? "normal"}
-                      fontStyle={s.textFontStyle ?? "normal"} textDecoration={s.textDecoration ?? "none"} dominantBaseline="middle">
-                      {lines.map((line, i) => <tspan key={i} x={textX} y={startY + lh * i}>{line}</tspan>)}
-                    </text>
-                  ) : null;
+                  let textEl: React.ReactNode = null;
+                  if (s.text) {
+                    const lines = s.text.split("\n");
+                    const lh = fs * 1.3;
+                    const startY = cy - (lh * lines.length) / 2 + lh / 2;
+                    const anchor = s.textAlign === "left" ? "start" : s.textAlign === "right" ? "end" : "middle";
+                    const textX = s.textAlign === "left" ? x+8 : s.textAlign === "right" ? x+w-8 : cx;
+                    const spans = s.textSpans;
+                    if (spans && spans.length > 0) {
+                      type Seg = { text: string; color?: string; fontWeight?: string; fontStyle?: string; textDecoration?: string; fontSize?: number };
+                      const lineSegs: Seg[][] = lines.map(() => []);
+                      let li = 0;
+                      for (const span of spans) {
+                        let rem = span.text;
+                        while (rem.length > 0) {
+                          const nl = rem.indexOf("\n");
+                          const chunk = nl === -1 ? rem : rem.slice(0, nl);
+                          if (chunk.length > 0 && li < lineSegs.length)
+                            lineSegs[li].push({ text: chunk, color: span.color, fontWeight: span.fontWeight, fontStyle: span.fontStyle, textDecoration: span.textDecoration, fontSize: span.fontSize });
+                          if (nl === -1) { rem = ""; } else { li++; rem = rem.slice(nl + 1); }
+                        }
+                      }
+                      textEl = (
+                        <text textAnchor={anchor} fontSize={fs}
+                          fontFamily={s.textFontFamily ?? "sans-serif"} fontWeight={s.textFontWeight ?? "normal"}
+                          fontStyle={s.textFontStyle ?? "normal"} dominantBaseline="middle">
+                          {lines.map((_, i) => (
+                            <tspan key={i} x={textX} y={startY + lh * i}>
+                              {lineSegs[i]?.length > 0
+                                ? lineSegs[i].map((seg, j) => (
+                                    <tspan key={j}
+                                      fill={seg.color ?? s.textColor ?? "#ffffff"}
+                                      fontWeight={seg.fontWeight ?? s.textFontWeight ?? "normal"}
+                                      fontStyle={seg.fontStyle ?? s.textFontStyle ?? "normal"}
+                                      textDecoration={seg.textDecoration ?? s.textDecoration ?? "none"}
+                                      fontSize={seg.fontSize !== undefined ? seg.fontSize : fs}>
+                                      {seg.text}
+                                    </tspan>
+                                  ))
+                                : <tspan fill={s.textColor ?? "#ffffff"}>{""}</tspan>}
+                            </tspan>
+                          ))}
+                        </text>
+                      );
+                    } else {
+                      textEl = (
+                        <text textAnchor={anchor} fill={s.textColor ?? "#ffffff"} fontSize={fs}
+                          fontFamily={s.textFontFamily ?? "sans-serif"} fontWeight={s.textFontWeight ?? "normal"}
+                          fontStyle={s.textFontStyle ?? "normal"} textDecoration={s.textDecoration ?? "none"} dominantBaseline="middle">
+                          {lines.map((line, i) => <tspan key={i} x={textX} y={startY + lh * i}>{line}</tspan>)}
+                        </text>
+                      );
+                    }
+                  }
                   return (
                     <svg
                       key={id}

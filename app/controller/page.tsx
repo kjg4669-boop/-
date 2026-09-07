@@ -95,6 +95,7 @@ export default function ControllerPage() {
 
   const [isLive, setIsLive] = useState(true);
   const [isFrozen, setIsFrozen] = useState(false);
+  const [frozenPreviewConfig, setFrozenPreviewConfig] = useState<LayerConfig | null>(null);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [autoAdvanceMs, setAutoAdvanceMs] = useState(5000);
   const [autoProgress, setAutoProgress] = useState(0);
@@ -107,6 +108,10 @@ export default function ControllerPage() {
   const [isClear, setIsClear] = useState(false);
   const isClearRef = useRef(false);
   useEffect(() => { isClearRef.current = isClear; }, [isClear]);
+  // isFrozenRef is the authoritative source for freeze state in callbacks/effects.
+  // Updated synchronously in handleToggleFrozen (NOT during render) so it's always
+  // ahead of React's async state update — prevents race conditions with Zustand nav events.
+  const isFrozenRef = useRef(false);
   // Sync clear state to output regardless of isLive (blackout pattern)
   const isClearFirstRender = useRef(true);
   useEffect(() => {
@@ -115,7 +120,7 @@ export default function ControllerPage() {
     const toSend: LayerConfig = isClear
       ? { ...lc, subtitle: { ...lc.subtitle, visible: false, lines: [] }, canvas: undefined }
       : lc;
-    ipc.sendSlideUpdate(toSend);
+    if (!isFrozenRef.current) ipc.sendSlideUpdate(toSend);
   }, [isClear]);
   const [isLoop, setIsLoop] = useState(false);
   const [alertInput, setAlertInput] = useState("");
@@ -202,9 +207,11 @@ export default function ControllerPage() {
   });
 
   // Stream camera frames to output window via IPC (WKWebView getUserMedia workaround)
+  // frozen=isFrozen: pauses emission without stopping the stream (instant resume on unfreeze)
   useCameraFrameStream(
     isCameraOutputActive,
     isCameraOutputActive ? (cameraDeviceIdRef.current ?? undefined) : undefined,
+    isFrozen,
   );
 
   // deep-link: .wpjson 파일 연결로 앱 열릴 때 자동 로드
@@ -425,12 +432,14 @@ export default function ControllerPage() {
         copyright: buildCopyrightString(item?.song),
       } : undefined;
       void ipc.sendSlideUpdate(toSend, readyMeta);
+      // Re-send freeze state so a reconnecting output window stays frozen if needed
+      if (isFrozenRef.current) void ipc.sendFreeze(true);
       // Stage display: always send real lines (unaffected by clear state)
       const stageToSend: LayerConfig = cleared && slide
         ? { ...lc, subtitle: { ...lc.subtitle, visible: true, lines: slide.lines ?? [], lines2: slide.lines2 ?? [] } }
         : lc;
       void ipc.sendStageSlideUpdate(stageToSend, readyMeta);
-      ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
+      if (!isFrozenRef.current) ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
       void ipc.sendBlackout(bo);
       void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
@@ -478,7 +487,7 @@ export default function ControllerPage() {
   }, []);
 
   useEffect(() => {
-    const shouldSendIpc = isLive && !isFrozen;
+    const shouldSendIpc = isLive && !isFrozenRef.current;
     const { getActiveItem, getActiveLyricSlide, getFlatSlideList, getActiveFlatSlideIndex } = useQueueStore.getState();
     const item = getActiveItem();
     const globalDefaults = loadGlobalDefaults(DEFAULT_LAYER_CONFIG);
@@ -585,7 +594,8 @@ export default function ControllerPage() {
     ipc.sendStageSlideUpdate(stageConfig, slideMeta);
 
     if (!shouldSendIpc) {
-      ipc.sendPreviewUpdate(newConfig);
+      // When frozen, don't update preview either (preview should mirror output window)
+      if (!isFrozenRef.current) ipc.sendPreviewUpdate(newConfig);
       return;
     }
 
@@ -597,7 +607,7 @@ export default function ControllerPage() {
     const songTitle = item.song?.title ?? item.label ?? "";
     void ipc.sendRemoteState(slideText, songTitle, activeLyricSlideIndex, item.song?.lyrics_json.length ?? 1).catch(() => {});
   // notesVersion excluded intentionally: Stage Display notes refresh on slide navigation (avoids IPC per keystroke)
-  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, isFrozen, setLayerConfig]);
+  }, [activeItemIndex, activeLyricSlideIndex, currentService?.id, currentService?.items.length, isLive, isClear, setLayerConfig]);
 
   // Reset per-slide history push flags on every slide navigation so the first edit after
   // navigating to a slide correctly pushes a pre-edit snapshot to the undo stack.
@@ -675,11 +685,25 @@ export default function ControllerPage() {
   const handleToggleBlackout = useCallback(() => { const n = !isBlackout; setBlackout(n); void ipc.sendBlackout(n); }, [isBlackout, setBlackout]);
   const handleToggleClear = useCallback(() => setIsClear((v) => !v), []);
   const handleToggleFrozen = useCallback(() => {
-    setIsFrozen((prev) => {
-      void ipc.sendFreeze(!prev);
-      // Slide update on unfreeze is handled by the slide-update effect (isFrozen in deps)
-      return !prev;
-    });
+    // Update ref FIRST — synchronously, before any React re-render — so all
+    // callbacks and effects immediately see the new frozen state even if Zustand
+    // triggers a navigation render before React processes setIsFrozen.
+    const newFrozen = !isFrozenRef.current;
+    isFrozenRef.current = newFrozen;
+    setIsFrozen(newFrozen);
+    if (newFrozen) {
+      // Freezing: cancel any pending debounced slide update so it doesn't slip through
+      ipc.cancelPendingSlideUpdate();
+      // Snapshot current config so docked preview stays on frozen slide
+      setFrozenPreviewConfig(useOutputStore.getState().layerConfig);
+    } else {
+      // Unfreezing: explicitly push current state to output and preview
+      const lc = useOutputStore.getState().layerConfig;
+      ipc.sendSlideUpdate(lc);
+      ipc.sendPreviewUpdate(lc);
+      setFrozenPreviewConfig(null);
+    }
+    void ipc.sendFreeze(newFrozen);
   }, []);
   const handleToggleAutoAdvance = useCallback(() => setAutoAdvance((v) => !v), []);
   const handleSendAlert = useCallback(() => {
@@ -999,7 +1023,7 @@ export default function ControllerPage() {
       };
       setLayerConfig(config);
       ipc.sendPreviewUpdate(config);
-      if (isLive) ipc.sendSlideUpdate(config);
+      if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(config);
       // Capture lyrics_json now (before debounce fires) to avoid stale service data
       const songNow = useQueueStore.getState().currentService?.items.find((i) => i.song?.id === songId)?.song;
       if (!songNow) return;
@@ -1043,7 +1067,7 @@ export default function ControllerPage() {
           : undefined,
       };
       setLayerConfig(withContent);
-      if (isLive) ipc.sendSlideUpdate(withContent);
+      if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(withContent);
       ipc.sendPreviewUpdate(withContent);
       // Auto-save layer settings to the active item (debounced)
       // Capture slideId NOW (at change time) to prevent race condition if slide navigation
@@ -1146,7 +1170,7 @@ export default function ControllerPage() {
         : (currentShapes.length > 0 ? { textBlocks: [], shapeBlocks: currentShapes, layerOrder: currentLayerOrder } : undefined),
     };
     setLayerConfig(config);
-    if (isLive) ipc.sendSlideUpdate(config);
+    if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(config);
     ipc.sendPreviewUpdate(config);
     canvasRef.current?.syncTextBlocks(newBlocks);
   }, [isLive, isClear, setLayerConfig, updateSlideCanvas]);
@@ -1167,7 +1191,7 @@ export default function ControllerPage() {
       canvas: { ...(lc.canvas ?? { textBlocks: [] }), shapeBlocks: newShapes },
     };
     setLayerConfig(config);
-    if (isLive) ipc.sendSlideUpdate(config);
+    if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(config);
     ipc.sendPreviewUpdate(config);
   }, [isLive, setLayerConfig, updateSlideCanvas]);
 
@@ -1210,7 +1234,15 @@ export default function ControllerPage() {
       useQueueStore.getState().pushHistory();
     }
     const shapes = useOutputStore.getState().layerConfig.canvas?.shapeBlocks ?? [];
-    const newShapes = shapes.map(s => s.id === selectedShapeId ? { ...s, ...patch } : s);
+    const newShapes = shapes.map(s => {
+      if (s.id !== selectedShapeId) return s;
+      const updated = { ...s, ...patch };
+      // When setting shape-level textColor, drop textSpans entirely so SVG text rendering is used
+      if ("textColor" in patch) {
+        updated.textSpans = undefined;
+      }
+      return updated;
+    });
     applyShapeUpdate(newShapes);
   }, [selectedShapeId, applyShapeUpdate]);
 
@@ -1325,7 +1357,7 @@ export default function ControllerPage() {
       updateSlideCanvas(item.song.id, slide.id, { textBlocks, shapeBlocks, layerOrder: newOrder });
     }
     setLayerConfig(config);
-    if (isLive) ipc.sendSlideUpdate(config);
+    if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(config);
     ipc.sendPreviewUpdate(config);
   }, [isLive, updateSlideCanvas, setLayerConfig]);
 
@@ -1905,7 +1937,7 @@ export default function ControllerPage() {
       // Restore visual state from snapshot (canvas textBlocks, shapes, layer config)
       setLayerConfig(snapshot.layerConfig);
       ipc.sendPreviewUpdate(snapshot.layerConfig);
-      if (isLive) ipc.sendSlideUpdate(snapshot.layerConfig);
+      if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(snapshot.layerConfig);
       // Sync SlideCanvas internal text-block state with the restored canvas
       canvasRef.current?.syncTextBlocks(snapshot.layerConfig.canvas?.textBlocks ?? []);
     } catch (e) {
@@ -1945,7 +1977,7 @@ export default function ControllerPage() {
       // Restore visual state from snapshot (canvas textBlocks, shapes, layer config)
       setLayerConfig(snapshot.layerConfig);
       ipc.sendPreviewUpdate(snapshot.layerConfig);
-      if (isLive) ipc.sendSlideUpdate(snapshot.layerConfig);
+      if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(snapshot.layerConfig);
       // Sync SlideCanvas internal text-block state with the restored canvas
       canvasRef.current?.syncTextBlocks(snapshot.layerConfig.canvas?.textBlocks ?? []);
     } catch (e) {
@@ -2396,7 +2428,7 @@ export default function ControllerPage() {
                     className="text-zinc-600 hover:text-zinc-200 text-xs px-1 rounded hover:bg-zinc-700"
                   >↗</button>
                 </div>
-                <OutputPreview layerConfig={layerConfig} isBlackout={isBlackout} isLive={isLive} />
+                <OutputPreview layerConfig={frozenPreviewConfig ?? layerConfig} isBlackout={isBlackout} isLive={isLive} />
               </div>
             ) : (
               <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">

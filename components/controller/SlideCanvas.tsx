@@ -150,7 +150,15 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
 
     useImperativeHandle(ref, () => ({
       updateBlock(id, patch) {
-        setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+        setBlocks((prev) => prev.map((b) => {
+          if (b.id !== id) return b;
+          const updated = { ...b, ...patch };
+          // When setting block-level color, clear per-span colors so block.color takes effect
+          if ("color" in patch && updated.spans) {
+            updated.spans = updated.spans.map(s => ({ ...s, color: undefined }));
+          }
+          return updated;
+        }));
       },
       addBlock() {
         const id = `${idPrefix}-${Date.now()}-${nextNum.current++}`;
@@ -207,11 +215,12 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         setBlocks(newBlocks);
       },
       applyFormatToShapeText(shapeId, patch) {
-        if (editingShapeId !== shapeId) return false;
         // 라이브 선택 우선, 없으면 grace period 저장값 사용
         const liveRange = editingShapeSelectionRef.current;
         const savedRange = lastShapeSelectionRef.current?.shapeId === shapeId &&
           Date.now() - lastShapeSelectionRef.current.time < 30000 ? lastShapeSelectionRef.current : null;
+        // 편집 중이 아니어도 grace period 내 저장된 선택 범위 있으면 허용
+        if (editingShapeId !== shapeId && !savedRange) return false;
         const selRange = (liveRange && liveRange.start !== liveRange.end) ? liveRange
           : (savedRange && savedRange.start !== savedRange.end) ? savedRange : null;
         if (!selRange) return false;
