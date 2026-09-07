@@ -632,18 +632,26 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
         if (start !== end) {
           editingSelectionRef.current = { start, end };
           lastSelectionRef.current = { blockId: editingId, start, end, time: Date.now() };
-          // 선택 범위 첫 스팬의 서식을 콜백으로 전달 (툴바 활성 상태용)
+          // 선택 범위 내 모든 스팬 스캔 → 가장 큰 fontSize 사용
           const { spans } = htmlToSpans(el.innerHTML);
-          let pos = 0, selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          let pos = 0;
+          let selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          let maxFs = 0;
           for (const span of spans) {
-            if (pos + span.text.length > start) {
+            const spanLen = span.text.length;
+            if (pos < end && pos + spanLen > start) {
               const { text: _t, ...fmt } = span;
-              selFmt = Object.keys(fmt).length > 0 ? fmt : null;
-              break;
+              if (selFmt === null) {
+                selFmt = Object.keys(fmt).length > 0 ? { ...fmt } : {};
+                maxFs = fmt.fontSize ?? 0;
+              } else if ((fmt.fontSize ?? 0) > maxFs) {
+                maxFs = fmt.fontSize!;
+                if (selFmt) selFmt = Object.assign({}, selFmt, { fontSize: maxFs });
+              }
             }
-            pos += span.text.length;
+            pos += spanLen;
           }
-          onSelectionFormatChangeRef.current?.(selFmt);
+          onSelectionFormatChangeRef.current?.(selFmt && Object.keys(selFmt).length > 0 ? selFmt : null);
         } else {
           editingSelectionRef.current = null;
           onSelectionFormatChangeRef.current?.(null);
@@ -687,12 +695,24 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
           editingShapeSelectionRef.current = { start, end };
           lastShapeSelectionRef.current = { shapeId: editingShapeId, start, end, time: Date.now() };
           const { spans } = htmlToSpans(el.innerHTML);
-          let pos = 0, selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          let pos = 0;
+          let selFmt: Partial<Omit<TextSpan, "text">> | null = null;
+          let maxFs = 0;
           for (const span of spans) {
-            if (pos + span.text.length > start) { const { text: _t, ...fmt } = span; selFmt = Object.keys(fmt).length > 0 ? fmt : null; break; }
-            pos += span.text.length;
+            const spanLen = span.text.length;
+            if (pos < end && pos + spanLen > start) {
+              const { text: _t, ...fmt } = span;
+              if (selFmt === null) {
+                selFmt = Object.keys(fmt).length > 0 ? { ...fmt } : {};
+                maxFs = fmt.fontSize ?? 0;
+              } else if ((fmt.fontSize ?? 0) > maxFs) {
+                maxFs = fmt.fontSize!;
+                if (selFmt) selFmt = Object.assign({}, selFmt, { fontSize: maxFs });
+              }
+            }
+            pos += spanLen;
           }
-          onSelectionFormatChangeRef.current?.(selFmt);
+          onSelectionFormatChangeRef.current?.(selFmt && Object.keys(selFmt).length > 0 ? selFmt : null);
         } else {
           editingShapeSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null);
         }

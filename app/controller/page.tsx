@@ -1672,24 +1672,23 @@ export default function ControllerPage() {
   type FmtPatch = { fontFamily?: string; fontSize?: number; fontWeight?: "normal" | "bold"; fontStyle?: "normal" | "italic"; textDecoration?: "none" | "underline" | "line-through"; color?: string; textAlign?: "left" | "center" | "right" };
 
   const handleFormat = useCallback((patch: FmtPatch) => {
+    // 자막에 항상 적용
+    handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...(patch as Partial<LayerConfig["subtitle"]>) } });
+    // 선택된 블록/도형에도 동시 적용 (전체 적용)
     if (selectedBlock && canvasRef.current) {
-      // 먼저 선택 범위에 적용 시도
       const applied = canvasRef.current.applyFormatToSelection(
         selectedBlock.id,
         patch as Partial<Omit<TextSpan, "text">>
       );
       if (!applied) {
-        // 선택 범위 없으면 전체 블록에 적용
         canvasRef.current.updateBlock(selectedBlock.id, patch);
       }
     } else if (selectedShapeId) {
-      // 도형 텍스트 — 먼저 선택 범위에 적용 시도
       const applied = canvasRef.current?.applyFormatToShapeText(
         selectedShapeId,
         patch as Partial<Omit<TextSpan, "text">>
       );
       if (!applied) {
-        // 선택 범위 없으면 전체 기본 속성 업데이트
         const shapePatch: Partial<ShapeBlock> = {};
         if (patch.fontFamily !== undefined) shapePatch.textFontFamily = patch.fontFamily;
         if (patch.fontSize !== undefined) shapePatch.textFontSize = patch.fontSize;
@@ -1700,34 +1699,17 @@ export default function ControllerPage() {
         if (patch.textAlign !== undefined) shapePatch.textAlign = patch.textAlign;
         handleUpdateShape(shapePatch);
       }
-    } else {
-      handleLayerChange({ ...layerConfig, subtitle: { ...layerConfig.subtitle, ...(patch as Partial<LayerConfig["subtitle"]>) } });
     }
   }, [selectedBlock, selectedShapeId, handleUpdateShape, layerConfig, handleLayerChange]);
 
-  const fmt: Required<FmtPatch> = selectedBlock ? {
-    fontFamily: selectionFormat?.fontFamily ?? selectedBlock.fontFamily,
-    fontSize: selectionFormat?.fontSize ?? selectedBlock.fontSize,
-    fontWeight: selectionFormat?.fontWeight ?? (selectedBlock.fontWeight ?? "normal"),
-    fontStyle: selectionFormat?.fontStyle ?? (selectedBlock.fontStyle ?? "normal"),
-    textDecoration: selectionFormat?.textDecoration ?? (selectedBlock.textDecoration ?? "none"),
-    color: selectionFormat?.color ?? selectedBlock.color,
-    textAlign: selectedBlock.textAlign ?? "center",
-  } : selectedShape ? {
-    fontFamily: selectionFormat?.fontFamily ?? selectedShape.textFontFamily ?? "sans-serif",
-    fontSize: selectionFormat?.fontSize ?? selectedShape.textFontSize ?? 60,
-    fontWeight: selectionFormat?.fontWeight ?? (selectedShape.textFontWeight as "normal" | "bold") ?? "normal",
-    fontStyle: selectionFormat?.fontStyle ?? (selectedShape.textFontStyle as "normal" | "italic") ?? "normal",
-    textDecoration: selectionFormat?.textDecoration ?? selectedShape.textDecoration ?? "none",
-    color: selectionFormat?.color ?? selectedShape.textColor ?? "#ffffff",
-    textAlign: selectedShape.textAlign ?? "center",
-  } : {
-    fontFamily: layerConfig.subtitle.fontFamily,
-    fontSize: layerConfig.subtitle.fontSize,
-    fontWeight: layerConfig.subtitle.fontWeight ?? "normal",
-    fontStyle: layerConfig.subtitle.fontStyle ?? "normal",
-    textDecoration: layerConfig.subtitle.textDecoration ?? "none",
-    color: layerConfig.subtitle.color,
+  // 리본 바: 텍스트 드래그 선택 중이면 선택 서식(가장 큰 크기 우선), 아니면 항상 자막 서식
+  const fmt: Required<FmtPatch> = {
+    fontFamily: selectionFormat?.fontFamily ?? layerConfig.subtitle.fontFamily,
+    fontSize: selectionFormat?.fontSize ?? layerConfig.subtitle.fontSize,
+    fontWeight: selectionFormat?.fontWeight ?? (layerConfig.subtitle.fontWeight ?? "normal"),
+    fontStyle: selectionFormat?.fontStyle ?? (layerConfig.subtitle.fontStyle ?? "normal"),
+    textDecoration: selectionFormat?.textDecoration ?? (layerConfig.subtitle.textDecoration ?? "none"),
+    color: selectionFormat?.color ?? layerConfig.subtitle.color,
     textAlign: layerConfig.subtitle.textAlign ?? "center",
   };
 
