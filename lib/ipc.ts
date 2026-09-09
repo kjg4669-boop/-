@@ -78,23 +78,44 @@ export async function invokeCommand<T>(command: string, args?: Record<string, un
 
 // Debounce: coalesce rapid slide updates to prevent subtitle flickering
 let _pendingSlideConfig: LayerConfig | null = null;
+let _pendingLivestreamConfig: LayerConfig | undefined = undefined;
 let _pendingMeta: SlideMeta | undefined = undefined;
 let _slideDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // High-level IPC helpers
 export const ipc = {
-  sendSlideUpdate: (layerConfig: LayerConfig, meta?: SlideMeta): void => {
+  sendSlideUpdate: (layerConfig: LayerConfig, meta?: SlideMeta, livestreamConfig?: LayerConfig): void => {
     _pendingSlideConfig = layerConfig;
+    _pendingLivestreamConfig = livestreamConfig;
     _pendingMeta = meta;
     if (_slideDebounceTimer) clearTimeout(_slideDebounceTimer);
     _slideDebounceTimer = setTimeout(() => {
       _slideDebounceTimer = null;
       if (_pendingSlideConfig) {
-        void emitEvent<SlideUpdatePayload>("slide:update", { layerConfig: _pendingSlideConfig, meta: _pendingMeta });
+        const payload: SlideUpdatePayload = {
+          layerConfig: _pendingSlideConfig,
+          meta: _pendingMeta,
+        };
+        if (_pendingLivestreamConfig) {
+          payload.profiles = {
+            audience: _pendingSlideConfig,
+            livestream: _pendingLivestreamConfig,
+          };
+        }
+        void emitEvent<SlideUpdatePayload>("slide:update", payload);
         _pendingSlideConfig = null;
+        _pendingLivestreamConfig = undefined;
         _pendingMeta = undefined;
       }
     }, 30);
+  },
+
+  // Cancel any pending debounced slide update (call when freezing to avoid stale sends)
+  cancelPendingSlideUpdate: (): void => {
+    if (_slideDebounceTimer) { clearTimeout(_slideDebounceTimer); _slideDebounceTimer = null; }
+    _pendingSlideConfig = null;
+    _pendingLivestreamConfig = undefined;
+    _pendingMeta = undefined;
   },
 
   sendSubtitleNext: () => emitEvent("subtitle:next", {}),
@@ -109,6 +130,12 @@ export const ipc = {
 
   onSlideUpdateFull: (cb: (config: LayerConfig, meta?: SlideMeta) => void) =>
     listenEvent<SlideUpdatePayload>("slide:update", (p) => cb(p.layerConfig, p.meta)),
+
+  // Livestream 창 전용: profiles.livestream이 있으면 그것을, 없으면 audience(layerConfig) fallback
+  onLivestreamUpdate: (cb: (config: LayerConfig, meta?: SlideMeta) => void) =>
+    listenEvent<SlideUpdatePayload>("slide:update", (p) =>
+      cb(p.profiles?.livestream ?? p.layerConfig, p.meta)
+    ),
 
   onSubtitleNext: (cb: () => void) => listenEvent("subtitle:next", cb),
 

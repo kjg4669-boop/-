@@ -123,7 +123,7 @@ export type ServiceItemType = "song" | "video" | "announcement" | "scripture" | 
 export interface LayerConfig {
   transitionMs?: number;
   background: {
-    type: MediaType | "none";
+    type: MediaType | "none" | "transparent";
     src?: string;
     color?: string;
     loop?: boolean;
@@ -313,7 +313,49 @@ export interface SlideMeta {
   copyright?: string;
 }
 
-export interface SlideUpdatePayload { layerConfig: LayerConfig; meta?: SlideMeta; }
+export interface SlideUpdatePayload {
+  layerConfig: LayerConfig;          // audience (하위 호환)
+  profiles?: {
+    audience: LayerConfig;
+    livestream: LayerConfig;
+  };
+  meta?: SlideMeta;
+}
+
+export const DEFAULT_LIVESTREAM_LAYER_CONFIG: LayerConfig = {
+  transitionMs: 300,
+  background: { type: "transparent", opacity: 1 },
+  subtitle: {
+    visible: false,
+    lines: [],
+    fontSize: 36,
+    fontFamily: "sans-serif",
+    color: "#ffffff",
+    strokeColor: "#000000",
+    strokeWidth: 2,
+    shadowEnabled: true,
+    backgroundBoxVisible: true,
+    backgroundBoxOpacity: 0.6,
+    position: "bottom",
+    opacity: 1,
+    fontWeight: "normal",
+    fontStyle: "normal",
+    textAlign: "center",
+    bilingualEnabled: false,
+    lines2: [],
+    fontSize2: 22,
+    color2: "#cccccc",
+    fontWeight2: "normal",
+    fontStyle2: "normal",
+    textEntrance: "fade",
+    textEntranceIntensity: 30,
+    layout: "full",
+    showCopyright: false,
+    lineHeight: 1.3,
+    letterSpacing: 0,
+  },
+  overlay: { visible: false, x: 0, y: 0, width: 320, height: 180, opacity: 1 },
+};
 export interface OverlayTogglePayload { id: string; visible: boolean; }
 export interface PlaybackStatusPayload { currentTime: number; duration: number; playing: boolean; }
 export interface AlertPayload {
