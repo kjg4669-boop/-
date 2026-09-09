@@ -223,9 +223,7 @@ pub fn run() {
             app.manage(remote::RemoteServerState::new());
             app.manage(ndi_output::NdiOutputState::new());
             let ls_state = livestream_server::LivestreamServerState::new();
-            let ls_tx = ls_state.state_tx.clone();
-            let abort = livestream_server::start(ls_tx);
-            if let Ok(mut guard) = ls_state.abort_handle.lock() { *guard = Some(abort); }
+            livestream_server::start(ls_state.state_tx.clone());
             app.manage(ls_state);
 
             // ── 파일 메뉴 ──────────────────────────────────────────────────

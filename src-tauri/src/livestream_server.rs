@@ -16,17 +16,13 @@ use tokio::sync::broadcast;
 pub const LIVESTREAM_PORT: u16 = 4316;
 
 pub struct LivestreamServerState {
-    pub abort_handle: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
     pub state_tx: broadcast::Sender<String>,
 }
 
 impl LivestreamServerState {
     pub fn new() -> Self {
         let (state_tx, _) = broadcast::channel(32);
-        Self {
-            abort_handle: std::sync::Mutex::new(None),
-            state_tx,
-        }
+        Self { state_tx }
     }
 }
 
@@ -115,15 +111,15 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AxumLsState>) {
     }
 }
 
-/// Start the livestream HTTP server. Returns immediately; server runs in background task.
-pub fn start(state_tx: broadcast::Sender<String>) -> tokio::task::AbortHandle {
+/// Start the livestream HTTP server. Runs for the lifetime of the app.
+pub fn start(state_tx: broadcast::Sender<String>) {
     let axum_state = Arc::new(AxumLsState { state_tx });
     let router = Router::new()
         .route("/livestream", get(page_handler))
         .route("/livestream-ws", get(ws_handler))
         .with_state(axum_state);
 
-    let handle = tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], LIVESTREAM_PORT));
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(l) => l,
@@ -136,8 +132,6 @@ pub fn start(state_tx: broadcast::Sender<String>) -> tokio::task::AbortHandle {
             eprintln!("[livestream-server] serve error: {}", e);
         }
     });
-
-    handle.abort_handle()
 }
 
 #[tauri::command]
