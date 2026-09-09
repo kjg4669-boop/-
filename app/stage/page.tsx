@@ -34,7 +34,7 @@ async function closeWindow() {
 export default function StagePage() {
   const [layerConfig, setLayerConfig] = useState<LayerConfig | null>(null);
   const [meta, setMeta] = useState<SlideMeta | null>(null);
-  const [stageAlert, setStageAlert] = useState<{ text: string; position: string; bgColor: string; textColor: string; } | null>(null);
+  const [stageAlert, setStageAlert] = useState<{ text: string; position: "top" | "center" | "bottom"; bgColor: string; textColor: string; } | null>(null);
   const [stageMsg, setStageMsg] = useState<{ text: string } | null>(null);
   const [countdown, setCountdown] = useState<CountdownPayload | null>(null);
   const [announcement, setAnnouncement] = useState<AnnouncementShowPayload>({ visible: false, title: "", body: "" });
@@ -369,7 +369,7 @@ export default function StagePage() {
       {stageAlert && (
         <AlertBanner
           text={stageAlert.text}
-          position={stageAlert.position as "top" | "center" | "bottom"}
+          position={stageAlert.position}
           bgColor={stageAlert.bgColor}
           textColor={stageAlert.textColor}
         />

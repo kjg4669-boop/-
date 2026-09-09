@@ -411,7 +411,7 @@ export default function ControllerPage() {
     let mounted = true;
     let unlisten: (() => void) | null = null;
     void ipc.onOutputReady(() => {
-      const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av } = useOutputStore.getState();
+      const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av, alertPosition: ap, alertBgColor: abc, alertTextColor: atc } = useOutputStore.getState();
       const cleared = isClearRef.current;
       const toSend: LayerConfig = cleared
         ? { ...lc, subtitle: { ...lc.subtitle, visible: false, lines: [] }, canvas: undefined }
@@ -450,7 +450,7 @@ export default function ControllerPage() {
       void ipc.sendStageSlideUpdate(stageToSend, readyMeta);
       if (!isFrozenRef.current) ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
       void ipc.sendBlackout(bo);
-      void ipc.sendAlert({ text: at, visible: av, duration: 0, position: "bottom" });
+      void ipc.sendAlert({ text: at, visible: av, duration: 0, position: ap, backgroundColor: abc, textColor: atc });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
       void ipc.sendScaleMode(useSettingsStore.getState().outputScaleMode);
       void ipc.sendVideoSettings(useSettingsStore.getState().videoFit, useSettingsStore.getState().fpsLimit, useSettingsStore.getState().cameraMirror);
@@ -723,6 +723,7 @@ export default function ControllerPage() {
     setAlert(alertInput.trim(), true);
     setAlertActive(true);
     void ipc.sendAlert({ text: alertInput.trim(), visible: true, duration: 0, position: "bottom" });
+    setAlertInput("");
   }, [alertInput, setAlert]);
   const handleClearAlert = useCallback(() => {
     setAlert("", false);
