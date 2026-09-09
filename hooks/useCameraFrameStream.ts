@@ -1,13 +1,19 @@
 "use client";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { emitEvent } from "@/lib/ipc";
 
 /**
  * Captures frames from the specified camera and streams them via IPC
  * ("camera:frame" event) so the output window can render them without
  * needing its own getUserMedia() call (WKWebView restriction workaround).
+ *
+ * When frozen=true, frame emission is paused but the stream stays alive
+ * so it can resume instantly on unfreeze without a getUserMedia restart.
  */
-export function useCameraFrameStream(active: boolean, deviceId: string | undefined) {
+export function useCameraFrameStream(active: boolean, deviceId: string | undefined, frozen: boolean = false) {
+  const frozenRef = useRef(frozen);
+  frozenRef.current = frozen;
+
   useEffect(() => {
     if (!active || !deviceId) return;
 
@@ -34,6 +40,7 @@ export function useCameraFrameStream(active: boolean, deviceId: string | undefin
 
         intervalId = setInterval(() => {
           if (video.readyState < 2) return;
+          if (frozenRef.current) return; // Pause emission when frozen
           ctx.drawImage(video, 0, 0, 1280, 720);
           const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
           void emitEvent("camera:frame", { data: dataUrl });

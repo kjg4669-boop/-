@@ -63,10 +63,12 @@ import HelpOverlay from "@/components/controller/HelpOverlay";
 import RemotePanel from "@/components/controller/RemotePanel";
 import NdiPanel from "@/components/controller/NdiPanel";
 import VideoPanel from "@/components/controller/VideoPanel";
+import LivestreamSection from "@/components/controller/LivestreamSection";
 import { useVideoStore } from "@/stores/videoStore";
 import type { RemoteCommand, ServiceItemSettings, MediaItem } from "@/lib/types";
+import { DEFAULT_LIVESTREAM_LAYER_CONFIG } from "@/lib/types";
 
-type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video" | "livestream";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
 
 function buildCopyrightString(song?: { copyright_text?: string; ccli_number?: string; publisher?: string } | null): string {
@@ -130,7 +132,7 @@ export default function ControllerPage() {
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
-  const [tabOrder, setTabOrder] = useState<RightTab[]>(["queue", "songs", "video", "alert", "settings", "announcement"]);
+  const [tabOrder, setTabOrder] = useState<RightTab[]>(["queue", "songs", "video", "alert", "settings", "announcement", "livestream"]);
   const [removedTabs, setRemovedTabs] = useState<RightTab[]>(["looks", "remote", "ndi"]);
   const [draggingTab, setDraggingTab] = useState<RightTab | null>(null);
   const [dragOverTab, setDragOverTab] = useState<RightTab | null>(null);
@@ -150,6 +152,10 @@ export default function ControllerPage() {
   const leftResizeRef = useRef<{ startX: number; startW: number } | null>(null);
   const [previewDocked, setPreviewDocked] = useState(true);
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>("home");
+  const [livestreamLayerConfig, setLivestreamLayerConfig] = useState<LayerConfig>(DEFAULT_LIVESTREAM_LAYER_CONFIG);
+  const [livestreamObsPort] = useState(4316);
+  const livestreamLayerConfigRef = useRef(livestreamLayerConfig);
+  useEffect(() => { livestreamLayerConfigRef.current = livestreamLayerConfig; }, [livestreamLayerConfig]);
   const [serviceNotes, setServiceNotes] = useState("");
   const [selectedBlock, setSelectedBlock] = useState<TextBlock | null>(null);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
@@ -431,7 +437,10 @@ export default function ControllerPage() {
         notes: item.notes,
         copyright: buildCopyrightString(item?.song),
       } : undefined;
-      void ipc.sendSlideUpdate(toSend, readyMeta);
+      const lsConfig = livestreamLayerConfigRef.current;
+      const lsToSend: LayerConfig = { ...lsConfig, subtitle: { ...lsConfig.subtitle, visible: toSend.subtitle.visible, lines: toSend.subtitle.lines, lines2: toSend.subtitle.lines2 } };
+      void ipc.sendSlideUpdate(toSend, readyMeta, lsToSend);
+      ipc.sendLivestreamUpdate(lsToSend);
       // Re-send freeze state so a reconnecting output window stays frozen if needed
       if (isFrozenRef.current) void ipc.sendFreeze(true);
       // Stage display: always send real lines (unaffected by clear state)
@@ -599,7 +608,10 @@ export default function ControllerPage() {
       return;
     }
 
-    ipc.sendSlideUpdate(newConfig, slideMeta);
+    const lsCfg = livestreamLayerConfigRef.current;
+    const lsSend: LayerConfig = { ...lsCfg, subtitle: { ...lsCfg.subtitle, visible: newConfig.subtitle.visible, lines: newConfig.subtitle.lines, lines2: newConfig.subtitle.lines2 } };
+    ipc.sendSlideUpdate(newConfig, slideMeta, lsSend);
+    ipc.sendLivestreamUpdate(lsSend);
     ipc.sendPreviewUpdate(newConfig); // keep floating preview in sync when isLive
 
     // Sync state to any connected web remote clients
@@ -728,6 +740,9 @@ export default function ControllerPage() {
     if (isStageOpen) { ipc.closeStageWindow().catch(console.error); setIsStageOpen(false); }
     else { ipc.openStageWindow().catch(console.error); setIsStageOpen(true); }
   }, [isStageOpen]);
+  const handleOpenLivestreamWindow = useCallback(() => {
+    ipc.openLivestreamWindow().catch(console.error);
+  }, []);
   const handleSendStageMsg = useCallback(() => {
     if (!stageMsgText.trim()) return;
     setStageMsgActive(true);
@@ -797,7 +812,7 @@ export default function ControllerPage() {
     canvasRef.current?.addBlock();
   }, []);
   const handleOpenDesignPanel = useCallback(() => { setShowPanel(true); setRightTab("settings"); }, []);
-  const TAB_LABELS_WIN: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상" };
+  const TAB_LABELS_WIN: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상", livestream: "방송" };
   const openTabAsWindow = useCallback(async (tab: RightTab, screenX?: number, screenY?: number) => {
     if (openedWindowsRef.current.has(tab)) return;
     try {
@@ -1705,7 +1720,10 @@ export default function ControllerPage() {
   // 리본 바: 텍스트 드래그 선택 중이면 선택 서식(가장 큰 크기 우선), 아니면 항상 자막 서식
   const fmt: Required<FmtPatch> = {
     fontFamily: selectionFormat?.fontFamily ?? layerConfig.subtitle.fontFamily,
-    fontSize: selectionFormat?.fontSize ?? layerConfig.subtitle.fontSize,
+    // 선택 중(selectionFormat non-null)이면 block/shape 기본 크기 fallback, 아니면 자막 크기
+    fontSize: selectionFormat !== null
+      ? (selectionFormat.fontSize ?? (selectedBlock?.fontSize ?? (selectedShape?.textFontSize ?? layerConfig.subtitle.fontSize)))
+      : layerConfig.subtitle.fontSize,
     fontWeight: selectionFormat?.fontWeight ?? (layerConfig.subtitle.fontWeight ?? "normal"),
     fontStyle: selectionFormat?.fontStyle ?? (layerConfig.subtitle.fontStyle ?? "normal"),
     textDecoration: selectionFormat?.textDecoration ?? (layerConfig.subtitle.textDecoration ?? "none"),
@@ -2435,7 +2453,7 @@ export default function ControllerPage() {
                 <button onClick={() => setPanelFloating(false)} className="text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-700 px-2 py-0.5 rounded border border-zinc-700">⊟ 도킹</button>
               </div>
             ) : (() => {
-              const TAB_LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상" };
+              const TAB_LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상", livestream: "방송" };
               return (
                 <div
                   ref={tabBarRef}
@@ -2554,6 +2572,14 @@ export default function ControllerPage() {
                     {rightTab === "announcement" && <AnnouncementPanel />}
                     {rightTab === "video" && (
                       <VideoPanel layerConfig={layerConfig} onChange={handleLayerChange} />
+                    )}
+                    {rightTab === "livestream" && (
+                      <LivestreamSection
+                        layerConfig={livestreamLayerConfig}
+                        onChange={setLivestreamLayerConfig}
+                        onOpenWindow={handleOpenLivestreamWindow}
+                        obsPort={livestreamObsPort}
+                      />
                     )}
                   </>
                 )}

@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"which gh && gh auth status 2>&1 | head -5\",\"description\":\"Check GitHub CLI status\"}",
-  "error": "Exit code 1\ngh not found\n\ngh not found",
-  "timestamp": "2026-08-24T04:51:27.733Z",
+  "tool_input_preview": "{\"command\":\"npx tsc --noEmit 2>&1\",\"timeout\":60000}",
+  "error": "Exit code 2\napp/livestream/page.tsx(71,28): error TS2739: Type 'LayerConfig' is missing the following properties from type '{ type: MediaType | \"none\" | \"transparent\"; src?: string | undefined; color?: string | undefined; loop?: boolean | undefined; opacity: number; }': type, opacity\napp/livestream/page.tsx(72,26): error TS2740: Type 'LayerConfig' is missing the following properties from type '{ visible: boolean; lines: string[]; fontSize: number; fontFamily: string; color: string; strokeColor: ...",
+  "timestamp": "2026-09-09T15:00:45.688Z",
   "retry_count": 1
 }

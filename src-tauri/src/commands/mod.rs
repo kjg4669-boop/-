@@ -189,3 +189,29 @@ pub async fn close_preview_window(app: AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub async fn open_livestream_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("livestream") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, "livestream", WebviewUrl::App("/livestream".into()))
+        .title("방송 출력 (Livestream)")
+        .inner_size(1280.0, 720.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn close_livestream_window(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("livestream") {
+        window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

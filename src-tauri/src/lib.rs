@@ -2,6 +2,7 @@ mod commands;
 mod display;
 mod remote;
 mod ndi_output;
+mod livestream_server;
 
 #[tauri::command]
 fn open_system_camera_settings() -> Result<(), String> {
@@ -211,6 +212,9 @@ pub fn run() {
             commands::close_preview_window,
             commands::set_preview_config,
             commands::get_preview_config,
+            commands::open_livestream_window,
+            commands::close_livestream_window,
+            livestream_server::send_livestream_update,
             open_system_camera_settings,
             request_camera_permission_native,
         ])
@@ -218,6 +222,11 @@ pub fn run() {
             app.manage(commands::PreviewConfigState::new());
             app.manage(remote::RemoteServerState::new());
             app.manage(ndi_output::NdiOutputState::new());
+            let ls_state = livestream_server::LivestreamServerState::new();
+            let ls_tx = ls_state.state_tx.clone();
+            let abort = livestream_server::start(ls_tx);
+            if let Ok(mut guard) = ls_state.abort_handle.lock() { *guard = Some(abort); }
+            app.manage(ls_state);
 
             // ── 파일 메뉴 ──────────────────────────────────────────────────
             let f_new     = MenuItem::with_id(app, "new_service",      "새 예배",                true, Some("CmdOrCtrl+N"))?;

@@ -651,7 +651,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
             }
             pos += spanLen;
           }
-          onSelectionFormatChangeRef.current?.(selFmt && Object.keys(selFmt).length > 0 ? selFmt : null);
+          onSelectionFormatChangeRef.current?.(selFmt);
         } else {
           editingSelectionRef.current = null;
           onSelectionFormatChangeRef.current?.(null);
@@ -712,7 +712,7 @@ const SlideCanvas = forwardRef<SlideCanvasHandle, Props>(
             }
             pos += spanLen;
           }
-          onSelectionFormatChangeRef.current?.(selFmt && Object.keys(selFmt).length > 0 ? selFmt : null);
+          onSelectionFormatChangeRef.current?.(selFmt);
         } else {
           editingShapeSelectionRef.current = null; onSelectionFormatChangeRef.current?.(null);
         }

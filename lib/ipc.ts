@@ -181,6 +181,9 @@ export const ipc = {
   openStageWindow: () => invokeCommand("open_stage_display"),
   closeStageWindow: () => invokeCommand("close_stage_display"),
 
+  openLivestreamWindow: () => invokeCommand("open_livestream_window"),
+  closeLivestreamWindow: () => invokeCommand("close_livestream_window"),
+
   // Countdown Timer
   sendCountdown: (payload: CountdownPayload) =>
     emitEvent<CountdownPayload>("countdown:update", payload),
@@ -304,6 +307,11 @@ export const ipc = {
     emitEvent<StageMessagePayload>("stage:message", payload),
   onStageMessage: (cb: (payload: StageMessagePayload) => void) =>
     listenEvent<StageMessagePayload>("stage:message", cb),
+
+  // OBS browser source: broadcast current slide config to livestream HTTP server
+  sendLivestreamUpdate: (config: LayerConfig): void => {
+    void invokeCommand<void>("send_livestream_update", { payload: JSON.stringify(config) });
+  },
 
   // Camera frame streaming (controller → output window)
   // Controller captures frames via canvas and emits; output window listens as fallback
