@@ -365,6 +365,8 @@ export interface AlertPayload {
   position: "top" | "bottom" | "center";
   backgroundColor?: string;
   textColor?: string;
+  yPercent?: number;   // 0–100, vertical position (overrides position preset when set)
+  fontSize?: number;   // font size in 1920×1080 canvas px
 }
 
 export interface RemoteCommand {

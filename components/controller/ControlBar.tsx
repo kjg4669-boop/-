@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Tv, Monitor, Mic, ChevronDown, Camera } from "lucide-react";
+import { Tv, Monitor, Mic, ChevronDown, Camera, Settings } from "lucide-react";
 import type { DisplayInfo } from "@/lib/types";
 import type { OutputScaleMode, VideoFit } from "@/stores/settingsStore";
 import { ipc } from "@/lib/ipc";
@@ -39,7 +39,7 @@ interface Props {
   alertInput: string;
   onSetAlertInput: (v: string) => void;
   alertActive: boolean;
-  onSendAlert: () => void;
+  onSendAlert: (yPercent: number, fontSize: number, duration: number) => void;
   onClearAlert: () => void;
 
   displays: DisplayInfo[];
@@ -105,6 +105,14 @@ export default function ControlBar({
   const outputBtnRef = useRef<HTMLButtonElement>(null);
   const outputMenuRef = useRef<HTMLDivElement>(null);
 
+  const [alertYPercent, setAlertYPercent] = useState(90);
+  const [alertFontSize, setAlertFontSize] = useState(48);
+  const [alertDuration, setAlertDuration] = useState(5000);
+  const [showAlertSettings, setShowAlertSettings] = useState(false);
+  const [alertSettingsPos, setAlertSettingsPos] = useState({ top: 0, left: 0 });
+  const alertSettingsBtnRef = useRef<HTMLButtonElement>(null);
+  const alertSettingsRef = useRef<HTMLDivElement>(null);
+
   const [previewCameraId, setPreviewCameraId] = useState<string | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
 
@@ -155,6 +163,20 @@ export default function ControlBar({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showOutputMenu]);
+
+  useEffect(() => {
+    if (!showAlertSettings) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        alertSettingsRef.current && !alertSettingsRef.current.contains(e.target as Node) &&
+        alertSettingsBtnRef.current && !alertSettingsBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowAlertSettings(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showAlertSettings]);
 
   const countdownLabel = countdownActive
     ? countdownRemainingMs > 0
@@ -241,12 +263,67 @@ export default function ControlBar({
 
       <input type="text" placeholder="자막 경보..." value={alertInput}
         onChange={(e) => onSetAlertInput(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter" && alertInput.trim()) onSendAlert(); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && alertInput.trim()) onSendAlert(alertYPercent, alertFontSize, alertDuration); }}
         className="bg-zinc-700 border border-zinc-600 rounded px-2 py-1 text-white w-24 outline-none focus:border-orange-500" />
-      <button onClick={() => { if (alertInput.trim()) onSendAlert(); }} disabled={!alertInput.trim()}
+      <button onClick={() => { if (alertInput.trim()) onSendAlert(alertYPercent, alertFontSize, alertDuration); }} disabled={!alertInput.trim()}
         className={`px-2 py-1 rounded ${alertActive ? "bg-orange-600 hover:bg-orange-700" : "bg-zinc-700 hover:bg-zinc-600"} text-white disabled:opacity-40`}>
         전송
       </button>
+      <div className="relative">
+        <button
+          ref={alertSettingsBtnRef}
+          onClick={() => {
+            const rect = alertSettingsBtnRef.current?.getBoundingClientRect();
+            if (rect) setAlertSettingsPos({ top: rect.bottom + 4, left: rect.left });
+            setShowAlertSettings((v) => !v);
+          }}
+          title="자막 경보 설정"
+          className={`px-1.5 py-1 rounded ${showAlertSettings ? "bg-zinc-600 text-white" : "bg-zinc-700 hover:bg-zinc-600 text-zinc-400"}`}
+        >
+          <Settings size={13} />
+        </button>
+        {showAlertSettings && (
+          <div
+            ref={alertSettingsRef}
+            style={{ position: "fixed", top: alertSettingsPos.top, left: alertSettingsPos.left, zIndex: 9999 }}
+            className="bg-zinc-800 border border-zinc-600 rounded shadow-xl p-3 space-y-2 min-w-[180px]"
+          >
+            <p className="text-zinc-400 text-xs uppercase tracking-wider">위치</p>
+            <div className="flex gap-1">
+              {([["상단", 5], ["중앙", 50], ["하단", 90]] as const).map(([label, y]) => (
+                <button key={label}
+                  onClick={() => setAlertYPercent(y)}
+                  className={`flex-1 py-1 rounded text-xs ${Math.abs(alertYPercent - y) < 20 ? "bg-blue-600 text-white" : "bg-zinc-700 text-zinc-300 hover:bg-zinc-600"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 text-xs shrink-0 w-8">글자</span>
+              <div className="flex-1 flex flex-col gap-0.5">
+                <input type="range" min={24} max={96} step={4} value={alertFontSize}
+                  onChange={(e) => setAlertFontSize(Number(e.target.value))}
+                  className="w-full accent-orange-500" />
+                <div className="relative w-full h-1.5">
+                  <span className="absolute left-1/2 -translate-x-1/2 w-px h-1.5 bg-zinc-500" />
+                </div>
+              </div>
+              <span className="text-zinc-300 text-xs w-6 text-right">{alertFontSize}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-zinc-400 text-xs shrink-0 w-8">시간</span>
+              <select value={alertDuration} onChange={(e) => setAlertDuration(Number(e.target.value))}
+                className="flex-1 bg-zinc-700 text-white rounded px-1 py-0.5 border border-zinc-600 text-xs">
+                <option value={0}>고정</option>
+                <option value={3000}>3초</option>
+                <option value={5000}>5초</option>
+                <option value={10000}>10초</option>
+                <option value={30000}>30초</option>
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
       {alertActive && (
         <button onClick={onClearAlert} className="px-1.5 py-1 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400">✕</button>
       )}
@@ -420,19 +497,20 @@ export default function ControlBar({
         <Mic size={14} /><span>발표자 모니터</span>
       </button>
 
-      {/* Stage message quick send */}
-      <div className="flex gap-1 items-center">
+      {/* Stage message quick send — only active when stage monitor is open */}
+      <div className="flex gap-1 items-center" title={!isStageOpen ? "발표자 모니터를 먼저 열어주세요" : undefined}>
         <input
           type="text"
           value={stageMsgText}
           onChange={(e) => onSetStageMsgText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") onSendStageMsg(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && isStageOpen) onSendStageMsg(); }}
           placeholder="발표자에게 메시지..."
-          className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-yellow-500 min-w-0 w-28"
+          disabled={!isStageOpen}
+          className="flex-1 bg-zinc-800 text-white text-xs rounded px-2 py-1 border border-zinc-600 outline-none focus:border-yellow-500 min-w-0 w-28 disabled:opacity-40 disabled:cursor-not-allowed"
         />
         <button
           onClick={stageMsgActive ? onClearStageMsg : onSendStageMsg}
-          disabled={!stageMsgActive && !stageMsgText.trim()}
+          disabled={!isStageOpen || (!stageMsgActive && !stageMsgText.trim())}
           className={`px-2 py-1 text-xs rounded shrink-0 disabled:opacity-40 ${stageMsgActive ? "bg-yellow-600 hover:bg-yellow-500 text-black" : "bg-zinc-700 hover:bg-zinc-600 text-white"}`}
         >
           {stageMsgActive ? "지우기" : "전송"}

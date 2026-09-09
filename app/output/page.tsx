@@ -24,7 +24,7 @@ const CANVAS_W = 1920;
 const CANVAS_H = 1080;
 
 export default function OutputPage() {
-  const { layerConfig, isBlackout, alertText, alertVisible, alertDuration, alertPosition, alertBgColor, alertTextColor, countdown, setLayerConfig, patchLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown } = useOutputStore();
+  const { layerConfig, isBlackout, alertText, alertVisible, alertDuration, alertPosition, alertBgColor, alertTextColor, alertYPercent, alertFontSize, countdown, setLayerConfig, patchLayerConfig, setBlackout, setOutputReady, setAlert, setCountdown } = useOutputStore();
   const unlistenRefs = useRef<Array<() => void>>([]);
   // Stable refs so alert dismiss callback doesn't restart timer on color/position changes
   const alertPositionRef = useRef(alertPosition);
@@ -81,7 +81,7 @@ export default function OutputPage() {
         if (mounted) setBlackout(active);
       });
       const unlistenAlert = await ipc.onAlert((p) => {
-        if (mounted) setAlert(p.text, p.visible, p.duration, p.position, p.backgroundColor, p.textColor);
+        if (mounted) setAlert(p.text, p.visible, p.duration, p.position, p.backgroundColor, p.textColor, p.yPercent, p.fontSize);
       });
 
       const unlistenCountdown = await ipc.onCountdown((payload) => {
@@ -302,13 +302,22 @@ export default function OutputPage() {
 
           {/* Layer 5: Countdown overlay */}
           {lookVis.countdown && <CountdownLayer countdown={countdown} />}
-
-          {/* Alert banner */}
-          {alertVisible && alertText && (
-            <AlertBanner text={alertText} position={alertPosition} bgColor={alertBgColor} textColor={alertTextColor} />
-          )}
         </div>
       </div>
+
+      {/* Alert banner — outside scaled canvas to avoid overflow clipping */}
+      {alertVisible && alertText && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 60, pointerEvents: "none" }}>
+          <AlertBanner
+            text={alertText}
+            position={alertPosition}
+            bgColor={alertBgColor}
+            textColor={alertTextColor}
+            yPercent={alertYPercent}
+            fontSize={alertFontSize * scale}
+          />
+        </div>
+      )}
 
       {/* Audio element for backing tracks */}
       <audio ref={audioRef} />

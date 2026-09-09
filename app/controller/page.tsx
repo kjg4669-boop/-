@@ -80,7 +80,7 @@ function buildCopyrightString(song?: { copyright_text?: string; ccli_number?: st
 }
 
 export default function ControllerPage() {
-  const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert } = useOutputStore();
+  const { isBlackout, setBlackout, layerConfig, setLayerConfig, setAlert, alertText, alertVisible, alertDuration, alertPosition, alertYPercent, alertFontSize, alertBgColor, alertTextColor } = useOutputStore();
   const {
     nextLyricSlide,
     prevLyricSlide,
@@ -411,7 +411,7 @@ export default function ControllerPage() {
     let mounted = true;
     let unlisten: (() => void) | null = null;
     void ipc.onOutputReady(() => {
-      const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av, alertPosition: ap, alertBgColor: abc, alertTextColor: atc } = useOutputStore.getState();
+      const { layerConfig: lc, isBlackout: bo, alertText: at, alertVisible: av, alertPosition: ap, alertBgColor: abc, alertTextColor: atc, alertYPercent: ayp, alertFontSize: afs } = useOutputStore.getState();
       const cleared = isClearRef.current;
       const toSend: LayerConfig = cleared
         ? { ...lc, subtitle: { ...lc.subtitle, visible: false, lines: [] }, canvas: undefined }
@@ -450,7 +450,7 @@ export default function ControllerPage() {
       void ipc.sendStageSlideUpdate(stageToSend, readyMeta);
       if (!isFrozenRef.current) ipc.sendPreviewUpdate(lc); // push full (non-cleared) state to floating preview immediately
       void ipc.sendBlackout(bo);
-      void ipc.sendAlert({ text: at, visible: av, duration: 0, position: ap, backgroundColor: abc, textColor: atc });
+      void ipc.sendAlert({ text: at, visible: av, duration: 0, position: ap, backgroundColor: abc, textColor: atc, yPercent: ayp, fontSize: afs });
       void ipc.sendCountdown({ active: countdownActiveRef.current, remainingMs: countdownRemainingMsRef.current, totalMs: countdownTotalMsRef.current });
       void ipc.sendScaleMode(useSettingsStore.getState().outputScaleMode);
       void ipc.sendVideoSettings(useSettingsStore.getState().videoFit, useSettingsStore.getState().fpsLimit, useSettingsStore.getState().cameraMirror);
@@ -718,11 +718,12 @@ export default function ControllerPage() {
     void ipc.sendFreeze(newFrozen);
   }, []);
   const handleToggleAutoAdvance = useCallback(() => setAutoAdvance((v) => !v), []);
-  const handleSendAlert = useCallback(() => {
+  const handleSendAlert = useCallback((yPercent: number, fontSize: number, duration: number) => {
     if (!alertInput.trim()) return;
-    setAlert(alertInput.trim(), true);
+    const pos = yPercent < 33 ? "top" : yPercent > 67 ? "bottom" : "center";
+    setAlert(alertInput.trim(), true, duration, pos, undefined, undefined, yPercent, fontSize);
     setAlertActive(true);
-    void ipc.sendAlert({ text: alertInput.trim(), visible: true, duration: 0, position: "bottom" });
+    void ipc.sendAlert({ text: alertInput.trim(), visible: true, duration, position: pos, yPercent, fontSize });
     setAlertInput("");
   }, [alertInput, setAlert]);
   const handleClearAlert = useCallback(() => {
@@ -730,6 +731,18 @@ export default function ControllerPage() {
     setAlertActive(false);
     void ipc.sendAlertHide();
   }, [setAlert]);
+  const ctrlAlertDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (ctrlAlertDismissRef.current !== null) { clearTimeout(ctrlAlertDismissRef.current); ctrlAlertDismissRef.current = null; }
+    if (alertVisible && alertDuration > 0) {
+      ctrlAlertDismissRef.current = setTimeout(() => {
+        ctrlAlertDismissRef.current = null;
+        setAlert("", false, 0, alertPosition);
+        setAlertActive(false);
+      }, alertDuration);
+    }
+    return () => { if (ctrlAlertDismissRef.current !== null) { clearTimeout(ctrlAlertDismissRef.current); ctrlAlertDismissRef.current = null; } };
+  }, [alertVisible, alertDuration, alertPosition, setAlert]);
   const handleToggleVideoPlay = useCallback(() => {
     if (videoStatus?.playing) {
       void ipc.sendVideoControl({ action: "pause" });
@@ -2429,7 +2442,10 @@ export default function ControllerPage() {
                     className="text-zinc-600 hover:text-zinc-200 text-xs px-1 rounded hover:bg-zinc-700"
                   >↗</button>
                 </div>
-                <OutputPreview layerConfig={frozenPreviewConfig ?? layerConfig} isBlackout={isBlackout} isLive={isLive} />
+                <OutputPreview layerConfig={frozenPreviewConfig ?? layerConfig} isBlackout={isBlackout} isLive={isLive}
+                  alertVisible={alertVisible} alertText={alertText}
+                  alertYPercent={alertYPercent} alertFontSize={alertFontSize}
+                  alertBgColor={alertBgColor} alertTextColor={alertTextColor} />
               </div>
             ) : (
               <div className="flex-shrink-0 border-b border-zinc-700 bg-zinc-900 p-2">

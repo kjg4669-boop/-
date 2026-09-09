@@ -11,6 +11,8 @@ interface OutputState {
   alertPosition: "top" | "bottom" | "center";
   alertBgColor: string;
   alertTextColor: string;
+  alertYPercent: number;
+  alertFontSize: number;
   countdown: CountdownPayload | null;
   setLayerConfig: (config: LayerConfig) => void;
   patchLayerConfig: (subtitle?: Partial<LayerConfig["subtitle"]>, background?: Partial<LayerConfig["background"]>) => void;
@@ -22,7 +24,9 @@ interface OutputState {
     duration?: number,
     position?: "top" | "bottom" | "center",
     bgColor?: string,
-    textColor?: string
+    textColor?: string,
+    yPercent?: number,
+    fontSize?: number
   ) => void;
   setCountdown: (payload: CountdownPayload | null) => void;
 }
@@ -37,6 +41,8 @@ export const useOutputStore = create<OutputState>((set) => ({
   alertPosition: "bottom",
   alertBgColor: "rgba(0,0,0,0.85)",
   alertTextColor: "#ffffff",
+  alertYPercent: 90,
+  alertFontSize: 42,
   countdown: null,
   setLayerConfig: (config) => set({ layerConfig: config }),
   patchLayerConfig: (subtitle, background) =>
@@ -49,7 +55,7 @@ export const useOutputStore = create<OutputState>((set) => ({
     })),
   setBlackout: (active) => set({ isBlackout: active }),
   setOutputReady: (ready) => set({ isOutputReady: ready }),
-  setAlert: (text, visible, duration = 0, position = "bottom", bgColor = "rgba(0,0,0,0.85)", textColor = "#ffffff") =>
+  setAlert: (text, visible, duration = 0, position = "bottom", bgColor = "rgba(0,0,0,0.85)", textColor = "#ffffff", yPercent = 90, fontSize = 42) =>
     set({
       alertText: text,
       alertVisible: visible,
@@ -57,6 +63,8 @@ export const useOutputStore = create<OutputState>((set) => ({
       alertPosition: position,
       alertBgColor: bgColor,
       alertTextColor: textColor,
+      alertYPercent: yPercent,
+      alertFontSize: fontSize,
     }),
   setCountdown: (payload) => set({ countdown: payload }),
 }));

@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ipc, emitEvent, isTauri } from "@/lib/ipc";
 import type { LayerConfig, SlideMeta, CountdownPayload, AnnouncementShowPayload } from "@/lib/types";
+
 import { SECTION_LABEL } from "@/lib/constants";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import AlertBanner from "@/components/AlertBanner";
 import { Timer, MessageSquare, X } from "lucide-react";
 
 function ClockDisplay() {
@@ -34,12 +34,10 @@ async function closeWindow() {
 export default function StagePage() {
   const [layerConfig, setLayerConfig] = useState<LayerConfig | null>(null);
   const [meta, setMeta] = useState<SlideMeta | null>(null);
-  const [stageAlert, setStageAlert] = useState<{ text: string; position: "top" | "center" | "bottom"; bgColor: string; textColor: string; } | null>(null);
   const [stageMsg, setStageMsg] = useState<{ text: string } | null>(null);
   const [countdown, setCountdown] = useState<CountdownPayload | null>(null);
   const [announcement, setAnnouncement] = useState<AnnouncementShowPayload>({ visible: false, title: "", body: "" });
   const unlistenRefs = useRef<Array<() => void>>([]);
-  const stageAlertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleUpdate = useCallback((config: LayerConfig, m?: SlideMeta) => {
     setLayerConfig(config);
@@ -60,30 +58,6 @@ export default function StagePage() {
         if (mounted) handleUpdate(config, m);
       });
 
-      const unlistenAlert = await ipc.onAlert((payload) => {
-        if (!mounted) return;
-        if (stageAlertTimerRef.current !== null) {
-          clearTimeout(stageAlertTimerRef.current);
-          stageAlertTimerRef.current = null;
-        }
-        if (payload.visible && payload.text) {
-          setStageAlert({
-            text: payload.text,
-            position: payload.position,
-            bgColor: payload.backgroundColor ?? "rgba(0,0,0,0.85)",
-            textColor: payload.textColor ?? "#ffffff",
-          });
-          if (payload.duration > 0) {
-            stageAlertTimerRef.current = setTimeout(() => {
-              stageAlertTimerRef.current = null;
-              if (mounted) setStageAlert(null);
-            }, payload.duration);
-          }
-        } else {
-          setStageAlert(null);
-        }
-      });
-
       const unlistenStageMsg = await ipc.onStageMessage((p) => {
         if (!mounted) return;
         setStageMsg(p.visible && p.text ? { text: p.text } : null);
@@ -99,13 +73,12 @@ export default function StagePage() {
       });
 
       if (mounted) {
-        unlistenRefs.current.push(unlisten, unlistenAlert, unlistenStageMsg, unlistenCountdown, unlistenAnnouncement);
+        unlistenRefs.current.push(unlisten, unlistenStageMsg, unlistenCountdown, unlistenAnnouncement);
         // Signal ready so controller re-sends current state
         await ipc.sendOutputReady();
       } else {
         // Unmounted before setup completed — immediately release the listeners
         unlisten();
-        unlistenAlert();
         unlistenStageMsg();
         unlistenCountdown();
         unlistenAnnouncement();
@@ -114,7 +87,6 @@ export default function StagePage() {
     void setup();
     return () => {
       mounted = false;
-      if (stageAlertTimerRef.current !== null) clearTimeout(stageAlertTimerRef.current);
       unlistenRefs.current.forEach((fn) => fn());
       unlistenRefs.current = [];
     };
@@ -364,15 +336,6 @@ export default function StagePage() {
         }}>
           <MessageSquare size={22} style={{ flexShrink: 0 }} /> {stageMsg.text}
         </div>
-      )}
-      {/* Alert overlay */}
-      {stageAlert && (
-        <AlertBanner
-          text={stageAlert.text}
-          position={stageAlert.position}
-          bgColor={stageAlert.bgColor}
-          textColor={stageAlert.textColor}
-        />
       )}
     </div>
     </ErrorBoundary>

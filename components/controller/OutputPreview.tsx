@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { LayerConfig, TextBlock, ShapeBlock } from "@/lib/types";
 import { toDisplayUrl } from "@/lib/media";
 import { ipc } from "@/lib/ipc";
+import AlertBanner from "@/components/AlertBanner";
 
 type BgConfig = LayerConfig["background"];
 interface SubContent { lines: string[]; lines2: string[] }
@@ -17,13 +18,19 @@ interface Props {
   width?: number;
   /** true이면 테두리/둥근 모서리 없음 (창모드 전체화면용) */
   fullscreen?: boolean;
+  alertVisible?: boolean;
+  alertText?: string;
+  alertYPercent?: number;
+  alertFontSize?: number;
+  alertBgColor?: string;
+  alertTextColor?: string;
 }
 
 const DEFAULT_W = 232;
 const NATIVE_W = 1920;
 const NATIVE_H = 1080;
 
-export default function OutputPreview({ layerConfig, isBlackout, isLive, width = DEFAULT_W, fullscreen = false }: Props) {
+export default function OutputPreview({ layerConfig, isBlackout, isLive, width = DEFAULT_W, fullscreen = false, alertVisible, alertText, alertYPercent, alertFontSize, alertBgColor, alertTextColor }: Props) {
   const SCALE = width / NATIVE_W;
   const height = Math.round(width * NATIVE_H / NATIVE_W);
   const scaleRatio = width / DEFAULT_W; // 고정 px 값 비례 스케일용
@@ -514,6 +521,18 @@ export default function OutputPreview({ layerConfig, isBlackout, isLive, width =
           </div>
         </div>
       ))}
+
+      {/* 자막 경보 배너 */}
+      {alertVisible && alertText && (
+        <AlertBanner
+          text={alertText}
+          position={alertYPercent !== undefined ? (alertYPercent < 33 ? "top" : alertYPercent > 67 ? "bottom" : "center") : "bottom"}
+          bgColor={alertBgColor ?? "#1a1a1a"}
+          textColor={alertTextColor ?? "#ffffff"}
+          yPercent={alertYPercent}
+          fontSize={alertFontSize !== undefined ? alertFontSize * SCALE : undefined}
+        />
+      )}
 
       {/* 개발자 디버그 오버레이 (보기 > 개발자 도구) */}
       {showDebug && (

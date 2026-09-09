@@ -13,6 +13,14 @@ export default function PreviewPage() {
   const [isBlackout, setIsBlackout] = useState(false);
   const [windowSize, setWindowSize] = useState({ w: CANVAS_W, h: CANVAS_H });
   const [isOutputLive, setIsOutputLive] = useState(false);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const [alertText, setAlertText] = useState("");
+  const [alertDuration, setAlertDuration] = useState(0);
+  const [alertYPercent, setAlertYPercent] = useState(90);
+  const [alertFontSize, setAlertFontSize] = useState(48);
+  const [alertBgColor, setAlertBgColor] = useState("#1a1a1a");
+  const [alertTextColor, setAlertTextColor] = useState("#ffffff");
+  const previewAlertDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlistenRefs = useRef<Array<() => void>>([]);
 
@@ -61,6 +69,16 @@ export default function PreviewPage() {
         if (!mounted) return; receivedUpdate = true; setLayerConfig(config);
       });
       const unlistenBlackout = await ipc.onBlackout((active) => { if (mounted) setIsBlackout(active); });
+      const unlistenAlert = await ipc.onAlert((p) => {
+        if (!mounted) return;
+        setAlertVisible(p.visible);
+        setAlertText(p.text);
+        setAlertDuration(p.duration ?? 0);
+        if (p.yPercent !== undefined) setAlertYPercent(p.yPercent);
+        if (p.fontSize !== undefined) setAlertFontSize(p.fontSize);
+        if (p.backgroundColor) setAlertBgColor(p.backgroundColor);
+        if (p.textColor) setAlertTextColor(p.textColor);
+      });
       const unlistenHeartbeat = await ipc.onHeartbeat(() => {
         if (!mounted) return;
         setIsOutputLive(true);
@@ -73,7 +91,7 @@ export default function PreviewPage() {
         if (!mounted || receivedUpdate || retryCount >= 10) { clearInterval(retryInterval); return; }
         retryCount++; await ipc.sendOutputReady();
       }, 500);
-      unlistenRefs.current.push(unlistenPreview, unlistenBlackout, unlistenHeartbeat, () => clearInterval(retryInterval));
+      unlistenRefs.current.push(unlistenPreview, unlistenBlackout, unlistenAlert, unlistenHeartbeat, () => clearInterval(retryInterval));
     }
     void setup();
     const handleUnload = () => { void emitEvent("preview:closed", {}); };
@@ -92,6 +110,18 @@ export default function PreviewPage() {
     };
   }, []);
 
+  // Auto-dismiss alert after duration
+  useEffect(() => {
+    if (previewAlertDismissRef.current !== null) { clearTimeout(previewAlertDismissRef.current); previewAlertDismissRef.current = null; }
+    if (alertVisible && alertDuration > 0) {
+      previewAlertDismissRef.current = setTimeout(() => {
+        previewAlertDismissRef.current = null;
+        setAlertVisible(false);
+      }, alertDuration);
+    }
+    return () => { if (previewAlertDismissRef.current !== null) { clearTimeout(previewAlertDismissRef.current); previewAlertDismissRef.current = null; } };
+  }, [alertVisible, alertDuration]);
+
   const scale = Math.min(windowSize.w / CANVAS_W, windowSize.h / CANVAS_H);
   const scaledW = Math.round(CANVAS_W * scale);
 
@@ -103,6 +133,12 @@ export default function PreviewPage() {
         isLive={isOutputLive}
         width={scaledW}
         fullscreen
+        alertVisible={alertVisible}
+        alertText={alertText}
+        alertYPercent={alertYPercent}
+        alertFontSize={alertFontSize}
+        alertBgColor={alertBgColor}
+        alertTextColor={alertTextColor}
       />
     </div>
   );
