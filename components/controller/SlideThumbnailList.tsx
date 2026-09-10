@@ -5,7 +5,6 @@ import { DndContext, DragEndEvent, PointerSensor, useSensor, useSensors, closest
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueueStore } from "@/stores/queueStore";
-import { useOutputStore } from "@/stores/outputStore";
 import { useVideoStore } from "@/stores/videoStore";
 import { songDb, serviceDb } from "@/lib/db";
 import type { LyricSlide, FlatSlide, Service, LayerConfig, ShapeBlock } from "@/lib/types";
@@ -143,7 +142,6 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
   const setActiveFlatSlide = useQueueStore((s) => s.setActiveFlatSlide);
   const toggleHiddenSlide = useQueueStore((s) => s.toggleHiddenSlide);
   const updateServiceData = useQueueStore((s) => s.updateServiceData);
-  const bg = useOutputStore((s) => s.layerConfig.background);
   const { phases, slidePhaseMap } = useVideoStore();
   const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
 
@@ -259,7 +257,7 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
               ? canvasBlocks.map((b) => b.text)
               : entry.slide.lines;
 
-            // Per-slide background: video phase > per-slide override > item-level > current output bg
+            // Per-slide background: video phase > per-slide override > item-level > black
             const phaseBg = (() => {
               const phaseId = slidePhaseMap[entry.slide.id];
               const phase = phaseId ? phases.find((p) => p.id === phaseId) : undefined;
@@ -268,7 +266,7 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
             const serviceItem = currentService?.items[entry.serviceItemIndex];
             const perSlideBg = serviceItem?.settings_json?.slideBackgrounds?.[entry.slide.id] as LayerConfig["background"] | undefined;
             const itemLevelBg = serviceItem?.settings_json?.background as LayerConfig["background"] | undefined;
-            const slideBg = phaseBg ?? perSlideBg ?? itemLevelBg ?? bg;
+            const slideBg = phaseBg ?? perSlideBg ?? itemLevelBg ?? ({ type: "color", color: "#111" } as LayerConfig["background"]);
             const thumbBgStyle: React.CSSProperties = (() => {
               if (slideBg.type === "color") return { backgroundColor: slideBg.color ?? "#111" };
               if (slideBg.type === "image" && slideBg.src) {

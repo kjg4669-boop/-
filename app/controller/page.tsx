@@ -171,6 +171,8 @@ export default function ControllerPage() {
   const saveTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layerAutoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stores params for the pending debounce so handleSaveAs can flush it before copying the service.
+  const pendingLayerSaveRef = useRef<{ itemId: number; config: LayerConfig; slideId: string | null } | null>(null);
   const handleSaveItemRef = useRef<(itemId: number, config: LayerConfig, capturedSlideId?: string | null) => Promise<void>>(async () => {});
   // Camera output state: maintained independently of layerConfig so slide navigation never resets it
   const cameraDeviceIdRef = useRef<string | null>(null);
@@ -552,10 +554,10 @@ export default function ControllerPage() {
       : resolvedBg;
     const baseWithSlideBg: LayerConfig = { ...base, background: effectiveBg };
 
-    // Auto-apply video phase if this slide has one assigned (only when the phase has an actual video background)
-    // Camera takes priority: do not override camera broadcast with video phase
+    // Auto-apply phase background if this slide has one assigned (video, color, or image)
+    // Camera takes priority: do not override camera broadcast with phase background
     const videoPhase = slide ? useVideoStore.getState().getPhaseForSlide(slide.id) : null;
-    const effectiveBase: LayerConfig = (!cameraDeviceIdRef.current && videoPhase && videoPhase.background.type === "video")
+    const effectiveBase: LayerConfig = (!cameraDeviceIdRef.current && videoPhase)
       ? { ...baseWithSlideBg, background: videoPhase.background }
       : baseWithSlideBg;
 
@@ -1099,32 +1101,36 @@ export default function ControllerPage() {
       if (isLive && !isFrozenRef.current) ipc.sendSlideUpdate(withContent);
       ipc.sendPreviewUpdate(withContent);
       // Auto-save layer settings to the active item (debounced)
-      // Capture slideId NOW (at change time) to prevent race condition if slide navigation
-      // occurs before the debounce fires (within 600ms).
+      // Capture slideId AND itemId NOW (at change time) to prevent race condition if
+      // item/slide navigation occurs before the debounce fires (within 600ms).
       const capturedSlideId = slide?.id ?? null;
+      const qs = useQueueStore.getState();
+      const activeItem = qs.currentService?.items[qs.activeItemIndex];
+      const capturedItemId = activeItem?.id ?? null;
 
       // Immediately save current slide's per-slide background so nav effect reads it
       // before the 600ms DB debounce fires.
-      if (capturedSlideId) {
-        const qs = useQueueStore.getState();
-        const activeItem = qs.currentService?.items[qs.activeItemIndex];
-        if (activeItem) {
-          const ex = activeItem.settings_json ?? {};
-          // Don't persist camera background — it must be manually activated each session.
-          if (config.background.type !== "camera") {
-            const updatedSlideBgs = { ...(ex.slideBackgrounds ?? {}), [capturedSlideId]: { ...config.background } };
-            qs.updateItemSettingsJson(activeItem.id, { ...ex, slideBackgrounds: updatedSlideBgs });
-          }
+      // Skip if the slide has a videoStore phase assigned — phase backgrounds are restored
+      // from videoStore at nav time, so writing them to slideBackgrounds creates a stale
+      // dual source of truth that corrupts backgrounds on save/reload.
+      if (capturedSlideId && activeItem) {
+        const ex = activeItem.settings_json ?? {};
+        const hasPhase = !!useVideoStore.getState().getPhaseForSlide(capturedSlideId);
+        if (config.background.type !== "camera" && !hasPhase) {
+          const updatedSlideBgs = { ...(ex.slideBackgrounds ?? {}), [capturedSlideId]: { ...config.background } };
+          qs.updateItemSettingsJson(activeItem.id, { ...ex, slideBackgrounds: updatedSlideBgs });
         }
       }
 
       if (layerAutoSaveTimerRef.current) clearTimeout(layerAutoSaveTimerRef.current);
+      pendingLayerSaveRef.current = capturedItemId !== null
+        ? { itemId: capturedItemId, config, slideId: capturedSlideId }
+        : null;
       layerAutoSaveTimerRef.current = setTimeout(() => {
         layerAutoSaveTimerRef.current = null;
-        const { currentService, activeItemIndex } = useQueueStore.getState();
-        const itemId = currentService?.items[activeItemIndex]?.id ?? null;
-        if (itemId !== null) {
-          void handleSaveItemRef.current(itemId, config, capturedSlideId);
+        pendingLayerSaveRef.current = null;
+        if (capturedItemId !== null) {
+          void handleSaveItemRef.current(capturedItemId, config, capturedSlideId);
         } else {
           saveGlobalDefaults(config);
         }
@@ -1671,18 +1677,28 @@ export default function ControllerPage() {
         transitionMs: config.transitionMs,
       };
 
-      // Only save item-level background on explicit "이 항목에 적용" button press.
-      // Auto-save (debounce) only saves per-slide override, so other slides keep their own colors.
-      if (capturedSlideId === undefined) {
+      // Video backgrounds must NEVER be stored at item level — doing so causes the video
+      // to appear on ALL slides of the item. Remove any previously mis-saved video bg.
+      if (settings.background?.type === "video") {
+        delete settings.background;
+      }
+
+      // Only save item-level background on explicit "이 항목에 적용" button press,
+      // and only for non-video types (color/image). Video is always per-slide.
+      if (capturedSlideId === undefined && config.background.type !== "video") {
         settings.background = { ...config.background };
       }
       if (slideId && config.background.type !== "camera") {
         // 현재 슬라이드만 per-slide 배경 저장 (다른 슬라이드는 각자의 색상 유지)
         // Camera is ephemeral — never saved to DB
-        settings.slideBackgrounds = {
-          ...(existingSettings.slideBackgrounds ?? {}),
-          [slideId]: { ...config.background },
-        };
+        // Phase-assigned slides: background restored from videoStore at nav time, skip DB write
+        const hasPhase = !!useVideoStore.getState().getPhaseForSlide(slideId);
+        if (!hasPhase) {
+          settings.slideBackgrounds = {
+            ...(existingSettings.slideBackgrounds ?? {}),
+            [slideId]: { ...config.background },
+          };
+        }
       }
 
       try {
@@ -1904,7 +1920,21 @@ export default function ControllerPage() {
     }
     isSavingRef.current = true;
     try {
-      await serviceDb.saveItems(svc.id, svc.items);
+      // Flush any pending layer auto-save so the current slide's background is up-to-date
+      if (layerAutoSaveTimerRef.current && pendingLayerSaveRef.current) {
+        clearTimeout(layerAutoSaveTimerRef.current);
+        layerAutoSaveTimerRef.current = null;
+        const { itemId, config, slideId } = pendingLayerSaveRef.current;
+        pendingLayerSaveRef.current = null;
+        await handleSaveItemRef.current(itemId, config, slideId);
+      } else if (layerAutoSaveTimerRef.current) {
+        clearTimeout(layerAutoSaveTimerRef.current);
+        layerAutoSaveTimerRef.current = null;
+        pendingLayerSaveRef.current = null;
+      }
+      // Re-read after flush for most up-to-date in-memory state
+      const freshSvc = useQueueStore.getState().currentService ?? svc;
+      await serviceDb.saveItems(freshSvc.id, freshSvc.items);
       const reloaded = await serviceDb.get(svc.id);
       if (reloaded) store.updateServiceData(reloaded);
       else store.setIsDirty(false);
@@ -2007,8 +2037,19 @@ export default function ControllerPage() {
     if (!svc) { setShowSaveModal(false); return; }
     const date = new Date().toISOString().slice(0, 10);
     try {
+      // Flush any pending layer auto-save so the current item's backgrounds are
+      // written to the in-memory service before being copied into the new service.
+      if (layerAutoSaveTimerRef.current && pendingLayerSaveRef.current) {
+        clearTimeout(layerAutoSaveTimerRef.current);
+        layerAutoSaveTimerRef.current = null;
+        const { itemId, config, slideId } = pendingLayerSaveRef.current;
+        pendingLayerSaveRef.current = null;
+        await handleSaveItemRef.current(itemId, config, slideId);
+      }
+      // Re-read after flush: handleSaveItem may have updated in-memory state
+      const freshSvc = useQueueStore.getState().currentService ?? svc;
       const newId = await serviceDb.create(name, date);
-      await serviceDb.saveItems(newId, svc.items);
+      await serviceDb.saveItems(newId, freshSvc.items);
       const reloaded = await serviceDb.get(newId);
       if (reloaded) store.updateServiceData(reloaded);
       else store.updateCurrentServiceMeta({ id: newId, name, date });
