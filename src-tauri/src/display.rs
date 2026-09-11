@@ -10,3 +10,19 @@ pub struct DisplayInfo {
     pub height: u32,
     pub is_primary: bool,
 }
+
+/// macOS: get real display names via NSScreen.localizedName
+#[cfg(target_os = "macos")]
+pub fn macos_screen_names() -> Vec<String> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSScreen;
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return vec![];
+    };
+    let screens = NSScreen::screens(mtm);
+    screens
+        .iter()
+        .map(|s| s.localizedName().to_string())
+        .collect()
+}

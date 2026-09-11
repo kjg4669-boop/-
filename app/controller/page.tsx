@@ -68,7 +68,7 @@ import { useVideoStore } from "@/stores/videoStore";
 import type { RemoteCommand, ServiceItemSettings, MediaItem } from "@/lib/types";
 import { DEFAULT_LIVESTREAM_LAYER_CONFIG } from "@/lib/types";
 
-type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video" | "livestream";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "video" | "livestream";
 type RibbonTab = "home" | "insert" | "design" | "transition" | "animation" | "review" | "view";
 
 function buildCopyrightString(song?: { copyright_text?: string; ccli_number?: string; publisher?: string } | null): string {
@@ -132,8 +132,8 @@ export default function ControllerPage() {
   const [showPanel, setShowPanel] = useState(true);
   const [zoom, setZoom] = useState(85);
   const [rightTab, setRightTab] = useState<RightTab>("queue");
-  const [tabOrder, setTabOrder] = useState<RightTab[]>(["queue", "songs", "video", "alert", "settings", "announcement", "livestream"]);
-  const [removedTabs, setRemovedTabs] = useState<RightTab[]>(["looks", "remote", "ndi"]);
+  const [tabOrder, setTabOrder] = useState<RightTab[]>(["queue", "songs", "video", "settings"]);
+  const [removedTabs, setRemovedTabs] = useState<RightTab[]>(["alert", "looks", "remote", "ndi", "livestream"]);
   const [draggingTab, setDraggingTab] = useState<RightTab | null>(null);
   const [dragOverTab, setDragOverTab] = useState<RightTab | null>(null);
   const tabOrderRef = useRef<RightTab[]>(tabOrder);
@@ -828,7 +828,17 @@ export default function ControllerPage() {
     canvasRef.current?.addBlock();
   }, []);
   const handleOpenDesignPanel = useCallback(() => { setShowPanel(true); setRightTab("settings"); }, []);
-  const TAB_LABELS_WIN: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상", livestream: "방송" };
+  // 리본 패널탭 토글: 이미 열려있으면 기본 탭(queue)으로 복귀
+  const handleRibbonPanelTab = useCallback((tab: string) => {
+    const t = tab as RightTab;
+    if (rightTab === t) {
+      setRightTab("queue");
+    } else {
+      setShowPanel(true);
+      setRightTab(t);
+    }
+  }, [rightTab]);
+  const TAB_LABELS_WIN: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", video: "동영상", livestream: "방송" };
   const openTabAsWindow = useCallback(async (tab: RightTab, screenX?: number, screenY?: number) => {
     if (openedWindowsRef.current.has(tab)) return;
     try {
@@ -1542,33 +1552,49 @@ export default function ControllerPage() {
         const { layerConfig: lc } = useOutputStore.getState();
         const sub = lc.subtitle;
         const bg = lc.background;
-        const bgColor = (bg.type === "color" ? bg.color : "#000000")?.replace("#", "") ?? "000000";
-        const fColor = (sub.color ?? "#FFFFFF").replace("#", "");
-        const fSize = Math.round((sub.fontSize ?? 48) * 0.75);
+
+        // 6자리 hex 색상으로 정규화 (유효하지 않은 색상 → 폴백)
+        const toHex6 = (color: string | undefined, fallback: string): string => {
+          if (!color) return fallback;
+          const h = color.replace(/^#/, "").trim();
+          return /^[0-9a-fA-F]{6}$/.test(h) ? h.toUpperCase() : fallback;
+        };
+
+        const bgColor = bg.type === "color" ? toHex6(bg.color, "000000") : "000000";
+        const fColor = toHex6(sub.color, "FFFFFF");
+        // pt 변환 (px→pt ≈ ×0.75), 범위 제한
+        const fSize = Math.max(8, Math.min(200, Math.round((sub.fontSize ?? 48) * 0.75)));
         const fAlign = (sub.textAlign ?? "center") as "left" | "center" | "right";
         const fValign = sub.position === "top" ? "top" : sub.position === "bottom" ? "bottom" : "middle";
         const fBold = sub.fontWeight === "bold";
         const fItalic = sub.fontStyle === "italic";
-        const fFace = sub.fontFamily ?? "Arial";
+        // PowerPoint 호환: ASCII 범위 밖 폰트명은 Arial로 대체
+        const fFace = /^[\x20-\x7E]+$/.test(sub.fontFamily ?? "") ? (sub.fontFamily ?? "Arial") : "Arial";
         const bilingual = sub.bilingualEnabled ?? false;
-        const fSize2 = Math.round((sub.fontSize2 ?? 28) * 0.75);
-        const fColor2 = (sub.color2 ?? "#CCCCCC").replace("#", "");
+        const fSize2 = Math.max(8, Math.min(200, Math.round((sub.fontSize2 ?? 28) * 0.75)));
+        const fColor2 = toHex6(sub.color2, "CCCCCC");
 
-        // 배경 이미지 → base64 data URL 변환 시도
+        // 배경 이미지 → base64 data URL 변환 시도 (실패 시 단색 배경 사용)
         let bgDataUrl: string | null = null;
         if (bg.type === "image" && bg.src) {
           try {
             const res = await fetch(bg.src);
-            const blob = await res.blob();
-            bgDataUrl = await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result as string);
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
+            if (res.ok) {
+              const blob = await res.blob();
+              // MIME 타입 검증 (이미지만 허용)
+              if (blob.type.startsWith("image/")) {
+                bgDataUrl = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+              }
+            }
           } catch { /* 실패 시 단색 배경으로 대체 */ }
         }
 
+        let slideCount = 0;
         const addSlide = (lines: string[], lines2?: string[]) => {
           const s = pptx.addSlide();
           if (bgDataUrl) {
@@ -1576,25 +1602,29 @@ export default function ControllerPage() {
           } else {
             s.background = { color: bgColor };
           }
+          // 빈 라인 필터링 + 최소 공백 보장 (빈 텍스트 요소는 XML 오류 유발)
+          const text = lines.filter((l) => l != null).join("\n") || " ";
           if (bilingual && lines2 && lines2.length > 0) {
-            s.addText(lines.join("\n"), {
+            const text2 = lines2.filter((l) => l != null).join("\n") || " ";
+            s.addText(text, {
               x: 0.3, y: 0, w: 9.4, h: "65%",
               fontSize: fSize, color: fColor, align: fAlign, valign: fValign,
               bold: fBold, italic: fItalic, fontFace: fFace, wrap: true,
             });
-            s.addText(lines2.join("\n"), {
+            s.addText(text2, {
               x: 0.3, y: "65%", w: 9.4, h: "35%",
               fontSize: fSize2, color: fColor2, align: fAlign, valign: "top",
               bold: sub.fontWeight2 === "bold", italic: sub.fontStyle2 === "italic",
               fontFace: fFace, wrap: true,
             });
           } else {
-            s.addText(lines.join("\n"), {
+            s.addText(text, {
               x: 0.3, y: 0, w: 9.4, h: "100%",
               fontSize: fSize, color: fColor, align: fAlign, valign: fValign,
               bold: fBold, italic: fItalic, fontFace: fFace, wrap: true,
             });
           }
+          slideCount++;
         };
 
         for (const item of svc.items) {
@@ -1610,9 +1640,21 @@ export default function ControllerPage() {
           }
         }
 
+        // PPTX는 슬라이드가 최소 1개 이상이어야 함
+        if (slideCount === 0) {
+          const s = pptx.addSlide();
+          s.background = { color: bgColor };
+          s.addText(svc.name || " ", {
+            x: 0.5, y: 0, w: 9, h: "100%",
+            fontSize: 36, color: fColor, align: "center", valign: "middle",
+            fontFace: "Arial", wrap: true,
+          });
+        }
+
+        // uint8array로 직접 받아 writeFile에 전달 (변환 없음)
+        const data = await pptx.write({ outputType: "uint8array" }) as Uint8Array;
         const { writeFile } = await import("@tauri-apps/plugin-fs");
-        const buffer = await pptx.write({ outputType: "arraybuffer" }) as ArrayBuffer;
-        await writeFile(filePath, new Uint8Array(buffer));
+        await writeFile(filePath, data);
       } else {
         const { writeTextFile } = await import("@tauri-apps/plugin-fs");
         let content: string;
@@ -2352,8 +2394,10 @@ export default function ControllerPage() {
         currentLookId={currentLookId}
         onApplyLook={handleApplyLook}
         removedPanels={removedTabs}
-        panelLabels={{ queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프" }}
+        panelLabels={{ queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI" }}
         onRestorePanel={handleRestoreTab}
+        activePanelTab={["alert", "looks", "remote", "ndi", "livestream"].includes(rightTab) ? rightTab : null}
+        onOpenPanel={handleRibbonPanelTab}
         selectedShape={selectedShape}
         onAddShape={handleAddShape}
         onUpdateShape={handleUpdateShape}
@@ -2511,7 +2555,7 @@ export default function ControllerPage() {
                 <button onClick={() => setPanelFloating(false)} className="text-[10px] text-zinc-500 hover:text-white hover:bg-zinc-700 px-2 py-0.5 rounded border border-zinc-700">⊟ 도킹</button>
               </div>
             ) : (() => {
-              const TAB_LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프", video: "동영상", livestream: "방송" };
+              const TAB_LABELS: Record<RightTab, string> = { queue: "순서", songs: "찬양", settings: "디자인", alert: "공지", looks: "룩", remote: "원격", ndi: "NDI", video: "동영상", livestream: "방송" };
               return (
                 <div
                   ref={tabBarRef}
@@ -2616,7 +2660,13 @@ export default function ControllerPage() {
                         onSaveItem={handleSaveItem}
                       />
                     )}
-                    {rightTab === "alert" && <AlertPanel />}
+                    {rightTab === "alert" && (
+                      <div className="flex flex-col overflow-y-auto h-full">
+                        <AlertPanel />
+                        <div className="border-t border-zinc-700 flex-shrink-0" />
+                        <AnnouncementPanel />
+                      </div>
+                    )}
                     {rightTab === "looks" && (
                       <LooksPanel
                         currentLookId={currentLookId}
@@ -2627,7 +2677,6 @@ export default function ControllerPage() {
                     )}
                     {rightTab === "remote" && <RemotePanel />}
                     {rightTab === "ndi" && <NdiPanel />}
-                    {rightTab === "announcement" && <AnnouncementPanel />}
                     {rightTab === "video" && (
                       <VideoPanel layerConfig={layerConfig} onChange={handleLayerChange} />
                     )}
@@ -2744,7 +2793,7 @@ export default function ControllerPage() {
             className="bg-zinc-800 border border-zinc-700 rounded px-1 py-0 text-zinc-400 outline-none">
             {displays.map((d, i) => (
               <option key={d.id} value={i}>
-                {d.is_primary ? "주 모니터" : `모니터 ${i + 1}`} ({d.width}×{d.height})
+                {d.name || (d.is_primary ? "주 모니터" : `모니터 ${i + 1}`)} ({d.width}×{d.height})
               </option>
             ))}
           </select>

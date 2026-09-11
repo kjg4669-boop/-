@@ -1,8 +1,5 @@
 "use client";
 
-import { open } from "@tauri-apps/plugin-dialog";
-import { copyFile, mkdir } from "@tauri-apps/plugin-fs";
-import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { mediaDb } from "./db";
 import type { MediaItem } from "./types";
@@ -13,6 +10,10 @@ export async function importMediaFile(type: "image" | "video"): Promise<MediaIte
     type === "image"
       ? [{ name: "이미지", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }]
       : [{ name: "영상", extensions: ["mp4", "webm", "mov", "mkv", "avi"] }];
+
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const { copyFile, mkdir } = await import("@tauri-apps/plugin-fs");
+  const { appDataDir, join } = await import("@tauri-apps/api/path");
 
   const selected = await open({ filters, multiple: false });
   if (!selected || typeof selected !== "string") return null;

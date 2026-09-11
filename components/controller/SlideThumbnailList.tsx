@@ -257,11 +257,11 @@ export default function SlideThumbnailList({ onOpenDesignPanel }: Props) {
               ? canvasBlocks.map((b) => b.text)
               : entry.slide.lines;
 
-            // Per-slide background: video phase > per-slide override > item-level > black
+            // Per-slide background: phase (video/color/image) > per-slide override > item-level > black
             const phaseBg = (() => {
               const phaseId = slidePhaseMap[entry.slide.id];
               const phase = phaseId ? phases.find((p) => p.id === phaseId) : undefined;
-              return phase?.background.type === "video" ? phase.background : undefined;
+              return phase?.background ?? undefined;
             })();
             const serviceItem = currentService?.items[entry.serviceItemIndex];
             const perSlideBg = serviceItem?.settings_json?.slideBackgrounds?.[entry.slide.id] as LayerConfig["background"] | undefined;

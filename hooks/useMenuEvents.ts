@@ -4,7 +4,7 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { ipc } from "@/lib/ipc";
 import { useQueueStore } from "@/stores/queueStore";
 
-type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "announcement" | "video" | "livestream";
+type RightTab = "queue" | "songs" | "settings" | "alert" | "looks" | "remote" | "ndi" | "video" | "livestream";
 
 export interface MenuEventsOptions {
   openOutputRef: MutableRefObject<() => void>;

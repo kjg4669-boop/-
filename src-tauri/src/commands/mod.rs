@@ -34,6 +34,10 @@ pub fn get_displays(app: AppHandle) -> Vec<crate::display::DisplayInfo> {
 
     let primary = app.primary_monitor().ok().flatten();
 
+    // Get real display names from NSScreen.localizedName on macOS
+    #[cfg(target_os = "macos")]
+    let real_names = crate::display::macos_screen_names();
+
     monitors
         .into_iter()
         .enumerate()
@@ -43,11 +47,17 @@ pub fn get_displays(app: AppHandle) -> Vec<crate::display::DisplayInfo> {
             let phys_size = monitor.size();
             let log_pos = phys_pos.to_logical::<f64>(scale);
             let log_size = phys_size.to_logical::<f64>(scale);
-            let name = monitor.name().cloned().unwrap_or_else(|| "Display".to_string());
             let is_primary = primary
                 .as_ref()
                 .map(|p| p.position() == phys_pos && p.size() == phys_size)
                 .unwrap_or(i == 0);
+
+            #[cfg(target_os = "macos")]
+            let name = real_names.get(i).cloned()
+                .unwrap_or_else(|| monitor.name().cloned().unwrap_or_else(|| "Display".to_string()));
+            #[cfg(not(target_os = "macos"))]
+            let name = monitor.name().cloned().unwrap_or_else(|| "Display".to_string());
+
             crate::display::DisplayInfo {
                 id: i as u32,
                 name,

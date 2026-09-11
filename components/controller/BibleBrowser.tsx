@@ -14,8 +14,6 @@ import {
   type BibleVerseResult,
   type BibleImportJson,
 } from "@/lib/bibleDb";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
 import type { ScriptureSlide } from "@/lib/types";
 
 interface Props {
@@ -133,6 +131,8 @@ export function BibleBrowser({ onAdd, isAdding }: Props) {
   async function handleImport() {
     setIsImporting(true);
     try {
+      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+      const { readTextFile } = await import("@tauri-apps/plugin-fs");
       const filePath = await openDialog({
         multiple: false,
         filters: [{ name: "JSON", extensions: ["json"] }],

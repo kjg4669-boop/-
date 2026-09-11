@@ -357,7 +357,7 @@ export default function ControlBar({
                 className={`w-full text-left px-3 py-2 text-xs hover:bg-zinc-700 flex items-center gap-2 ${selectedDisplayIdx === i ? "text-blue-400 font-semibold" : "text-zinc-200"}`}
               >
                 {selectedDisplayIdx === i ? "✓ " : "  "}
-                {d.is_primary ? "기본 모니터" : `모니터 ${i + 1}`}
+                {d.name || (d.is_primary ? "기본 모니터" : `모니터 ${i + 1}`)}
                 <span className="text-zinc-500 ml-auto">{d.width}×{d.height}</span>
               </button>
             ))}

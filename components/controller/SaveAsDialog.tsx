@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronUp, Home, Monitor, Download, FileText,
   Folder, File, X, Save, ChevronDown, HardDrive,
 } from "lucide-react";
-import { readDir } from "@tauri-apps/plugin-fs";
+
 
 const EXT_OPTIONS = [
   { label: "Worship Projector 파일 (*.wpjson)", ext: "wpjson" },
@@ -67,6 +67,7 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
     setLoading(true);
     setSelected(null);
     try {
+      const { readDir } = await import("@tauri-apps/plugin-fs");
       const raw = await readDir(path);
       const sorted = (raw as { name?: string; isDirectory: boolean }[])
         .filter((e) => e.name && !e.name.startsWith("."))
@@ -107,7 +108,8 @@ export default function SaveAsDialog({ defaultName = "새 예배", onConfirm, on
         await loadDir(desktop, false);
         // Load external drives from /Volumes/
         try {
-          const raw = await readDir("/Volumes");
+          const { readDir: readDir2 } = await import("@tauri-apps/plugin-fs");
+          const raw = await readDir2("/Volumes");
           const vols = (raw as { name?: string; isDirectory: boolean }[])
             .filter((e) => e.name && e.name !== "Macintosh HD" && e.isDirectory)
             .map((e) => e.name!);

@@ -99,6 +99,9 @@ interface Props {
   panelLabels?: Record<string, string>;
   onRestorePanel?: (tab: string) => void;
 
+  activePanelTab?: string | null;
+  onOpenPanel?: (tab: string) => void;
+
   selectedShape: ShapeBlock | null;
   onAddShape: (type: ShapeType) => void;
   onUpdateShape: (patch: Partial<ShapeBlock>) => void;
@@ -130,6 +133,7 @@ export default function RibbonToolbar({
   onOpenDesignPanel, onShowAbout,
   looks, currentLookId, onApplyLook,
   removedPanels, panelLabels, onRestorePanel,
+  activePanelTab, onOpenPanel,
   selectedShape, onAddShape, onUpdateShape,
   defaultShapeFill, defaultShapeStroke, onSetDefaultShapeFill, onSetDefaultShapeStroke,
 }: Props) {
@@ -151,6 +155,28 @@ export default function RibbonToolbar({
             {TAB_LABELS[tab]}
           </button>
         ))}
+        {/* 패널 탭 - 보기 바로 오른쪽 */}
+        {onOpenPanel && (
+          <>
+            <div className="w-px h-4 bg-zinc-600 mx-1 self-center" />
+            {([
+              { tab: "alert", label: "공지" },
+              { tab: "livestream", label: "방송" },
+              { tab: "looks", label: "룩" },
+              { tab: "remote", label: "원격" },
+              { tab: "ndi", label: "NDI" },
+            ] as { tab: string; label: string }[]).map(({ tab, label }) => (
+              <button key={tab} onClick={() => onOpenPanel(tab)}
+                className={`px-2.5 h-full text-xs transition-colors ${
+                  activePanelTab === tab
+                    ? "text-violet-300 border-b-2 border-violet-400 bg-[#2d2d2d]"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}>
+                {label}
+              </button>
+            ))}
+          </>
+        )}
         <div className="flex-1" />
         <button
           onClick={onShowAbout}

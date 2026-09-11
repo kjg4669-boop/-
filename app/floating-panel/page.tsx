@@ -3,15 +3,18 @@ import { useEffect, useState } from "react";
 import QueuePanel from "@/components/controller/QueuePanel";
 import LibraryPanel from "@/components/controller/LibraryPanel";
 import AlertPanel from "@/components/controller/AlertPanel";
+import AnnouncementPanel from "@/components/controller/AnnouncementPanel";
 import RemotePanel from "@/components/controller/RemotePanel";
 import NdiPanel from "@/components/controller/NdiPanel";
-import AnnouncementPanel from "@/components/controller/AnnouncementPanel";
+import VideoPanel from "@/components/controller/VideoPanel";
 import { serviceDb } from "@/lib/db";
 import { useQueueStore } from "@/stores/queueStore";
+import { useOutputStore } from "@/stores/outputStore";
+import { ipc } from "@/lib/ipc";
 
 const TAB_LABELS: Record<string, string> = {
   queue: "순서", songs: "찬양", settings: "디자인", alert: "공지",
-  looks: "룩", remote: "원격", ndi: "NDI", announcement: "공지루프",
+  looks: "룩", remote: "원격", ndi: "NDI", video: "동영상",
 };
 
 export default function FloatingPanelPage() {
@@ -33,10 +36,16 @@ export default function FloatingPanelPage() {
     switch (tab) {
       case "queue": return <QueuePanel />;
       case "songs": return <LibraryPanel mode="songs" />;
-      case "alert": return <AlertPanel />;
+      case "alert": return (
+        <div className="flex flex-col overflow-y-auto h-full">
+          <AlertPanel />
+          <div className="border-t border-zinc-700 flex-shrink-0" />
+          <AnnouncementPanel />
+        </div>
+      );
       case "remote": return <RemotePanel />;
       case "ndi": return <NdiPanel />;
-      case "announcement": return <AnnouncementPanel />;
+      case "video": return <VideoPanelWrapper />;
       default:
         return (
           <div className="h-full flex items-center justify-center text-zinc-500 text-sm">
@@ -55,5 +64,26 @@ export default function FloatingPanelPage() {
         {renderContent()}
       </div>
     </div>
+  );
+}
+
+function VideoPanelWrapper() {
+  const layerConfig = useOutputStore((s) => s.layerConfig);
+  const setLayerConfig = useOutputStore((s) => s.setLayerConfig);
+
+  useEffect(() => {
+    // Sync layerConfig from main window via slide:update events
+    const unlisten = ipc.onSlideUpdate((config) => setLayerConfig(config));
+    return () => { unlisten.then((fn) => fn()); };
+  }, [setLayerConfig]);
+
+  return (
+    <VideoPanel
+      layerConfig={layerConfig}
+      onChange={(config) => {
+        setLayerConfig(config);
+        ipc.sendPreviewUpdate(config);
+      }}
+    />
   );
 }
